@@ -61,4 +61,43 @@ export class OrderRepository {
       return { id: doc.id, ...data };
     });
   }
+
+  /**
+   * Retrieves orders within a specific date range from Firestore.
+   *
+   * @param startDate - Start date of the range (inclusive)
+   * @param endDate - End date of the range (inclusive)
+   * @returns Array of orders within the date range
+   */
+  async getOrdersByDateRange(startDate: Date, endDate: Date): Promise<Order[]> {
+    const snapshot = await firestore
+      .collection('orders')
+      .where('createdAt', '>=', startDate)
+      .where('createdAt', '<=', endDate)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      // Handle Firestore Timestamp conversion
+      let createdAt = data.createdAt;
+      if (createdAt && typeof createdAt.toDate === 'function') {
+        createdAt = createdAt.toDate();
+      } else if (createdAt) {
+        createdAt = new Date(createdAt);
+      }
+
+      return {
+        id: doc.id,
+        userId: data.userId || '',
+        email: data.email || '',
+        amount: data.amount || 0,
+        productId: data.productId,
+        productName: data.productName,
+        shipping: data.shipping,
+        status: data.status || 'completed', // Default to 'completed' if not specified
+        createdAt,
+      } as Order;
+    });
+  }
 }
