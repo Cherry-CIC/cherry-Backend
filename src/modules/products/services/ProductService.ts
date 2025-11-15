@@ -165,6 +165,29 @@ export class ProductService {
       // Delegate to repository's atomic adjustLikes method
       return this.productRepo.adjustLikes(id, delta);
     }
+
+    /**
+     * Add a like from a user to a product.
+     * Idempotent: safe to call multiple times.
+     */
+    async likeProduct(productId: string, userId: string): Promise<Product | null> {
+      return this.productRepo.addLike(productId, userId);
+    }
+
+    /**
+     * Remove a like from a user to a product.
+     * Idempotent: safe to call even if user hasn't liked.
+     */
+    async unlikeProduct(productId: string, userId: string): Promise<Product | null> {
+      return this.productRepo.removeLike(productId, userId);
+    }
+
+    /**
+     * Get all products liked by a specific user.
+     */
+    async getProductsLikedByUser(userId: string): Promise<Product[]> {
+      return this.productRepo.getProductsLikedByUser(userId);
+    }
   
     private async validateReferences(categoryId: string, charityId: string): Promise<void> {
         const [category, charity] = await Promise.all([
