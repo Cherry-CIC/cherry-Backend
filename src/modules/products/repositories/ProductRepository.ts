@@ -149,4 +149,78 @@ export class ProductRepository {
 
     return this.getById(id);
   }
+
+  /**
+   * Add user to likedBy array and increment like count atomically.
+   * Idempotent: if user already liked, operation succeeds without duplication.
+   */
+  async addLike(id: string, userId: string): Promise<Product | null> {
+    const docRef = this.db.collection(this.collectionName).doc(id);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+      return null;
+    }
+
+    await docRef.update({
+      likedBy: FieldValue.arrayUnion(userId),
+      likes: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return this.getById(id);
+  }
+
+  /**
+   * Remove user from likedBy array and decrement like count atomically.
+   * Idempotent: if user hasn't liked, operation succeeds without error.
+   */
+  async removeLike(id: string, userId: string): Promise<Product | null> {
+    const docRef = this.db.collection(this.collectionName).doc(id);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+      return null;
+    }
+
+    const data = doc.data() as Product;
+    const likedBy = data.likedBy || [];
+    
+    // Only decrement if user was actually in likedBy array
+    if (likedBy.includes(userId)) {
+      await docRef.update({
+        likedBy: FieldValue.arrayRemove(userId),
+        likes: FieldValue.increment(-1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      // Still remove from array in case of data inconsistency, but don't decrement
+      await docRef.update({
+        likedBy: FieldValue.arrayRemove(userId),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    return this.getById(id);
+  }
+
+  /**
+   * Get all products liked by a specific user.
+   */
+  async getProductsLikedByUser(userId: string): Promise<Product[]> {
+    const snapshot = await this.db
+      .collection(this.collectionName)
+      .where('likedBy', 'array-contains', userId)
+      .get();
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
+        updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
+      } as Product;
+    });
+  }
 }

@@ -6,7 +6,16 @@ export const getAllProducts = async (req: Request, res: Response): Promise<void>
     try {
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProducts();
-        ResponseHandler.success(res, products, 'Products fetched successfully');
+        
+        // Add isLikedByUser if user is authenticated
+        const user = (req as any).user;
+        const productsWithLikeStatus = products.map(product => ({
+            ...product,
+            likeCount: product.likes || 0,
+            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
+        }));
+        
+        ResponseHandler.success(res, productsWithLikeStatus, 'Products fetched successfully');
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch products', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -43,7 +52,15 @@ export const getProductById = async (req: Request, res: Response): Promise<void>
             return;
         }
         
-        ResponseHandler.success(res, product, 'Product fetched successfully');
+        // Add like status if user is authenticated
+        const user = (req as any).user;
+        const productWithLikeStatus = {
+            ...product,
+            likeCount: product.likes || 0,
+            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
+        };
+        
+        ResponseHandler.success(res, productWithLikeStatus, 'Product fetched successfully');
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch product', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -60,7 +77,15 @@ export const getProductWithDetails = async (req: Request, res: Response): Promis
             return;
         }
         
-        ResponseHandler.success(res, product, 'Product with details fetched successfully');
+        // Add like status if user is authenticated
+        const user = (req as any).user;
+        const productWithLikeStatus = {
+            ...product,
+            likeCount: product.likes || 0,
+            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
+        };
+        
+        ResponseHandler.success(res, productWithLikeStatus, 'Product with details fetched successfully');
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch product details', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -70,7 +95,16 @@ export const getAllProductsWithDetails = async (req: Request, res: Response): Pr
     try {
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProductsWithDetails();
-        ResponseHandler.success(res, products, 'Products with details fetched successfully');
+        
+        // Add like status if user is authenticated
+        const user = (req as any).user;
+        const productsWithLikeStatus = products.map(product => ({
+            ...product,
+            likeCount: product.likes || 0,
+            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
+        }));
+        
+        ResponseHandler.success(res, productsWithLikeStatus, 'Products with details fetched successfully');
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch products with details', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -134,26 +168,96 @@ export const likeProduct = async (req: Request, res: Response): Promise<void> =>
   try {
     const productService = ServiceFactory.getProductService();
     const { id } = req.params;
-    const { like } = req.body;
+    const user = (req as any).user;
 
-    if (typeof like !== 'boolean') {
-      ResponseHandler.badRequest(res, 'Like must be a boolean (true to like, false to unlike)');
+    if (!user || !user.uid) {
+      ResponseHandler.unauthorized(res, 'Authentication required', 'User must be authenticated to like products');
       return;
     }
 
-    // Convert the boolean 'like' flag to a numeric delta (+1 for like, -1 for unlike)
-    const delta = like ? 1 : -1;
-    const product = await productService.changePoints(id, delta);
+    const product = await productService.likeProduct(id, user.uid);
+    
     if (!product) {
       ResponseHandler.notFound(res, 'Product not found', `Product with ID ${id} does not exist`);
       return;
     }
 
-    ResponseHandler.success(res, product, 'Product likes updated successfully');
+    ResponseHandler.success(
+      res,
+      {
+        likeCount: product.likes || 0,
+        isLikedByUser: true
+      },
+      'Product liked successfully'
+    );
   } catch (err) {
     ResponseHandler.internalServerError(
       res,
-      'Failed to update product likes',
+      'Failed to like product',
+      err instanceof Error ? err.message : 'Unknown error'
+    );
+  }
+};
+
+export const unlikeProduct = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const productService = ServiceFactory.getProductService();
+    const { id } = req.params;
+    const user = (req as any).user;
+
+    if (!user || !user.uid) {
+      ResponseHandler.unauthorized(res, 'Authentication required', 'User must be authenticated to unlike products');
+      return;
+    }
+
+    const product = await productService.unlikeProduct(id, user.uid);
+    
+    if (!product) {
+      ResponseHandler.notFound(res, 'Product not found', `Product with ID ${id} does not exist`);
+      return;
+    }
+
+    ResponseHandler.success(
+      res,
+      {
+        likeCount: product.likes || 0,
+        isLikedByUser: false
+      },
+      'Product unliked successfully'
+    );
+  } catch (err) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to unlike product',
+      err instanceof Error ? err.message : 'Unknown error'
+    );
+  }
+};
+
+export const getLikedProducts = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const productService = ServiceFactory.getProductService();
+    const user = (req as any).user;
+
+    if (!user || !user.uid) {
+      ResponseHandler.unauthorized(res, 'Authentication required', 'User must be authenticated to view liked products');
+      return;
+    }
+
+    const products = await productService.getProductsLikedByUser(user.uid);
+    
+    // Add like status (all will be true since these are liked products)
+    const productsWithLikeStatus = products.map(product => ({
+      ...product,
+      likeCount: product.likes || 0,
+      isLikedByUser: true
+    }));
+
+    ResponseHandler.success(res, productsWithLikeStatus, 'Liked products fetched successfully');
+  } catch (err) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch liked products',
       err instanceof Error ? err.message : 'Unknown error'
     );
   }
