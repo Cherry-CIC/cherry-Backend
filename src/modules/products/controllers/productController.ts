@@ -1,19 +1,34 @@
 import { Request, Response, NextFunction } from 'express';
 import { ServiceFactory } from '../services/ServiceFactory';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { Product } from '../model/Product';
+
+/**
+ * Helper function to format product response by removing private fields
+ * and adding computed like status fields.
+ * @param product - Product object from database
+ * @param userId - Optional authenticated user ID
+ * @returns Public product object with likeCount and isLikedByUser
+ */
+const formatProductResponse = (product: Product, userId?: string) => {
+  const { likedBy, ...publicProduct } = product;
+  return {
+    ...publicProduct,
+    likeCount: product.likes ?? 0,
+    isLikedByUser: userId ? (likedBy?.includes(userId) ?? false) : false
+  };
+};
 
 export const getAllProducts = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProducts();
         
-        // Add isLikedByUser if user is authenticated
+        // Add isLikedByUser if user is authenticated and strip private likedBy field
         const user = (req as any).user;
-        const productsWithLikeStatus = products.map(product => ({
-            ...product,
-            likeCount: product.likes || 0,
-            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
-        }));
+        const productsWithLikeStatus = products.map(product => 
+            formatProductResponse(product, user?.uid)
+        );
         
         ResponseHandler.success(res, productsWithLikeStatus, 'Products fetched successfully');
     } catch (err) {
@@ -52,13 +67,9 @@ export const getProductById = async (req: Request, res: Response): Promise<void>
             return;
         }
         
-        // Add like status if user is authenticated
+        // Add like status if user is authenticated and strip private likedBy field
         const user = (req as any).user;
-        const productWithLikeStatus = {
-            ...product,
-            likeCount: product.likes || 0,
-            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
-        };
+        const productWithLikeStatus = formatProductResponse(product, user?.uid);
         
         ResponseHandler.success(res, productWithLikeStatus, 'Product fetched successfully');
     } catch (err) {
@@ -77,13 +88,9 @@ export const getProductWithDetails = async (req: Request, res: Response): Promis
             return;
         }
         
-        // Add like status if user is authenticated
+        // Add like status if user is authenticated and strip private likedBy field
         const user = (req as any).user;
-        const productWithLikeStatus = {
-            ...product,
-            likeCount: product.likes || 0,
-            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
-        };
+        const productWithLikeStatus = formatProductResponse(product, user?.uid);
         
         ResponseHandler.success(res, productWithLikeStatus, 'Product with details fetched successfully');
     } catch (err) {
@@ -96,13 +103,11 @@ export const getAllProductsWithDetails = async (req: Request, res: Response): Pr
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProductsWithDetails();
         
-        // Add like status if user is authenticated
+        // Add like status if user is authenticated and strip private likedBy field
         const user = (req as any).user;
-        const productsWithLikeStatus = products.map(product => ({
-            ...product,
-            likeCount: product.likes || 0,
-            isLikedByUser: user && product.likedBy ? product.likedBy.includes(user.uid) : false
-        }));
+        const productsWithLikeStatus = products.map(product => 
+            formatProductResponse(product, user?.uid)
+        );
         
         ResponseHandler.success(res, productsWithLikeStatus, 'Products with details fetched successfully');
     } catch (err) {
@@ -244,14 +249,16 @@ export const getLikedProducts = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const products = await productService.getProductsLikedByUser(user.uid);
+    // Get pagination parameters from query
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+    const startAfter = req.query.startAfter as string | undefined;
+
+    const products = await productService.getProductsLikedByUser(user.uid, limit, startAfter);
     
-    // Add like status (all will be true since these are liked products)
-    const productsWithLikeStatus = products.map(product => ({
-      ...product,
-      likeCount: product.likes || 0,
-      isLikedByUser: true
-    }));
+    // Add like status (all will be true) and strip private likedBy field
+    const productsWithLikeStatus = products.map(product => 
+      formatProductResponse(product, user.uid)
+    );
 
     ResponseHandler.success(res, productsWithLikeStatus, 'Liked products fetched successfully');
   } catch (err) {

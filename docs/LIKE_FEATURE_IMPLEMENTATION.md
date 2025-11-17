@@ -132,33 +132,36 @@ GET /api/products/:id/details
 
 ### Data Model
 **File**: `src/modules/products/model/Product.ts`
-- Added optional `likedBy?: string[]` field to store user IDs
+- Added optional `likedBy?: string[]` field marked as PRIVATE
+- Field should never be exposed in API responses
 
 ### Repository Layer
 **File**: `src/modules/products/repositories/ProductRepository.ts`
-- `addLike(id, userId)` - Add user to likedBy array and increment count (atomic)
-- `removeLike(id, userId)` - Remove user from likedBy array and decrement count (atomic)
-- `getProductsLikedByUser(userId)` - Query products where user is in likedBy array
+- `addLike(id, userId)` - Uses transaction to check if user already liked before incrementing
+- `removeLike(id, userId)` - Uses transaction to check if user in array before decrementing, prevents negative likes
+- `getProductsLikedByUser(userId, limit, startAfter)` - Query with pagination support (default limit: 20)
 
 ### Service Layer
 **File**: `src/modules/products/services/ProductService.ts`
 - `likeProduct(productId, userId)` - Handle like operation
 - `unlikeProduct(productId, userId)` - Handle unlike operation
-- `getProductsLikedByUser(userId)` - Retrieve user's liked products
+- `getProductsLikedByUser(userId, limit, startAfter)` - Retrieve user's liked products with pagination
 
 ### Controller Layer
 **File**: `src/modules/products/controllers/productController.ts`
+- **Helper Function**: `formatProductResponse()` - Centralized function to strip private fields and add computed fields
 - `likeProduct()` - POST handler for liking
 - `unlikeProduct()` - DELETE handler for unliking
-- `getLikedProducts()` - GET handler for user's liked products
-- Enhanced all GET handlers to include `isLikedByUser` and `likeCount`
+- `getLikedProducts()` - GET handler with pagination support (limit, startAfter)
+- Enhanced all GET handlers to use `formatProductResponse()` helper
+- **CRITICAL:** All handlers strip private `likedBy` field via helper function using destructuring
 
 ### Routes
 **File**: `src/modules/products/routes/productRoutes.ts`
 - POST /:id/like - Like endpoint
 - DELETE /:id/like - Unlike endpoint
-- GET /user/liked - User's liked products
-- Swagger documentation updated for all endpoints
+- GET /user/liked - User's liked products with pagination
+- **Swagger Documentation**: Updated Product schema to remove `likedBy`, add `likeCount` and `isLikedByUser` fields
 
 ---
 
@@ -172,13 +175,21 @@ GET /api/products/:id/details
    - Each user manages only their own likes
    - User ID extracted from authenticated token
 
-3. **Atomic Operations**
-   - Uses Firestore arrayUnion and arrayRemove
-   - Prevents race conditions with concurrent operations
+3. **Transaction-Based Idempotency**
+   - Uses Firestore transactions to prevent race conditions
+   - addLike: Only increments if user not already in likedBy array
+   - removeLike: Only decrements if user is in likedBy array
+   - Prevents duplicate likes from double-incrementing counter
 
-4. **Input Validation**
-   - Product ID validation
-   - Returns 404 for non-existent products
+4. **Privacy Protection**
+   - likedBy field is NEVER exposed in API responses
+   - All responses strip private likedBy data before sending
+   - Only likeCount and isLikedByUser are included
+
+5. **Data Integrity**
+   - Like counts cannot go negative (Math.max(0, ...))
+   - Atomic operations prevent data corruption
+   - Input validation on product IDs
 
 ---
 
@@ -217,12 +228,16 @@ The implementation has been tested for:
 - Authenticated user can unlike a product
 - Liking already-liked product is idempotent
 - Unliking non-liked product is idempotent
+- Duplicate likes do NOT double-increment counter (transaction-based check)
+- Unlike operations never make like count go negative
 - Unauthenticated requests return 401
 - Invalid product ID returns 404
 - GET endpoints include isLikedByUser and likeCount
+- **likedBy field is NOT present in any API response** (privacy protection)
 - Multiple users can like the same product
 - Like count increments/decrements correctly
 - Backwards compatibility with products without likedBy field
+- Pagination works on GET /user/liked with limit and startAfter parameters
 
 ---
 
@@ -291,10 +306,12 @@ Common errors:
 ## Frontend Integration
 
 1. All like/unlike requests require `Authorization: Bearer <token>` header with Firebase ID token
-2. Operations are safe to retry - like/unlike actions are idempotent
+2. Operations are safe to retry - like/unlike actions are idempotent with transaction-based checks
 3. Response includes `likeCount` (integer) and `isLikedByUser` (boolean)
-4. UI can be updated optimistically before server confirmation, with rollback on failure
-5. Firebase listeners can be added later for real-time updates without architectural changes
+4. **likedBy array is NEVER exposed** - only use likeCount and isLikedByUser
+5. GET /user/liked supports pagination with `limit` (default 20) and `startAfter` query parameters
+6. UI can be updated optimistically before server confirmation, with rollback on failure
+7. Firebase listeners can be added later for real-time updates without architectural changes
 
 ---
 
@@ -315,4 +332,8 @@ Common errors:
 | Unauthenticated attempts return 401 | Complete |
 | Operations are idempotent | Complete |
 | Operations are atomic | Complete |
-| Backwards compatible | Complete |  
+| Backwards compatible | Complete |
+| **Duplicate likes don't double-increment** | Complete |
+| **likedBy never exposed in responses** | Complete |
+| **Pagination on GET /user/liked** | Complete |
+| **Like count never goes negative** | Complete |  

@@ -183,10 +183,10 @@ export class ProductService {
     }
 
     /**
-     * Get all products liked by a specific user.
+     * Get all products liked by a specific user with pagination support.
      */
-    async getProductsLikedByUser(userId: string): Promise<Product[]> {
-      return this.productRepo.getProductsLikedByUser(userId);
+    async getProductsLikedByUser(userId: string, limit?: number, startAfter?: string): Promise<Product[]> {
+      return this.productRepo.getProductsLikedByUser(userId, limit, startAfter);
     }
   
     private async validateReferences(categoryId: string, charityId: string): Promise<void> {

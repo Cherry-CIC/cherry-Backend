@@ -77,8 +77,16 @@ const router = Router();
  *           example: 599.99
  *         likes:
  *           type: number
- *           description: Number of likes
+ *           description: Number of likes (deprecated - use likeCount)
  *           example: 0
+ *         likeCount:
+ *           type: number
+ *           description: Total number of likes on this product
+ *           example: 42
+ *         isLikedByUser:
+ *           type: boolean
+ *           description: Whether the authenticated user has liked this product
+ *           example: true
  *         number:
  *           type: number
  *           description: Product quantity/number

@@ -152,66 +152,112 @@ export class ProductRepository {
 
   /**
    * Add user to likedBy array and increment like count atomically.
-   * Idempotent: if user already liked, operation succeeds without duplication.
+   * Uses transaction to ensure idempotency - only increments if user not already in array.
    */
   async addLike(id: string, userId: string): Promise<Product | null> {
     const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
 
-    if (!doc.exists) {
-      return null;
+    try {
+      await this.db.runTransaction(async (transaction) => {
+        const doc = await transaction.get(docRef);
+        
+        if (!doc.exists) {
+          throw new Error('Product not found');
+        }
+
+        const data = doc.data() as Product;
+        const likedBy = data.likedBy || [];
+        
+        // Only update if user hasn't already liked
+        if (!likedBy.includes(userId)) {
+          transaction.update(docRef, {
+            likedBy: FieldValue.arrayUnion(userId),
+            likes: FieldValue.increment(1),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      return this.getById(id);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Product not found') {
+        return null;
+      }
+      throw error;
     }
-
-    await docRef.update({
-      likedBy: FieldValue.arrayUnion(userId),
-      likes: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-
-    return this.getById(id);
   }
 
   /**
    * Remove user from likedBy array and decrement like count atomically.
-   * Idempotent: if user hasn't liked, operation succeeds without error.
+   * Uses transaction to ensure idempotency - only decrements if user is in array.
+   * Prevents likes from going negative.
    */
   async removeLike(id: string, userId: string): Promise<Product | null> {
     const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
 
-    if (!doc.exists) {
-      return null;
-    }
+    try {
+      await this.db.runTransaction(async (transaction) => {
+        const doc = await transaction.get(docRef);
+        
+        if (!doc.exists) {
+          throw new Error('Product not found');
+        }
 
-    const data = doc.data() as Product;
-    const likedBy = data.likedBy || [];
-    
-    // Only decrement if user was actually in likedBy array
-    if (likedBy.includes(userId)) {
-      await docRef.update({
-        likedBy: FieldValue.arrayRemove(userId),
-        likes: FieldValue.increment(-1),
-        updatedAt: FieldValue.serverTimestamp(),
+        const data = doc.data() as Product;
+        const likedBy = data.likedBy || [];
+        const currentLikes = typeof data.likes === 'number' ? data.likes : 0;
+        
+        // Only update if user is actually in likedBy array
+        if (likedBy.includes(userId)) {
+          transaction.update(docRef, {
+            likedBy: FieldValue.arrayRemove(userId),
+            likes: Math.max(0, currentLikes - 1),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Remove from array anyway in case of inconsistency, but don't decrement
+          transaction.update(docRef, {
+            likedBy: FieldValue.arrayRemove(userId),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
       });
-    } else {
-      // Still remove from array in case of data inconsistency, but don't decrement
-      await docRef.update({
-        likedBy: FieldValue.arrayRemove(userId),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
 
-    return this.getById(id);
+      return this.getById(id);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Product not found') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**
-   * Get all products liked by a specific user.
+   * Get all products liked by a specific user with pagination support.
+   * @param userId - User ID to filter by
+   * @param limit - Maximum number of results to return (default: 20)
+   * @param startAfter - Optional document ID to start after for cursor-based pagination
    */
-  async getProductsLikedByUser(userId: string): Promise<Product[]> {
-    const snapshot = await this.db
+  async getProductsLikedByUser(
+    userId: string, 
+    limit: number = 20, 
+    startAfter?: string
+  ): Promise<Product[]> {
+    let query = this.db
       .collection(this.collectionName)
       .where('likedBy', 'array-contains', userId)
-      .get();
+      .orderBy('updatedAt', 'desc')
+      .limit(limit);
+    
+    // If startAfter is provided, get that document and start after it
+    if (startAfter) {
+      const startDoc = await this.db.collection(this.collectionName).doc(startAfter).get();
+      if (startDoc.exists) {
+        query = query.startAfter(startDoc);
+      }
+    }
+
+    const snapshot = await query.get();
     
     return snapshot.docs.map(doc => {
       const data = doc.data();

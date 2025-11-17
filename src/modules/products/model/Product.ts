@@ -11,7 +11,7 @@ export interface Product {
     donation: number;
     price: number;
     likes: number;
-    likedBy?: string[]; // Array of user IDs who liked this product
+    likedBy?: string[]; // PRIVATE: Never expose in API responses - Array of user IDs who liked this product
     number: number;
     createdAt?: Date;
     updatedAt?: Date;
