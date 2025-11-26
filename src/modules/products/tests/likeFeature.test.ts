@@ -256,7 +256,7 @@ describe('Product Like/Unlike Feature', () => {
       expect(response.body.data).toHaveLength(2);
       expect(response.body.data[0].isLikedByUser).toBe(true);
       expect(response.body.data[1].isLikedByUser).toBe(true);
-      expect(ProductRepository.prototype.getProductsLikedByUser).toHaveBeenCalledWith(mockUserId);
+      expect(ProductRepository.prototype.getProductsLikedByUser).toHaveBeenCalledWith(mockUserId, 20, undefined);
     });
 
     it('should return empty array when user has not liked any products', async () => {
