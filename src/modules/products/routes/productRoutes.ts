@@ -7,7 +7,9 @@ import {
   getAllProductsWithDetails,
   updateProduct,
   deleteProduct,
-  likeProduct
+  likeProduct,
+  unlikeProduct,
+  getLikedProducts
 } from '../controllers/productController';
 import { validateProduct } from '../validators/productValidator';
 import { validateProductId } from '../validators/productIdValidator';
@@ -75,8 +77,16 @@ const router = Router();
  *           example: 599.99
  *         likes:
  *           type: number
- *           description: Number of likes
+ *           description: Number of likes (deprecated - use likeCount)
  *           example: 0
+ *         likeCount:
+ *           type: number
+ *           description: Total number of likes on this product
+ *           example: 42
+ *         isLikedByUser:
+ *           type: boolean
+ *           description: Whether the authenticated user has liked this product
+ *           example: true
  *         number:
  *           type: number
  *           description: Product quantity/number
@@ -596,7 +606,7 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  * @swagger
  * /api/products/{id}/like:
  *   post:
- *     summary: Like or unlike a product
+ *     summary: Like a product (requires authentication)
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -608,22 +618,9 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *           type: string
  *         description: Product ID
  *         example: "dePrjBhBLclqdWE0m9SP"
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - like
- *             properties:
- *               like:
- *                 type: boolean
- *                 description: true to like, false to unlike
- *                 example: true
  *     responses:
  *       200:
- *         description: Like status updated
+ *         description: Product liked successfully
  *         content:
  *           application/json:
  *             schema:
@@ -636,18 +633,116 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *                   type: string
  *                   example: "Product liked successfully"
  *                 data:
- *                   $ref: '#/components/schemas/Product'
+ *                   type: object
+ *                   properties:
+ *                     likeCount:
+ *                       type: integer
+ *                       example: 42
+ *                     isLikedByUser:
+ *                       type: boolean
+ *                       example: true
  *                 timestamp:
  *                   type: string
  *                   format: date-time
- *       400:
- *         description: Bad request (e.g., missing like flag)
+ *       401:
+ *         description: Unauthorized - Authentication required
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Server error
+ *   delete:
+ *     summary: Unlike a product (requires authentication)
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Product ID
+ *         example: "dePrjBhBLclqdWE0m9SP"
+ *     responses:
+ *       200:
+ *         description: Product unliked successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product unliked successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     likeCount:
+ *                       type: integer
+ *                       example: 41
+ *                     isLikedByUser:
+ *                       type: boolean
+ *                       example: false
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         description: Unauthorized - Authentication required
  *       404:
  *         description: Product not found
  *       500:
  *         description: Server error
  */
 router.post('/:id/like', authMiddleware, likeProduct);
+router.delete('/:id/like', authMiddleware, unlikeProduct);
+
+/**
+ * @swagger
+ * /api/products/user/liked:
+ *   get:
+ *     summary: Get all products liked by the authenticated user
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Liked products fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Liked products fetched successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Product'
+ *                       - type: object
+ *                         properties:
+ *                           likeCount:
+ *                             type: integer
+ *                             example: 42
+ *                           isLikedByUser:
+ *                             type: boolean
+ *                             example: true
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         description: Unauthorized - Authentication required
+ *       500:
+ *         description: Server error
+ */
+router.get('/user/liked', authMiddleware, getLikedProducts);
 
 export default router;
 
