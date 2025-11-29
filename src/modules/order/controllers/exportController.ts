@@ -118,7 +118,7 @@ export const exportOrdersCsv = async (req: Request, res: Response): Promise<void
       streamError = error;
     });
 
-    csvStream.on('error', (error) => {
+    csvStream.on('error', (error: Error | null) => {
       console.error('CSV stream error:', error);
       streamError = error;
     });

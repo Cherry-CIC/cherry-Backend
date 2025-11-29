@@ -66,7 +66,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         const firebaseUid = userCredential.user.uid;
         
         const userProfile = await userRepo.getByFirebaseUid(firebaseUid);
-        
+        console.log(userProfile);
+
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
             return;
