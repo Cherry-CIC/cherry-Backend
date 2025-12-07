@@ -20,6 +20,7 @@ import authRoutes from './modules/auth/routes/authRoutes';
 import paymentRoutes from './modules/payment/routes/paymentRoutes';
 import orderRoutes from './modules/order/routes/orderRoutes';
 import adminRoutes from './modules/order/routes/adminRoutes';
+import shippingRoutes from './modules/shipping/routes/shippingRoutes';
 
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -28,6 +29,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/shipping', shippingRoutes);
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 

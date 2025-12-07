@@ -17,5 +17,6 @@ export interface Order {
     name?: string;
   };
   status?: 'completed' | 'pending' | 'failed'; // Order status for tracking
+  shipmentId?: string; // Reference to shipment document
   createdAt: Date;
 }
