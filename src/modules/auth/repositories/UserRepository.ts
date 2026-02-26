@@ -34,7 +34,8 @@ export class UserRepository {
     }
 
     async getByFirebaseUid(firebaseUid: string): Promise<User | null> {
-        const snapshot = await this.db.collection(this.collectionName).where('id', '==', firebaseUid).get();
+        // FIXED: Changed query field from 'id' to 'firebaseUid' to match the data model
+        const snapshot = await this.db.collection(this.collectionName).where('firebaseUid', '==', firebaseUid).get();
         if (snapshot.empty) {
             return null;
         }

@@ -66,7 +66,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         const firebaseUid = userCredential.user.uid;
         
         const userProfile = await userRepo.getByFirebaseUid(firebaseUid);
-        console.log(userProfile);
 
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
@@ -104,6 +103,36 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             }
         }
         ResponseHandler.internalServerError(res, 'Failed to login', err instanceof Error ? err.message : 'Unknown error');
+    }
+};
+
+/**
+ * Synchronizes the user profile from Firebase Auth to Firestore.
+ * This is useful for social logins (Apple, Google) where the user is authenticated 
+ * on the mobile app first.
+ */
+export const syncProfile = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const firebaseUser = (req as any).user;
+        let userProfile = await userRepo.getByFirebaseUid(firebaseUser.uid);
+
+        if (!userProfile) {
+            // If profile doesn't exist, create it from Firebase token data
+            // This prevents the "duplicate email" prompt because we use what Apple/Google already gave us.
+            userProfile = await userRepo.create({
+                firebaseUid: firebaseUser.uid,
+                email: firebaseUser.email || '',
+                displayName: firebaseUser.name || 'Cherry User',
+                photoURL: firebaseUser.picture || ''
+            });
+            
+            ResponseHandler.created(res, userProfile, 'User profile synchronized and created');
+            return;
+        }
+
+        ResponseHandler.success(res, userProfile, 'User profile synchronized');
+    } catch (err) {
+        ResponseHandler.internalServerError(res, 'Failed to sync user profile', err instanceof Error ? err.message : 'Unknown error');
     }
 };
 

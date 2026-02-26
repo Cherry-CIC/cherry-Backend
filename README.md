@@ -1,26 +1,28 @@
-# cherry Backend
+# Cherry Backend
 
-A Node.js/TypeScript cherry backend API Built with Express.js and Firebase to power the Cherry Mobile App: https://github.com/Cherry-CIC/MVP
+A Node.js/TypeScript backend API built with Express.js and Firebase to power the Cherry Mobile App: [https://github.com/Cherry-CIC/MVP](https://github.com/Cherry-CIC/MVP)
+
+## 🏗️ Project Structure
 
 ```
 src/
 ├── app.ts                    # Express application setup
-├── server.ts                # Server entry point
-├── modules/                 # Feature modules
-│   ├── auth/               # Authentication module
-│   │   ├── controllers/    # Auth controllers
-│   │   ├── model/         # User model
-│   │   ├── repositories/  # User repository
-│   │   ├── routes/        # Auth routes
-│   │   └── validators/    # Auth validation
-│   ├── products/          # Product management
-│   ├── categories/        # Category management
-│   └── charities/         # Charity management
-├── shared/                # Shared utilities
-│   ├── config/           # Configuration files
-│   ├── middleware/       # Custom middleware
-│   └── utils/           # Utility functions
-└── types/               # TypeScript type definitions
+├── server.ts                 # Server entry point
+├── modules/                  # Feature modules
+│   ├── auth/                # Authentication module
+│   │   ├── controllers/     # Auth controllers
+│   │   ├── model/           # User model
+│   │   ├── repositories/    # User repository
+│   │   ├── routes/          # Auth routes
+│   │   └── validators/      # Auth validation
+│   ├── products/            # Product management
+│   ├── categories/          # Category management
+│   └── charities/           # Charity management
+├── shared/                   # Shared utilities
+│   ├── config/              # Configuration files
+│   ├── middleware/          # Custom middleware
+│   └── utils/               # Utility functions
+└── types/                    # TypeScript type definitions
 ```
 
 ## 🛠️ Prerequisites
@@ -29,6 +31,7 @@ Before running this project, make sure you have:
 
 - **Node.js** (v20 or higher)
 - **npm** or **yarn**
+- **Firebase CLI** (optional, for local emulation)
 
 ## 🚀 Getting Started
 
@@ -47,28 +50,31 @@ npm install
 
 ### 3. Environment Setup
 
-Create your environment files:
+We use environment variables for configuration. To get started locally:
 
-```bash
-cp .env.development .env.productiom
-```
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. For local development, the default values in `.env.example` are designed to work with the **Firebase Emulator**. You do not need real production keys to start developing.
 
-Update the environment variables (reach out to cherry mgmt):
+### 4. Running the Firebase Emulator (Recommended)
 
-```env
-PORT=4000
+To avoid needing real Firebase credentials and to prevent "Login Failed" issues caused by SHA-1 mismatches:
 
-# Firebase Configuration
-FIREBASE_API_KEY=your-firebase-api-key
-FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
-FIREBASE_MESSAGING_SENDER_ID=your-sender-id
-FIREBASE_APP_ID=your-app-id
-FIREBASE_MEASUREMENT_ID=your-measurement-id
-```
+1. Install Firebase CLI: `npm install -g firebase-tools`
+2. Login to Firebase (once): `firebase login`
+3. Start the emulators:
+   ```bash
+   firebase emulators:start
+   ```
+4. Ensure your `.env` has the following (uncommented):
+   ```env
+   FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099
+   FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+   ```
 
-## 🏃‍♂️ Running the Project
+## 🏃‍♂️ Running the Backend
 
 ### Development Mode
 
@@ -106,108 +112,14 @@ Once the server is running, you can access the API documentation at:
 http://localhost:4000/api-docs
 ```
 
-## 🔧 Development Tools
-
-### Code Formatting
-
-```bash
-# Format code with Prettier
-npm run format
-
-# Lint code with ESLint
-npm run lint
-```
-
-### Build
-
-```bash
-# Compile TypeScript to JavaScript
-npm run build
-```
-
 ## 🤝 Contributing
 
 We welcome contributions! Please follow these steps:
 
-### 1. Fork the Repository
+1. **Fork the Repository**
+2. **Create a Feature Branch**: `git checkout -b feature/your-feature-name`
+3. **Follow Conventional Commits**: e.g., `feat: add apple sign-in support`
+4. **Local Testing**: Ensure you test against the Firebase Emulator before submitting.
 
-Click the "Fork" button on the repository page to create your own copy.
-
-### 2. Create a Feature Branch
-
-```bash
-git checkout -b feature/your-feature-name
-```
-
-### 3. Make Your Changes
-
-- Follow the existing code style and patterns
-- Add tests for new functionality
-- Update documentation if needed
-- Ensure all tests pass
-
-### 4. Code Quality Checks
-
-Before submitting, run:
-
-```bash
-# Format your code
-npm run format
-
-# Fix linting issues
-npm run lint
-
-# Run tests
-npm test
-
-# Build the project
-npm run build
-```
-
-### 5. Commit Your Changes
-
-```bash
-git add .
-git commit -m "feat: add your feature description"
-```
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation changes
-- `test:` for adding tests
-- `refactor:` for code refactoring
-
-### 6. Push to Your Fork
-
-```bash
-git push origin feature/your-feature-name
-```
-
-### 7. Create a Pull Request
-
-1. Go to the original repository
-2. Click "New Pull Request"
-3. Select your branch
-4. Fill in the PR template with:
-   - Description of changes
-   - Type of change (feature, bugfix, etc.)
-   - Testing performed
-   - Screenshots (if applicable)
-
-### Development Guidelines
-
-- **Code Style**: Follow the existing conventions and architecture
-- **Documentation**: Update README and API docs for significant changes
-- **Types**: Maintain strong typing throughout the codebase
-- **Error Handling**: Use proper error handling and validation
-
-### Project Structure Guidelines
-
-- **Modules**: Keep related functionality in dedicated modules
-- **Controllers**: Handle HTTP requests and responses
-- **Repositories**: Manage data access and storage
-- **Models**: Define data structures and interfaces
-- **Validators**: Implement input validation using Joi
-- **Routes**: Define API endpoints and middleware
-
+### Security Note
+**Never** commit `.env` files or real Firebase service account JSONs to the repository. Always use `.env.example` as a template for new configuration keys.
