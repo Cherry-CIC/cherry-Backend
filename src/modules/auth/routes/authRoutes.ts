@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import {
-    register,
-    login,
-    getProfile,
-    updateProfile
+  register,
+  login,
+  getProfile,
+  updateProfile,
 } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
@@ -54,7 +54,7 @@ const router = Router();
  *         photoURL: "https://example.com/photo.jpg"
  *         createdAt: "2023-01-01T00:00:00.000Z"
  *         updatedAt: "2023-01-01T00:00:00.000Z"
- *     
+ *
  *     AuthResponse:
  *       type: object
  *       properties:
