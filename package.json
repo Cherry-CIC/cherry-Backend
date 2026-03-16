@@ -1,0 +1,50 @@
+{
+  "name": "cherry-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/node-fetch": "^2.6.12",
+    "axios": "^1.13.2",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.5.0",
+    "express": "^4.19.2",
+    "fast-csv": "^5.0.5",
+    "firebase": "^11.10.0",
+    "firebase-admin": "^13.4.0",
+    "joi": "^17.13.3",
+    "node-fetch": "^3.3.2",
+    "stripe": "^18.5.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.0",
+    "@types/supertest": "^6.0.3",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
+    "eslint": "^9.29.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.5.0",
+    "jest": "^30.0.2",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.5.3",
+    "supertest": "^7.1.1",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:dev": "ts-node src/server.ts",
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.{ts,js}' --fix",
+    "format": "prettier --write .",
+    "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",
+    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list"
+  }
+}
