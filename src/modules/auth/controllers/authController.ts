@@ -6,6 +6,25 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 
 const userRepo = new UserRepository();
 
+type AuthenticatedUser = {
+    uid: string;
+    email?: string;
+    name?: string;
+    picture?: string;
+};
+
+const getDisplayNameFromToken = (firebaseUser: AuthenticatedUser): string => {
+    if (firebaseUser.name?.trim()) {
+        return firebaseUser.name.trim();
+    }
+
+    if (firebaseUser.email?.trim()) {
+        return firebaseUser.email.trim().split('@')[0];
+    }
+
+    return 'cherry user';
+};
+
 export const register = async (req: Request, res: Response): Promise<void> => {
     try {
         const { email, password, displayName, photoURL } = req.body;
@@ -66,7 +85,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         const firebaseUid = userCredential.user.uid;
         
         const userProfile = await userRepo.getByFirebaseUid(firebaseUid);
-        console.log(userProfile);
 
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
@@ -104,6 +122,44 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             }
         }
         ResponseHandler.internalServerError(res, 'Failed to login', err instanceof Error ? err.message : 'Unknown error');
+    }
+};
+
+export const syncProfile = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const firebaseUser = (req as Request & { user?: AuthenticatedUser }).user;
+
+        if (!firebaseUser?.uid) {
+            ResponseHandler.unauthorized(res, 'Invalid authentication token', 'Firebase token is missing a uid');
+            return;
+        }
+
+        const email = firebaseUser.email?.trim();
+        if (!email) {
+            ResponseHandler.badRequest(
+                res,
+                'Email claim is required to synchronise the user profile',
+                'This sign-in method did not provide an email address.'
+            );
+            return;
+        }
+
+        const photoURL = firebaseUser.picture?.trim();
+        const { user, created } = await userRepo.findOrCreateByFirebaseUid({
+            firebaseUid: firebaseUser.uid,
+            email,
+            displayName: getDisplayNameFromToken(firebaseUser),
+            ...(photoURL ? { photoURL } : {})
+        });
+
+        if (created) {
+            ResponseHandler.created(res, user, 'User profile synchronised and created');
+            return;
+        }
+
+        ResponseHandler.success(res, user, 'User profile synchronised');
+    } catch (err) {
+        ResponseHandler.internalServerError(res, 'Failed to synchronise user profile', err instanceof Error ? err.message : 'Unknown error');
     }
 };
 

@@ -3,7 +3,8 @@ import {
     register,
     login,
     getProfile,
-    updateProfile
+    updateProfile,
+    syncProfile
 } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
@@ -180,6 +181,29 @@ router.post('/register', validateRegister, register);
  *         description: User not found
  */
 router.post('/login', validateLogin, login);
+
+/**
+ * @swagger
+ * /api/auth/sync:
+ *   get:
+ *     summary: Synchronise user profile from Firebase token
+ *     description: |
+ *       Used after social login with Apple or Google.
+ *       If the user profile does not exist in Firestore yet, the backend creates it from the Firebase ID token.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile synchronised successfully
+ *       201:
+ *         description: User profile created from token data
+ *       400:
+ *         description: The Firebase token does not include an email claim
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/sync', authMiddleware, syncProfile);
 
 /**
  * @swagger
