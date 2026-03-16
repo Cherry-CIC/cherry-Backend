@@ -13,6 +13,7 @@ import {
  */
 export class SendcloudService {
   private readonly client: any;
+  private readonly servicePointsClient: any;
 
   constructor() {
     const { publicKey, secretKey, apiUrl } = sendcloudConfig;
@@ -33,6 +34,19 @@ export class SendcloudService {
         'Content-Type': 'application/json',
       },
       timeout: 30000, // 30 seconds
+    });
+    this.servicePointsClient = axios.create({
+      baseURL:
+        process.env.SENDCLOUD_SERVICE_POINTS_API_URL ||
+        'https://servicepoints.sendcloud.sc/api/v2',
+      auth: {
+        username: publicKey,
+        password: secretKey,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
     });
   }
 
@@ -197,7 +211,9 @@ export class SendcloudService {
         params.carrier = courier;
       }
 
-      const response = await this.client.get('/service-points', { params });
+      const response = await this.servicePointsClient.get('/service-points/', {
+        params,
+      });
       return (response.data as SendcloudPickupPoint[]) || [];
     } catch (error: any) {
       const errorMessage =
