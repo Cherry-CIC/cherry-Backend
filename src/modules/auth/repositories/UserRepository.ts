@@ -6,17 +6,26 @@ export class UserRepository {
     private db = firestore;
     private collectionName = 'users';
 
+    private mapUser(doc: FirebaseFirestore.DocumentSnapshot): User {
+        const data = doc.data()!;
+
+        return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
+        } as User;
+    }
+
+    private cleanUser(user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Omit<User, 'id' | 'createdAt' | 'updatedAt'> {
+        return Object.fromEntries(
+            Object.entries(user).filter(([, value]) => value !== undefined)
+        ) as Omit<User, 'id' | 'createdAt' | 'updatedAt'>;
+    }
+
     async getAll(): Promise<User[]> {
         const snapshot = await this.db.collection(this.collectionName).get();
-        return snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                ...data,
-                createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-                updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-            } as User;
-        });
+        return snapshot.docs.map(doc => this.mapUser(doc));
     }
 
     async getById(id: string): Promise<User | null> {
@@ -24,50 +33,69 @@ export class UserRepository {
         if (!doc.exists) {
             return null;
         }
-        const data = doc.data()!;
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-        } as User;
+        return this.mapUser(doc);
     }
 
     async getByFirebaseUid(firebaseUid: string): Promise<User | null> {
-        const snapshot = await this.db.collection(this.collectionName).where('id', '==', firebaseUid).get();
+        const snapshot = await this.db.collection(this.collectionName).where('firebaseUid', '==', firebaseUid).limit(1).get();
         if (snapshot.empty) {
             return null;
         }
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-        } as User;
+        return this.mapUser(snapshot.docs[0]);
     }
 
     async getByEmail(email: string): Promise<User | null> {
-        const snapshot = await this.db.collection(this.collectionName).where('email', '==', email).get();
+        const snapshot = await this.db.collection(this.collectionName).where('email', '==', email).limit(1).get();
         if (snapshot.empty) {
             return null;
         }
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-        } as User;
+        return this.mapUser(snapshot.docs[0]);
+    }
+
+    async findOrCreateByFirebaseUid(
+        user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>
+    ): Promise<{ user: User; created: boolean }> {
+        const existingUser = await this.getByFirebaseUid(user.firebaseUid);
+        if (existingUser) {
+            return {
+                user: existingUser,
+                created: false,
+            };
+        }
+
+        const cleanUser = this.cleanUser(user);
+        const docRef = this.db.collection(this.collectionName).doc(user.firebaseUid);
+
+        return this.db.runTransaction(async transaction => {
+            const doc = await transaction.get(docRef);
+
+            if (doc.exists) {
+                return {
+                    user: this.mapUser(doc),
+                    created: false,
+                };
+            }
+
+            transaction.create(docRef, {
+                ...cleanUser,
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+
+            return {
+                user: {
+                    id: docRef.id,
+                    ...cleanUser,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                },
+                created: true,
+            };
+        });
     }
 
     async create(user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
-        // Filter out undefined values to prevent Firestore errors
-        const cleanUser = Object.fromEntries(
-            Object.entries(user).filter(([, value]) => value !== undefined)
-        );
+        const cleanUser = this.cleanUser(user);
         
         const docRef = await this.db.collection(this.collectionName).add({
             ...cleanUser,
@@ -77,7 +105,7 @@ export class UserRepository {
         
         return {
             id: docRef.id,
-            ...user,
+            ...cleanUser,
             createdAt: new Date(),
             updatedAt: new Date(),
         };

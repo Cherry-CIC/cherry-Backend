@@ -34,8 +34,9 @@ describe('SendcloudService.getPickupPoints()', () => {
     }
 
     service = new SendcloudService();
-    // Override the internal client with our mock
+    // Override the internal clients with our mock
     (service as any).client = { get: mockGet };
+    (service as any).servicePointsClient = { get: mockGet };
   });
 
   it('calls /service-points with correct params (no courier filter)', async () => {
@@ -43,9 +44,12 @@ describe('SendcloudService.getPickupPoints()', () => {
 
     await service.getPickupPoints('SW1A1AA');
 
-    expect(mockGet).toHaveBeenCalledWith('/service-points', {
+    expect(mockGet).toHaveBeenCalledWith(
+      '/service-points/',
+      {
       params: { country: 'GB', postcode: 'SW1A1AA' },
-    });
+      },
+    );
   });
 
   it('includes carrier param when courier is provided', async () => {
@@ -53,9 +57,12 @@ describe('SendcloudService.getPickupPoints()', () => {
 
     await service.getPickupPoints('SW1A1AA', 'dhl');
 
-    expect(mockGet).toHaveBeenCalledWith('/service-points', {
+    expect(mockGet).toHaveBeenCalledWith(
+      '/service-points/',
+      {
       params: { country: 'GB', postcode: 'SW1A1AA', carrier: 'dhl' },
-    });
+      },
+    );
   });
 
   it('returns the pickup point array from the response', async () => {

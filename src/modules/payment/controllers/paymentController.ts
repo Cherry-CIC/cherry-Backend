@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
-import { createWebhook } from '../../../shared/config/stripeConfig';
-import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
+import {
+  createWebhook,
+  StripeConfigurationError,
+} from '../../../shared/config/stripeConfig';
 import { PaymentService } from '../services/PaymentService';
 
 /**
@@ -66,6 +68,30 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
+    if (err instanceof StripeConfigurationError) {
+      ResponseHandler.custom(
+        res,
+        503,
+        false,
+        'Payment service unavailable',
+        undefined,
+        err.message,
+      );
+      return;
+    }
+
+    if (err instanceof Error && 'type' in err) {
+      ResponseHandler.custom(
+        res,
+        502,
+        false,
+        'Unable to create payment intent',
+        undefined,
+        'Stripe is currently unavailable. Please try again in a moment.',
+      );
+      return;
+    }
+
     ResponseHandler.internalServerError(
       res,
       'Failed to create PaymentIntent',
@@ -85,7 +111,40 @@ export const stripeWebhook = async (req: Request, res: Response): Promise<void> 
 
     // Raw body is required for signature verification
     const rawBody = (req as any).rawBody || req.body;
-    const event = createWebhook(rawBody, sig);
+    if (!rawBody) {
+      ResponseHandler.badRequest(
+        res,
+        'Missing raw webhook body',
+        'Stripe webhooks must reach the backend with the original request body intact.',
+      );
+      return;
+    }
+
+    let event;
+    try {
+      event = createWebhook(rawBody, sig);
+    } catch (webhookError) {
+      if (webhookError instanceof StripeConfigurationError) {
+        ResponseHandler.custom(
+          res,
+          503,
+          false,
+          'Payment service unavailable',
+          undefined,
+          webhookError.message,
+        );
+        return;
+      }
+
+      ResponseHandler.badRequest(
+        res,
+        'Invalid Stripe webhook signature',
+        webhookError instanceof Error
+          ? webhookError.message
+          : 'Signature verification failed',
+      );
+      return;
+    }
 
     // Example handling – extend as needed
     if (event.type === 'payment_intent.succeeded') {

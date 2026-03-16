@@ -1,37 +1,49 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import * as admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
-import { initializeApp as initializeClientApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getApps as getClientApps, initializeApp as initializeClientApp } from 'firebase/app';
+import { connectAuthEmulator, getAuth } from 'firebase/auth';
 
-// Firebase client SDK config (used for auth on the client side)
+const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || 'cherry-mvp-dev';
+const usingEmulators = Boolean(
+  process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.FIRESTORE_EMULATOR_HOST
+);
+
+// Firebase client SDK config used by backend auth helpers.
 const firebaseClientConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  // authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  // storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  // messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  // appId: process.env.FIREBASE_APP_ID,
+  apiKey: process.env.FIREBASE_API_KEY || 'dummy-api-key',
+  projectId: firebaseProjectId,
+  ...(process.env.FIREBASE_AUTH_DOMAIN
+    ? { authDomain: process.env.FIREBASE_AUTH_DOMAIN }
+    : {}),
 };
 
-// Initialise client app (for client‑side Auth utilities)
-const clientApp = initializeClientApp(firebaseClientConfig);
-if (process.env.NODE_ENV === 'production') {
-  // In Cloud Run, use Application Default Credentials (ADC)
-  initializeApp({
-    projectId:process.env.FIREBASE_PROJECT_ID,
-  });
-}else{
-  // Initialise Admin SDK (for server‑side Firestore & Auth)
-  // Use full service‑account credentials from .env. Cast to any to avoid strict type errors.
-  if (!admin.apps.length) {
-    // @ts-ignore
+const clientApp = getClientApps()[0] || initializeClientApp(firebaseClientConfig);
+const clientAuth = getAuth(clientApp);
+
+if (process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+  connectAuthEmulator(
+    clientAuth,
+    `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`
+  );
+}
+
+if (!admin.apps.length) {
+  if (process.env.NODE_ENV === 'production') {
+    initializeApp({
+      projectId: firebaseProjectId,
+    });
+  } else if (usingEmulators) {
+    initializeApp({
+      projectId: firebaseProjectId,
+    });
+  } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
     initializeApp({
       credential: cert({
         type: process.env.FIREBASE_TYPE,
-        project_id: process.env.FIREBASE_PROJECT_ID,
+        project_id: firebaseProjectId,
         private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-        private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
         client_email: process.env.FIREBASE_CLIENT_EMAIL,
         client_id: process.env.FIREBASE_CLIENT_ID,
         auth_uri: process.env.FIREBASE_AUTH_URI,
@@ -41,11 +53,17 @@ if (process.env.NODE_ENV === 'production') {
         client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
         universe_domain: process.env.FIREBASE_UNIVERSE_DOMAIN,
       } as any),
+      projectId: firebaseProjectId,
+    });
+  } else {
+    console.warn(
+      'Firebase Admin initialised without a service account. Set FIREBASE_* credentials or enable the local emulators.'
+    );
+    initializeApp({
+      projectId: firebaseProjectId,
     });
   }
 }
 
-// Export commonly used Firebase objects
 export const firestore = getFirestore();
-export const clientAuth = getAuth(clientApp);
-export { admin };
+export { admin, clientAuth };

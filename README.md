@@ -1,213 +1,66 @@
-# cherry Backend
+# cherry backend
 
-A Node.js/TypeScript cherry backend API Built with Express.js and Firebase to power the Cherry Mobile App: https://github.com/Cherry-CIC/MVP
+Node.js and TypeScript API for the cherry mobile app. cherry helps turn pre-loved clothing into 100% donations for UK-registered charities.
 
-```
-src/
-├── app.ts                    # Express application setup
-├── server.ts                # Server entry point
-├── modules/                 # Feature modules
-│   ├── auth/               # Authentication module
-│   │   ├── controllers/    # Auth controllers
-│   │   ├── model/         # User model
-│   │   ├── repositories/  # User repository
-│   │   ├── routes/        # Auth routes
-│   │   └── validators/    # Auth validation
-│   ├── products/          # Product management
-│   ├── categories/        # Category management
-│   └── charities/         # Charity management
-├── shared/                # Shared utilities
-│   ├── config/           # Configuration files
-│   ├── middleware/       # Custom middleware
-│   └── utils/           # Utility functions
-└── types/               # TypeScript type definitions
-```
+## Local setup
 
-## 🛠️ Prerequisites
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Copy the environment template:
+   ```bash
+   cp .env.example .env
+   ```
+3. Choose one local Firebase path:
+   - Emulator path: leave the service-account variables commented out and uncomment `FIREBASE_AUTH_EMULATOR_HOST` plus `FIRESTORE_EMULATOR_HOST`.
+   - Real Firebase path: fill in the `FIREBASE_*` service-account values in `.env`.
+4. Start the backend:
+   ```bash
+   npm run start:dev
+   ```
 
-Before running this project, make sure you have:
+The API runs on `http://localhost:3000` by default. Swagger docs are available at `http://localhost:3000/api-docs`.
 
-- **Node.js** (v20 or higher)
-- **npm** or **yarn**
+## Payments and shipping
 
-## 🚀 Getting Started
+Stripe payment amounts are expected in pence. For example, `1000` means `£10.00`.
 
-### 1. Clone the Repository
+The backend applies the cherry purchase security fee server-side using `PAYMENT_SECURITY_FEE_BPS`. The default is `1000`, which means a 10% fee. The payment-intent response includes the subtotal, fee, and total so the app can show the full breakdown clearly.
 
-```bash
-git clone <repository-url>
-cd cherry-backend
-```
+Stripe webhook verification requires `STRIPE_WEBHOOK_SECRET`. Sendcloud webhook verification uses `SENDCLOUD_WEBHOOK_SECRET` when provided, or falls back to `SENDCLOUD_SECRET_KEY` for API integrations.
 
-### 2. Install Dependencies
+## Auth profile sync
 
-```bash
-npm install
-```
+`GET /api/auth/sync` creates a Firestore user profile from the Firebase ID token when one does not already exist. This is intended for Apple and Google sign-in flows where the app already has an authenticated Firebase user.
 
-### 3. Environment Setup
+The endpoint:
+- returns `200` when the profile already exists
+- returns `201` when a new profile is created
+- returns `400` when the Firebase token does not include an email claim
 
-Create your environment files:
+## Emulator support
 
-```bash
-cp .env.development .env.productiom
-```
+The backend will use the Firebase Auth and Firestore emulators automatically when `FIREBASE_AUTH_EMULATOR_HOST` or `FIRESTORE_EMULATOR_HOST` is set.
 
-Update the environment variables (reach out to cherry mgmt):
+For emulator-based local work:
 
 ```env
-PORT=4000
-
-# Firebase Configuration
-FIREBASE_API_KEY=your-firebase-api-key
-FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
-FIREBASE_MESSAGING_SENDER_ID=your-sender-id
-FIREBASE_APP_ID=your-app-id
-FIREBASE_MEASUREMENT_ID=your-measurement-id
+FIREBASE_PROJECT_ID=cherry-mvp-dev
+FIREBASE_API_KEY=dummy-api-key
+FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
 ```
 
-## 🏃‍♂️ Running the Project
-
-### Development Mode
+## Useful commands
 
 ```bash
-npm run start:dev
-```
-
-The server will start on `http://localhost:4000` (or your configured PORT).
-
-### Production Mode
-
-```bash
-# Build the project
 npm run build
-
-# Start the production server
-npm start
-```
-
-### Using Docker
-
-```bash
-# Build the Docker image
-docker build -t cherry-backend .
-
-# Run the container
-docker run -p 4000:8080 cherry-backend
-```
-
-## 📖 API Documentation
-
-Once the server is running, you can access the API documentation at:
-
-```
-http://localhost:4000/api-docs
-```
-
-## 🔧 Development Tools
-
-### Code Formatting
-
-```bash
-# Format code with Prettier
-npm run format
-
-# Lint code with ESLint
-npm run lint
-```
-
-### Build
-
-```bash
-# Compile TypeScript to JavaScript
-npm run build
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these steps:
-
-### 1. Fork the Repository
-
-Click the "Fork" button on the repository page to create your own copy.
-
-### 2. Create a Feature Branch
-
-```bash
-git checkout -b feature/your-feature-name
-```
-
-### 3. Make Your Changes
-
-- Follow the existing code style and patterns
-- Add tests for new functionality
-- Update documentation if needed
-- Ensure all tests pass
-
-### 4. Code Quality Checks
-
-Before submitting, run:
-
-```bash
-# Format your code
-npm run format
-
-# Fix linting issues
-npm run lint
-
-# Run tests
 npm test
-
-# Build the project
-npm run build
+npm run lint
+npm run format
 ```
 
-### 5. Commit Your Changes
+## Contributing
 
-```bash
-git add .
-git commit -m "feat: add your feature description"
-```
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation changes
-- `test:` for adding tests
-- `refactor:` for code refactoring
-
-### 6. Push to Your Fork
-
-```bash
-git push origin feature/your-feature-name
-```
-
-### 7. Create a Pull Request
-
-1. Go to the original repository
-2. Click "New Pull Request"
-3. Select your branch
-4. Fill in the PR template with:
-   - Description of changes
-   - Type of change (feature, bugfix, etc.)
-   - Testing performed
-   - Screenshots (if applicable)
-
-### Development Guidelines
-
-- **Code Style**: Follow the existing conventions and architecture
-- **Documentation**: Update README and API docs for significant changes
-- **Types**: Maintain strong typing throughout the codebase
-- **Error Handling**: Use proper error handling and validation
-
-### Project Structure Guidelines
-
-- **Modules**: Keep related functionality in dedicated modules
-- **Controllers**: Handle HTTP requests and responses
-- **Repositories**: Manage data access and storage
-- **Models**: Define data structures and interfaces
-- **Validators**: Implement input validation using Joi
-- **Routes**: Define API endpoints and middleware
-
+Use short-lived feature branches. Keep changes focused. Update docs when behaviour changes. Run the build and relevant tests before opening a pull request.

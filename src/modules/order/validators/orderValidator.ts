@@ -46,7 +46,31 @@ export const orderSchema = Joi.object({
    * Only relevant (and expected) when deliveryMethod === "pickup_point".
    */
   pickupPointId: Joi.string().optional(),
-});
+}).custom((value, helpers) => {
+  if (value.deliveryMethod === 'ship_to_home') {
+    const address = value.shipping?.address;
+    if (!address?.line1 || !address?.city || !address?.postal_code) {
+      return helpers.error('any.custom', {
+        message:
+          '"shipping.address.line1", "shipping.address.city", and "shipping.address.postal_code" are required when deliveryMethod is "ship_to_home"',
+      });
+    }
+  }
+
+  if (value.deliveryMethod === 'pickup_point') {
+    if (!value.courier || !value.pickupPointId) {
+      return helpers.error('any.custom', {
+        message:
+          '"courier" and "pickupPointId" are required when deliveryMethod is "pickup_point"',
+      });
+    }
+  }
+
+  return value;
+}, 'delivery method validation')
+  .messages({
+    'any.custom': '{{#message}}',
+  });
 
 export function validateOrder(
   req: Request,
