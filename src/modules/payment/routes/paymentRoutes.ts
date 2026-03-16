@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import express from 'express';
 import { createPaymentIntent } from '../controllers/paymentController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { stripeWebhook } from '../controllers/paymentController';
+import { validateRequest } from '../../../shared/middleware/validateRequest';
+import { createPaymentIntentSchema } from '../validators/paymentValidator';
 
 const router = Router();
 
@@ -61,8 +62,12 @@ const router = Router();
  *       500:
  *         description: Internal server error
  */
-
-router.post('/create-payment-intent', authMiddleware, createPaymentIntent);
-router.post('/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+router.post(
+  '/create-payment-intent',
+  authMiddleware,
+  validateRequest(createPaymentIntentSchema),
+  createPaymentIntent,
+);
+router.post('/webhook', stripeWebhook);
 
 export default router;

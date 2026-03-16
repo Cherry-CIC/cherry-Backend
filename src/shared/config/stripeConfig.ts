@@ -1,15 +1,43 @@
-
 import Stripe from 'stripe';
 
-// Ensure the secret key is present; throw a clear error if not.
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY is not defined in the environment.');
+export class StripeConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StripeConfigurationError';
+  }
 }
- 
-// Initialise Stripe with the required API version.
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+let stripeClient: Stripe | null = null;
+
+const getRequiredStripeEnv = (
+  key: 'STRIPE_SECRET_KEY' | 'STRIPE_PUBLISHABLE_KEY' | 'STRIPE_WEBHOOK_SECRET',
+): string => {
+  const value = process.env[key];
+  if (!value) {
+    throw new StripeConfigurationError(
+      `${key} is not configured on the backend.`,
+    );
+  }
+
+  return value;
+};
+
+export const getStripeClient = (): Stripe => {
+  if (!stripeClient) {
+    stripeClient = new Stripe(getRequiredStripeEnv('STRIPE_SECRET_KEY'));
+  }
+
+  return stripeClient;
+};
+
+export const getStripePublishableKey = (): string =>
+  getRequiredStripeEnv('STRIPE_PUBLISHABLE_KEY');
+
+export const getStripeWebhookSecret = (): string =>
+  getRequiredStripeEnv('STRIPE_WEBHOOK_SECRET');
 
 const getCustomerByID = async (id: string): Promise<Stripe.Customer> => {
+  const stripe = getStripeClient();
   const customer = await stripe.customers.retrieve(id);
 
   if ((customer as Stripe.DeletedCustomer).deleted) {
@@ -20,57 +48,64 @@ const getCustomerByID = async (id: string): Promise<Stripe.Customer> => {
 };
 
 const addNewCustomer = async (email: string): Promise<Stripe.Customer> => {
+  const stripe = getStripeClient();
   const customer = await stripe.customers.create({
     email,
-    description: 'New Customer'
-  })
+    description: 'New Customer',
+  });
 
-  return customer
-}
+  return customer;
+};
 
-const createEphemeralKey = async (customerId: string): Promise<Stripe.EphemeralKey> => {
+const createEphemeralKey = async (
+  customerId: string,
+): Promise<Stripe.EphemeralKey> => {
+  const stripe = getStripeClient();
   const ephemeralKey = await stripe.ephemeralKeys.create(
-    {customer: customerId},
-    {apiVersion: '2022-08-01'}
+    { customer: customerId },
+    { apiVersion: '2022-08-01' },
   );
 
-  return ephemeralKey
-}
+  return ephemeralKey;
+};
 
 const createPaymentIntent = async (
   amount: number,
   currency: string,
-  customerId: string
+  customerId: string,
+  metadata?: Record<string, string>,
 ): Promise<Stripe.PaymentIntent> => {
+  const stripe = getStripeClient();
   const paymentIntent = await stripe.paymentIntents.create({
-    amount: amount,
-    currency: currency,
+    amount,
+    currency,
     customer: customerId,
     automatic_payment_methods: {
       enabled: true,
     },
+    metadata,
   });
 
-  return paymentIntent
-}
+  return paymentIntent;
+};
 
 const createWebhook = (
   rawBody: Buffer | string,
-  sig: string
+  sig: string,
 ): Stripe.Event => {
+  const stripe = getStripeClient();
   const event = stripe.webhooks.constructEvent(
     rawBody,
     sig,
-    process.env.STRIPE_SECRET_KEY!
-  )
-  return event
-}
+    getStripeWebhookSecret(),
+  );
+  return event;
+};
 
 export {
-  stripe,
   getCustomerByID,
   addNewCustomer,
   createEphemeralKey,
   createPaymentIntent,
-  createWebhook
+  createWebhook,
 };

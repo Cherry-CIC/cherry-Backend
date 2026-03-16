@@ -11,7 +11,17 @@ import { swaggerSpecs } from './shared/config/swaggerConfig';
 import './shared/config/firebaseConfig';
 
 const app = express();
-app.use(express.json());
+const webhookPaths = new Set(['/api/payment/webhook', '/api/shipping/webhook']);
+app.use(
+  express.json({
+    verify: (req, _res, buffer) => {
+      const request = req as express.Request & { rawBody?: Buffer };
+      if (webhookPaths.has(request.originalUrl)) {
+        request.rawBody = Buffer.from(buffer);
+      }
+    },
+  }),
+);
 
 import productRoutes from './modules/products/routes/productRoutes';
 import categoryRoutes from './modules/categories/routes/categoryRoutes';

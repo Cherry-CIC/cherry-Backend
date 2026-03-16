@@ -1,8 +1,29 @@
 import { Request, Response } from 'express';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { SendcloudService } from '../services/SendcloudService';
 import { ShipmentRepository } from '../repositories/ShipmentRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
+
+const getSendcloudWebhookSecret = (): string | null =>
+  process.env.SENDCLOUD_WEBHOOK_SECRET || process.env.SENDCLOUD_SECRET_KEY || null;
+
+const isValidSendcloudSignature = (
+  rawBody: Buffer,
+  signature: string,
+  secret: string,
+): boolean => {
+  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+  const actual = signature.trim().toLowerCase();
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const actualBuffer = Buffer.from(actual, 'utf8');
+
+  if (expectedBuffer.length !== actualBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expectedBuffer, actualBuffer);
+};
 
 /**
  * Create a shipment for an existing order
@@ -111,7 +132,7 @@ export const getShipmentStatus = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -181,7 +202,7 @@ export const getShippingLabel = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -275,7 +296,7 @@ export const cancelShipment = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -329,6 +350,44 @@ export const handleSendcloudWebhook = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const signatureHeader =
+      req.headers['sendcloud-signature'] || req.headers['x-sendcloud-signature'];
+    const signature = Array.isArray(signatureHeader)
+      ? signatureHeader[0]
+      : signatureHeader;
+    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+    const webhookSecret = getSendcloudWebhookSecret();
+
+    if (!webhookSecret) {
+      ResponseHandler.custom(
+        res,
+        503,
+        false,
+        'Sendcloud webhook is not configured',
+        undefined,
+        'Missing Sendcloud webhook verification secret on the backend.',
+      );
+      return;
+    }
+
+    if (!signature || !rawBody) {
+      ResponseHandler.unauthorized(
+        res,
+        'Invalid Sendcloud webhook',
+        'Missing webhook signature or raw request body.',
+      );
+      return;
+    }
+
+    if (!isValidSendcloudSignature(rawBody, signature, webhookSecret)) {
+      ResponseHandler.unauthorized(
+        res,
+        'Invalid Sendcloud webhook',
+        'Signature verification failed.',
+      );
+      return;
+    }
+
     const { action, parcel, timestamp } = req.body;
 
     console.log('Sendcloud webhook received:', {

@@ -22,6 +22,14 @@ Node.js and TypeScript API for the cherry mobile app. cherry helps turn pre-love
 
 The API runs on `http://localhost:3000` by default. Swagger docs are available at `http://localhost:3000/api-docs`.
 
+## Payments and shipping
+
+Stripe payment amounts are expected in pence. For example, `1000` means `£10.00`.
+
+The backend applies the cherry purchase security fee server-side using `PAYMENT_SECURITY_FEE_BPS`. The default is `1000`, which means a 10% fee. The payment-intent response includes the subtotal, fee, and total so the app can show the full breakdown clearly.
+
+Stripe webhook verification requires `STRIPE_WEBHOOK_SECRET`. Sendcloud webhook verification uses `SENDCLOUD_WEBHOOK_SECRET` when provided, or falls back to `SENDCLOUD_SECRET_KEY` for API integrations.
+
 ## Auth profile sync
 
 `GET /api/auth/sync` creates a Firestore user profile from the Firebase ID token when one does not already exist. This is intended for Apple and Google sign-in flows where the app already has an authenticated Firebase user.
