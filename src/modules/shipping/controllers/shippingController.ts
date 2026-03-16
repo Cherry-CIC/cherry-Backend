@@ -8,7 +8,10 @@ import { OrderRepository } from '../../order/repositories/OrderRepository';
  * Create a shipment for an existing order
  * POST /api/shipping/shipment
  */
-export const createShipment = async (req: Request, res: Response): Promise<void> => {
+export const createShipment = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { orderId, weight, shippingMethodId } = req.body;
 
@@ -20,24 +23,36 @@ export const createShipment = async (req: Request, res: Response): Promise<void>
     // Get order details
     const orderRepo = new OrderRepository();
     const orders = await orderRepo.getAllOrders();
-    const order = orders.find(o => o.id === orderId);
+    const order = orders.find((o) => o.id === orderId);
 
     if (!order) {
-      ResponseHandler.notFound(res, 'Order not found', `Order ${orderId} does not exist`);
+      ResponseHandler.notFound(
+        res,
+        'Order not found',
+        `Order ${orderId} does not exist`,
+      );
       return;
     }
 
     if (!order.shipping) {
-      ResponseHandler.badRequest(res, 'No shipping info', 'Order does not have shipping information');
+      ResponseHandler.badRequest(
+        res,
+        'No shipping info',
+        'Order does not have shipping information',
+      );
       return;
     }
 
     // Check if shipment already exists
     const shipmentRepo = new ShipmentRepository();
     const existingShipment = await shipmentRepo.getShipmentByOrderId(orderId);
-    
+
     if (existingShipment) {
-      ResponseHandler.badRequest(res, 'Shipment exists', 'A shipment already exists for this order');
+      ResponseHandler.badRequest(
+        res,
+        'Shipment exists',
+        'A shipment already exists for this order',
+      );
       return;
     }
 
@@ -82,7 +97,7 @@ export const createShipment = async (req: Request, res: Response): Promise<void>
     ResponseHandler.internalServerError(
       res,
       'Failed to create shipment',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -91,7 +106,10 @@ export const createShipment = async (req: Request, res: Response): Promise<void>
  * Get shipment status by order ID
  * GET /api/shipping/shipment/:orderId
  */
-export const getShipmentStatus = async (req: Request, res: Response): Promise<void> => {
+export const getShipmentStatus = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { orderId } = req.params;
 
@@ -99,7 +117,11 @@ export const getShipmentStatus = async (req: Request, res: Response): Promise<vo
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
 
     if (!shipment) {
-      ResponseHandler.notFound(res, 'Shipment not found', `No shipment found for order ${orderId}`);
+      ResponseHandler.notFound(
+        res,
+        'Shipment not found',
+        `No shipment found for order ${orderId}`,
+      );
       return;
     }
 
@@ -112,9 +134,10 @@ export const getShipmentStatus = async (req: Request, res: Response): Promise<vo
         // Update local record with latest info
         const statusMsg = parcel.status?.message?.toLowerCase() || 'pending';
         let status: any = 'en_route';
-        
+
         if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery')) status = 'out_for_delivery';
+        else if (statusMsg.includes('out for delivery'))
+          status = 'out_for_delivery';
         else if (statusMsg.includes('exception')) status = 'exception';
         else if (statusMsg.includes('cancelled')) status = 'cancelled';
         else if (statusMsg.includes('announced')) status = 'announced';
@@ -134,13 +157,17 @@ export const getShipmentStatus = async (req: Request, res: Response): Promise<vo
       }
     }
 
-    ResponseHandler.success(res, { shipment }, 'Shipment retrieved successfully');
+    ResponseHandler.success(
+      res,
+      { shipment },
+      'Shipment retrieved successfully',
+    );
   } catch (err) {
     console.error('Error fetching shipment:', err);
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch shipment',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -149,7 +176,10 @@ export const getShipmentStatus = async (req: Request, res: Response): Promise<vo
  * Get shipping label URL for an order
  * GET /api/shipping/label/:orderId
  */
-export const getShippingLabel = async (req: Request, res: Response): Promise<void> => {
+export const getShippingLabel = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { orderId } = req.params;
 
@@ -157,12 +187,20 @@ export const getShippingLabel = async (req: Request, res: Response): Promise<voi
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
 
     if (!shipment) {
-      ResponseHandler.notFound(res, 'Shipment not found', `No shipment found for order ${orderId}`);
+      ResponseHandler.notFound(
+        res,
+        'Shipment not found',
+        `No shipment found for order ${orderId}`,
+      );
       return;
     }
 
     if (!shipment.sendcloudId) {
-      ResponseHandler.badRequest(res, 'No Sendcloud ID', 'Shipment does not have a Sendcloud parcel ID');
+      ResponseHandler.badRequest(
+        res,
+        'No Sendcloud ID',
+        'Shipment does not have a Sendcloud parcel ID',
+      );
       return;
     }
 
@@ -171,7 +209,11 @@ export const getShippingLabel = async (req: Request, res: Response): Promise<voi
     const labelUrl = await sendcloudService.getLabelUrl(shipment.sendcloudId);
 
     if (!labelUrl) {
-      ResponseHandler.notFound(res, 'Label not found', 'Label URL is not available');
+      ResponseHandler.notFound(
+        res,
+        'Label not found',
+        'Label URL is not available',
+      );
       return;
     }
 
@@ -180,19 +222,19 @@ export const getShippingLabel = async (req: Request, res: Response): Promise<voi
 
     ResponseHandler.success(
       res,
-      { 
+      {
         labelUrl,
         trackingNumber: shipment.trackingNumber,
-        orderId: shipment.orderId 
+        orderId: shipment.orderId,
       },
-      'Label retrieved successfully'
+      'Label retrieved successfully',
     );
   } catch (err) {
     console.error('Error fetching label:', err);
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch label',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -201,18 +243,25 @@ export const getShippingLabel = async (req: Request, res: Response): Promise<voi
  * Get available shipping methods
  * GET /api/shipping/methods
  */
-export const getShippingMethods = async (req: Request, res: Response): Promise<void> => {
+export const getShippingMethods = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const sendcloudService = new SendcloudService();
     const methods = await sendcloudService.getShippingMethods();
 
-    ResponseHandler.success(res, { methods }, 'Shipping methods retrieved successfully');
+    ResponseHandler.success(
+      res,
+      { methods },
+      'Shipping methods retrieved successfully',
+    );
   } catch (err) {
     console.error('Error fetching shipping methods:', err);
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch shipping methods',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -221,7 +270,10 @@ export const getShippingMethods = async (req: Request, res: Response): Promise<v
  * Cancel a shipment
  * POST /api/shipping/cancel/:orderId
  */
-export const cancelShipment = async (req: Request, res: Response): Promise<void> => {
+export const cancelShipment = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { orderId } = req.params;
 
@@ -229,12 +281,20 @@ export const cancelShipment = async (req: Request, res: Response): Promise<void>
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
 
     if (!shipment) {
-      ResponseHandler.notFound(res, 'Shipment not found', `No shipment found for order ${orderId}`);
+      ResponseHandler.notFound(
+        res,
+        'Shipment not found',
+        `No shipment found for order ${orderId}`,
+      );
       return;
     }
 
     if (!shipment.sendcloudId) {
-      ResponseHandler.badRequest(res, 'No Sendcloud ID', 'Shipment does not have a Sendcloud parcel ID');
+      ResponseHandler.badRequest(
+        res,
+        'No Sendcloud ID',
+        'Shipment does not have a Sendcloud parcel ID',
+      );
       return;
     }
 
@@ -245,13 +305,17 @@ export const cancelShipment = async (req: Request, res: Response): Promise<void>
     // Update status locally
     await shipmentRepo.updateShipment(shipment.id, { status: 'cancelled' });
 
-    ResponseHandler.success(res, { orderId }, 'Shipment cancelled successfully');
+    ResponseHandler.success(
+      res,
+      { orderId },
+      'Shipment cancelled successfully',
+    );
   } catch (err) {
     console.error('Error cancelling shipment:', err);
     ResponseHandler.internalServerError(
       res,
       'Failed to cancel shipment',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -260,11 +324,18 @@ export const cancelShipment = async (req: Request, res: Response): Promise<void>
  * Webhook handler for Sendcloud status updates
  * POST /api/shipping/webhook
  */
-export const handleSendcloudWebhook = async (req: Request, res: Response): Promise<void> => {
+export const handleSendcloudWebhook = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { action, parcel, timestamp } = req.body;
 
-    console.log('Sendcloud webhook received:', { action, parcelId: parcel?.id, timestamp });
+    console.log('Sendcloud webhook received:', {
+      action,
+      parcelId: parcel?.id,
+      timestamp,
+    });
 
     if (action === 'parcel_status_changed' && parcel) {
       const shipmentRepo = new ShipmentRepository();
@@ -276,7 +347,8 @@ export const handleSendcloudWebhook = async (req: Request, res: Response): Promi
         let status: any = 'en_route';
 
         if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery')) status = 'out_for_delivery';
+        else if (statusMsg.includes('out for delivery'))
+          status = 'out_for_delivery';
         else if (statusMsg.includes('exception')) status = 'exception';
         else if (statusMsg.includes('cancelled')) status = 'cancelled';
         else if (statusMsg.includes('announced')) status = 'announced';
@@ -305,20 +377,70 @@ export const handleSendcloudWebhook = async (req: Request, res: Response): Promi
  * Get all shipments (admin only)
  * GET /api/shipping/shipments
  */
-export const getAllShipments = async (req: Request, res: Response): Promise<void> => {
+export const getAllShipments = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { status } = req.query;
 
     const shipmentRepo = new ShipmentRepository();
     const shipments = await shipmentRepo.getAllShipments(status as string);
 
-    ResponseHandler.success(res, { shipments, count: shipments.length }, 'Shipments retrieved successfully');
+    ResponseHandler.success(
+      res,
+      { shipments, count: shipments.length },
+      'Shipments retrieved successfully',
+    );
   } catch (err) {
     console.error('Error fetching shipments:', err);
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch shipments',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+/**
+ * Get Sendcloud pickup points (service points) near a postcode.
+ * GET /api/shipping/pickup-points?postcode=SW1A1AA&courier=dhl
+ *
+ * Called by the Flutter checkout screen to populate the pickup-point picker.
+ */
+export const getPickupPoints = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { postcode, courier } = req.query as Record<string, string>;
+
+    if (!postcode) {
+      ResponseHandler.badRequest(
+        res,
+        'Missing parameter',
+        '"postcode" query parameter is required',
+      );
+      return;
+    }
+
+    const sendcloudService = new SendcloudService();
+    const pickupPoints = await sendcloudService.getPickupPoints(
+      postcode,
+      courier,
+    );
+
+    ResponseHandler.success(
+      res,
+      { pickupPoints, count: pickupPoints.length },
+      'Pickup points retrieved successfully',
+    );
+  } catch (err) {
+    console.error('Error fetching pickup points:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch pickup points',
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };

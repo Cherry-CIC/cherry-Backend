@@ -10,6 +10,7 @@ import {
   cancelShipment,
   handleSendcloudWebhook,
   getAllShipments,
+  getPickupPoints,
 } from '../controllers/shippingController';
 import {
   createShipmentValidator,
@@ -55,7 +56,7 @@ router.post(
   authMiddleware,
   adminMiddleware,
   validateRequest(createShipmentValidator),
-  createShipment
+  createShipment,
 );
 
 /**
@@ -78,11 +79,7 @@ router.post(
  *       404:
  *         description: Shipment not found
  */
-router.get(
-  '/shipment/:orderId',
-  authMiddleware,
-  getShipmentStatus
-);
+router.get('/shipment/:orderId', authMiddleware, getShipmentStatus);
 
 /**
  * @swagger
@@ -108,7 +105,7 @@ router.get(
   '/label/:orderId',
   authMiddleware,
   adminMiddleware,
-  getShippingLabel
+  getShippingLabel,
 );
 
 /**
@@ -149,7 +146,7 @@ router.post(
   '/cancel/:orderId',
   authMiddleware,
   adminMiddleware,
-  cancelShipment
+  cancelShipment,
 );
 
 /**
@@ -170,12 +167,60 @@ router.post(
  *       200:
  *         description: Shipments retrieved
  */
-router.get(
-  '/shipments',
-  authMiddleware,
-  adminMiddleware,
-  getAllShipments
-);
+router.get('/shipments', authMiddleware, adminMiddleware, getAllShipments);
+
+/**
+ * @swagger
+ * /api/shipping/pickup-points:
+ *   get:
+ *     summary: Get Sendcloud pickup points (service points) near a postcode
+ *     description: >
+ *       Returns a list of available carrier pickup locations near the given postcode.
+ *       Called by the Flutter checkout screen to populate the pickup-point picker
+ *       before the user selects "Pickup Point" as delivery method.
+ *     tags: [Shipping]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: postcode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Postal code to search around (e.g. SW1A1AA)
+ *       - in: query
+ *         name: courier
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Carrier slug to filter results (e.g. dhl, ups, hermes). Omit for all carriers.
+ *     responses:
+ *       200:
+ *         description: Pickup points retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     pickupPoints:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     count:
+ *                       type: integer
+ *       400:
+ *         description: Missing postcode parameter
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/pickup-points', authMiddleware, getPickupPoints);
 
 /**
  * @swagger
