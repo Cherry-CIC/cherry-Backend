@@ -117,6 +117,13 @@ router.get(
  *     tags: [Shipping]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: servicePointId
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Optional Sendcloud service-point ID used to filter pickup-point compatible shipping methods.
  *     responses:
  *       200:
  *         description: Shipping methods retrieved
@@ -159,12 +166,6 @@ router.post(
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: servicePointId
- *         required: false
- *         schema:
- *           type: string
- *         description: Optional Sendcloud service-point ID used to filter pickup-point compatible shipping methods.
  *       - in: query
  *         name: status
  *         schema:
