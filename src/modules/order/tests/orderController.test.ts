@@ -11,25 +11,18 @@ jest.mock('../../../shared/config/firebaseConfig', () => ({
   },
 }));
 
-// Mock Sendcloud config (so SendcloudService constructor doesn't throw)
-jest.mock('../../../shared/config/sendcloudConfig', () => ({
-  sendcloudConfig: {
-    publicKey: 'test-pub',
-    secretKey: 'test-sec',
-    apiUrl: 'https://panel.sendcloud.sc/api/v2',
-  },
-}));
-
 // Mock dependencies
 jest.mock('../repositories/OrderRepository');
 jest.mock('../../auth/repositories/UserRepository');
-jest.mock('../../shipping/services/SendcloudService');
 jest.mock('../../shipping/repositories/ShipmentRepository');
+jest.mock('../../shipping/services/ShippingProviderFactory', () => ({
+  createShippingProvider: jest.fn(),
+}));
 
 import { OrderRepository } from '../repositories/OrderRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
-import { SendcloudService } from '../../shipping/services/SendcloudService';
 import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
+import { createShippingProvider } from '../../shipping/services/ShippingProviderFactory';
 
 const makeMockRes = () => {
   const res: Partial<Response> = {
@@ -46,6 +39,16 @@ const makeMockReq = (body: object, uid = 'user-uid'): Request =>
   }) as any;
 
 describe('createOrder controller – delivery method branching', () => {
+  const mockShippingProvider = {
+    createParcel: jest.fn(),
+    createParcelToServicePoint: jest.fn(),
+    getParcel: jest.fn(),
+    getShippingMethods: jest.fn(),
+    cancelParcel: jest.fn(),
+    getLabelUrl: jest.fn(),
+    getPickupPoints: jest.fn(),
+    verifyWebhookSignature: jest.fn(),
+  };
   const mockSavedOrder = {
     id: 'order-123',
     userId: 'user-uid',
@@ -62,6 +65,7 @@ describe('createOrder controller – delivery method branching', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (createShippingProvider as jest.Mock).mockReturnValue(mockShippingProvider);
 
     // UserRepository always resolves a valid user
     (UserRepository.prototype.getByFirebaseUid as jest.Mock).mockResolvedValue({
@@ -76,10 +80,7 @@ describe('createOrder controller – delivery method branching', () => {
       OrderRepository.prototype.updateOrderTracking as jest.Mock
     ).mockResolvedValue(undefined);
 
-    // SendcloudService.createParcel resolves with a parcel
-    (SendcloudService.prototype.createParcel as jest.Mock).mockResolvedValue(
-      mockParcel,
-    );
+    mockShippingProvider.createParcel.mockResolvedValue(mockParcel);
 
     // ShipmentRepository.createShipment resolves with a shipment
     (
@@ -87,7 +88,7 @@ describe('createOrder controller – delivery method branching', () => {
     ).mockResolvedValue(mockShipment);
   });
 
-  it('calls SendcloudService.createParcel when deliveryMethod is "ship_to_home"', async () => {
+  it('calls the shipping provider when deliveryMethod is "ship_to_home"', async () => {
     const req = makeMockReq({
       amount: 5000,
       deliveryMethod: 'ship_to_home',
@@ -105,7 +106,7 @@ describe('createOrder controller – delivery method branching', () => {
 
     await createOrder(req, res);
 
-    expect(SendcloudService.prototype.createParcel).toHaveBeenCalledTimes(1);
+    expect(mockShippingProvider.createParcel).toHaveBeenCalledTimes(1);
     expect(ShipmentRepository.prototype.createShipment).toHaveBeenCalledTimes(
       1,
     );
@@ -116,7 +117,7 @@ describe('createOrder controller – delivery method branching', () => {
     );
   });
 
-  it('does NOT call SendcloudService.createParcel when deliveryMethod is "pickup_point"', async () => {
+  it('does NOT call the shipping provider when deliveryMethod is "pickup_point"', async () => {
     const req = makeMockReq({
       amount: 5000,
       deliveryMethod: 'pickup_point',
@@ -127,11 +128,11 @@ describe('createOrder controller – delivery method branching', () => {
 
     await createOrder(req, res);
 
-    expect(SendcloudService.prototype.createParcel).not.toHaveBeenCalled();
+    expect(mockShippingProvider.createParcel).not.toHaveBeenCalled();
     expect(ShipmentRepository.prototype.createShipment).not.toHaveBeenCalled();
   });
 
-  it('does NOT call SendcloudService.createParcel when no deliveryMethod is provided', async () => {
+  it('does NOT call the shipping provider when no deliveryMethod is provided', async () => {
     const req = makeMockReq({
       amount: 5000,
       shipping: {
@@ -147,7 +148,7 @@ describe('createOrder controller – delivery method branching', () => {
 
     await createOrder(req, res);
 
-    expect(SendcloudService.prototype.createParcel).not.toHaveBeenCalled();
+    expect(mockShippingProvider.createParcel).not.toHaveBeenCalled();
   });
 
   it('persists deliveryMethod and shippingProvider on the order', async () => {
@@ -171,8 +172,8 @@ describe('createOrder controller – delivery method branching', () => {
     );
   });
 
-  it('still returns 200 when Sendcloud parcel creation fails (order is safe)', async () => {
-    (SendcloudService.prototype.createParcel as jest.Mock).mockRejectedValue(
+  it('still returns 200 when parcel creation fails (order is safe)', async () => {
+    mockShippingProvider.createParcel.mockRejectedValue(
       new Error('Sendcloud is down'),
     );
 

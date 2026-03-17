@@ -1,17 +1,40 @@
 import axios from 'axios';
+import crypto from 'crypto';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 import {
   SendcloudParcel,
   SendcloudPickupPoint,
   SendcloudShippingMethod,
 } from '../models/Shipment';
+import {
+  ShippingMethodsOptions,
+  ShippingParcelRequest,
+  ShippingProvider,
+} from './ShippingProvider';
 
 /**
  * Service for interacting with the Sendcloud API
  * Handles parcel creation, tracking, label generation, shipping methods,
  * and pickup-point (service-point) lookups.
  */
-export class SendcloudService {
+const normaliseBuffer = (rawBody: Buffer | string): Buffer =>
+  Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, 'utf8');
+
+const normaliseSignature = (signature: string): string =>
+  signature.replace(/^sha256=/i, '').trim();
+
+const timingSafeCompare = (left: string, right: string): boolean => {
+  const leftBuffer = Buffer.from(left, 'utf8');
+  const rightBuffer = Buffer.from(right, 'utf8');
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+export class SendcloudService implements ShippingProvider {
   private readonly client: any;
 
   constructor() {
@@ -41,11 +64,41 @@ export class SendcloudService {
    * @param parcelData - Parcel information including address, weight, etc.
    * @returns Created parcel from Sendcloud
    */
-  async createParcel(parcelData: any): Promise<SendcloudParcel> {
+  async createParcel(
+    parcelData: ShippingParcelRequest,
+  ): Promise<SendcloudParcel> {
     try {
       const response = await this.client.post('/parcels', {
-        parcel: parcelData,
+        parcel: {
+          ...parcelData,
+          request_label: true,
+        },
       });
+      return response.data.parcel;
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.message;
+      throw new Error(`Sendcloud API Error: ${errorMessage}`);
+    }
+  }
+
+  async createParcelToServicePoint(
+    parcelData: ShippingParcelRequest,
+    servicePointId: string,
+    shippingMethodId: number,
+  ): Promise<SendcloudParcel> {
+    try {
+      const response = await this.client.post('/parcels', {
+        parcel: {
+          ...parcelData,
+          request_label: true,
+          shipment: { id: shippingMethodId },
+          to_service_point: servicePointId,
+        },
+      });
+
       return response.data.parcel;
     } catch (error: any) {
       const errorMessage =
@@ -78,9 +131,17 @@ export class SendcloudService {
    * Get all available shipping methods
    * @returns List of shipping methods
    */
-  async getShippingMethods(): Promise<SendcloudShippingMethod[]> {
+  async getShippingMethods(
+    options?: ShippingMethodsOptions,
+  ): Promise<SendcloudShippingMethod[]> {
     try {
-      const response = await this.client.get('/shipping_methods');
+      const params: Record<string, string> = {};
+
+      if (options?.servicePointId) {
+        params.service_point_id = options.servicePointId;
+      }
+
+      const response = await this.client.get('/shipping_methods', { params });
       return response.data.shipping_methods || [];
     } catch (error: any) {
       const errorMessage =
@@ -206,5 +267,20 @@ export class SendcloudService {
         error.message;
       throw new Error(`Sendcloud API Error (pickup points): ${errorMessage}`);
     }
+  }
+
+  verifyWebhookSignature(rawBody: Buffer | string, signature: string): boolean {
+    const secret = sendcloudConfig.webhookSecret;
+
+    if (!secret || !signature) {
+      return false;
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(normaliseBuffer(rawBody))
+      .digest('hex');
+
+    return timingSafeCompare(expectedSignature, normaliseSignature(signature));
   }
 }

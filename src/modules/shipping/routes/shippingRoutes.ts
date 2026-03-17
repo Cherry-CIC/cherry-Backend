@@ -43,6 +43,7 @@ const router = Router();
  *                 type: number
  *               shippingMethodId:
  *                 type: number
+ *                 description: Required when the linked order uses deliveryMethod "pickup_point"
  *     responses:
  *       200:
  *         description: Shipment created successfully
@@ -158,6 +159,12 @@ router.post(
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: servicePointId
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Optional Sendcloud service-point ID used to filter pickup-point compatible shipping methods.
  *       - in: query
  *         name: status
  *         schema:

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
+import Stripe from 'stripe';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
-import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { PaymentService } from '../services/PaymentService';
 
 /**
@@ -95,6 +95,19 @@ export const stripeWebhook = async (req: Request, res: Response): Promise<void> 
     ResponseHandler.success(res, {}, 'Webhook received');
   } catch (err) {
     console.error('⚠️ Webhook error:', err);
+
+    if (
+      err instanceof Stripe.errors.StripeSignatureVerificationError ||
+      (err instanceof Error && err.name === 'StripeSignatureVerificationError')
+    ) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid Stripe webhook signature',
+        err.message,
+      );
+      return;
+    }
+
     ResponseHandler.internalServerError(
       res,
       'Failed to process webhook',

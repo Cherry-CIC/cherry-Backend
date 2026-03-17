@@ -20,6 +20,23 @@ export interface CreateOrderOptions {
  */
 export class OrderRepository {
   /**
+   * Retrieves a single order by Firestore document ID.
+   *
+   * @param orderId - Firestore document ID of the order.
+   * @returns The order or null when not found.
+   */
+  async getById(orderId: string): Promise<Order | null> {
+    const doc = await firestore.collection('orders').doc(orderId).get();
+
+    if (!doc.exists) {
+      return null;
+    }
+
+    const data = doc.data() as Omit<Order, 'id'>;
+    return { id: doc.id, ...data };
+  }
+
+  /**
    * Saves a new order document.
    *
    * @param opts - Order creation options (see {@link CreateOrderOptions}).

@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { PassThrough } from 'stream';
 import app from '../../../app';
 import { OrderRepository } from '../repositories/OrderRepository';
 import { admin } from '../../../shared/config/firebaseConfig';
@@ -121,17 +122,7 @@ describe('CSV Export Orders - /api/admin/export/orders', () => {
       // Set up environment variable for storage bucket
       process.env.FIREBASE_STORAGE_BUCKET = 'test-bucket.appspot.com';
 
-      // Mock storage write stream
-      const mockWriteStream: any = {
-        on: jest.fn((event: string, callback: () => void) => {
-          if (event === 'finish') {
-            setTimeout(callback, 0);
-          }
-          return mockWriteStream;
-        }),
-        write: jest.fn(),
-        end: jest.fn(),
-      };
+      const mockWriteStream = new PassThrough();
 
       const mockFile = {
         createWriteStream: jest.fn().mockReturnValue(mockWriteStream),
