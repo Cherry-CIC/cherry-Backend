@@ -16,7 +16,13 @@ const firebaseClientConfig = {
 
 // Initialise client app (for client‑side Auth utilities)
 const clientApp = initializeClientApp(firebaseClientConfig);
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'test') {
+  if (!admin.apps.length) {
+    initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID || 'cherry-test-project',
+    });
+  }
+} else if (process.env.NODE_ENV === 'production') {
   // In Cloud Run, use Application Default Credentials (ADC)
   initializeApp({
     projectId:process.env.FIREBASE_PROJECT_ID,

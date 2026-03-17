@@ -1,8 +1,46 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
-import { SendcloudService } from '../services/SendcloudService';
 import { ShipmentRepository } from '../repositories/ShipmentRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
+import { Shipment } from '../models/Shipment';
+import { createShippingProvider } from '../services/ShippingProviderFactory';
+import { ShippingParcelRequest } from '../services/ShippingProvider';
+
+const mapShipmentStatus = (statusMessage?: string): Shipment['status'] => {
+  const normalisedStatusMessage = statusMessage?.toLowerCase() || '';
+
+  if (normalisedStatusMessage.includes('delivered')) return 'delivered';
+  if (normalisedStatusMessage.includes('out for delivery'))
+    return 'out_for_delivery';
+  if (normalisedStatusMessage.includes('exception')) return 'exception';
+  if (normalisedStatusMessage.includes('cancelled')) return 'cancelled';
+  if (normalisedStatusMessage.includes('announced')) return 'announced';
+
+  return 'en_route';
+};
+
+const parseWebhookTimestamp = (timestamp: unknown): number | null => {
+  if (timestamp instanceof Date) {
+    return timestamp.getTime();
+  }
+
+  if (typeof timestamp === 'number') {
+    return timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
+  }
+
+  if (typeof timestamp === 'string') {
+    const numericTimestamp = Number(timestamp);
+
+    if (!Number.isNaN(numericTimestamp)) {
+      return parseWebhookTimestamp(numericTimestamp);
+    }
+
+    const parsedDate = Date.parse(timestamp);
+    return Number.isNaN(parsedDate) ? null : parsedDate;
+  }
+
+  return null;
+};
 
 /**
  * Create a shipment for an existing order
@@ -22,8 +60,7 @@ export const createShipment = async (
 
     // Get order details
     const orderRepo = new OrderRepository();
-    const orders = await orderRepo.getAllOrders();
-    const order = orders.find((o) => o.id === orderId);
+    const order = await orderRepo.getById(orderId);
 
     if (!order) {
       ResponseHandler.notFound(
@@ -57,25 +94,54 @@ export const createShipment = async (
     }
 
     // Create parcel in Sendcloud
-    const sendcloudService = new SendcloudService();
-    const parcelData: any = {
+    const shippingProvider = createShippingProvider();
+    const parcelData: ShippingParcelRequest = {
       name: order.shipping.name || 'Customer',
-      address: order.shipping.address.line1,
+      address: order.shipping.address.line1 || '',
       address_2: order.shipping.address.line2 || '',
-      city: order.shipping.address.city,
-      postal_code: order.shipping.address.postal_code,
+      city: order.shipping.address.city || '',
+      postal_code: order.shipping.address.postal_code || '',
       country: order.shipping.address.country || 'GB',
       email: order.email,
       order_number: order.id,
       weight: weight || 1000, // Default 1kg if not provided
     };
 
-    // Add shipping method if provided
-    if (shippingMethodId) {
-      parcelData.shipment = { id: shippingMethodId };
-    }
+    let sendcloudParcel;
 
-    const sendcloudParcel = await sendcloudService.createParcel(parcelData);
+    if (order.deliveryMethod === 'pickup_point') {
+      if (!order.pickupPointId) {
+        ResponseHandler.badRequest(
+          res,
+          'Missing pickup point',
+          'pickupPointId must be present on pickup_point orders before shipment creation',
+        );
+        return;
+      }
+
+      if (!shippingMethodId) {
+        ResponseHandler.badRequest(
+          res,
+          'Missing shipping method',
+          'shippingMethodId is required when creating a pickup_point shipment',
+        );
+        return;
+      }
+
+      parcelData.shipment = { id: shippingMethodId };
+      parcelData.to_service_point = order.pickupPointId;
+      sendcloudParcel = await shippingProvider.createParcelToServicePoint(
+        parcelData,
+        order.pickupPointId,
+        shippingMethodId,
+      );
+    } else {
+      if (shippingMethodId) {
+        parcelData.shipment = { id: shippingMethodId };
+      }
+
+      sendcloudParcel = await shippingProvider.createParcel(parcelData);
+    }
 
     // Save to Firestore
     const shipment = await shipmentRepo.createShipment({
@@ -86,9 +152,9 @@ export const createShipment = async (
       carrier: sendcloudParcel.carrier?.name,
       status: 'announced',
       labelUrl: sendcloudParcel.label?.label_printer,
+      deliveryMethod: order.deliveryMethod || 'ship_to_home',
+      pickupPointId: order.pickupPointId,
       parcel: parcelData,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     ResponseHandler.success(res, { shipment }, 'Shipment created successfully');
@@ -111,7 +177,7 @@ export const getShipmentStatus = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -128,19 +194,11 @@ export const getShipmentStatus = async (
     // Optionally fetch latest status from Sendcloud
     if (shipment.sendcloudId) {
       try {
-        const sendcloudService = new SendcloudService();
-        const parcel = await sendcloudService.getParcel(shipment.sendcloudId);
+        const shippingProvider = createShippingProvider();
+        const parcel = await shippingProvider.getParcel(shipment.sendcloudId);
 
         // Update local record with latest info
-        const statusMsg = parcel.status?.message?.toLowerCase() || 'pending';
-        let status: any = 'en_route';
-
-        if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery'))
-          status = 'out_for_delivery';
-        else if (statusMsg.includes('exception')) status = 'exception';
-        else if (statusMsg.includes('cancelled')) status = 'cancelled';
-        else if (statusMsg.includes('announced')) status = 'announced';
+        const status = mapShipmentStatus(parcel.status?.message);
 
         await shipmentRepo.updateShipment(shipment.id, {
           status,
@@ -181,7 +239,7 @@ export const getShippingLabel = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -205,8 +263,8 @@ export const getShippingLabel = async (
     }
 
     // Fetch label URL from Sendcloud
-    const sendcloudService = new SendcloudService();
-    const labelUrl = await sendcloudService.getLabelUrl(shipment.sendcloudId);
+    const shippingProvider = createShippingProvider();
+    const labelUrl = await shippingProvider.getLabelUrl(shipment.sendcloudId);
 
     if (!labelUrl) {
       ResponseHandler.notFound(
@@ -248,8 +306,9 @@ export const getShippingMethods = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const sendcloudService = new SendcloudService();
-    const methods = await sendcloudService.getShippingMethods();
+    const { servicePointId } = req.query as Record<string, string>;
+    const shippingProvider = createShippingProvider();
+    const methods = await shippingProvider.getShippingMethods({ servicePointId });
 
     ResponseHandler.success(
       res,
@@ -275,7 +334,7 @@ export const cancelShipment = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId as string;
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -299,8 +358,8 @@ export const cancelShipment = async (
     }
 
     // Cancel in Sendcloud
-    const sendcloudService = new SendcloudService();
-    await sendcloudService.cancelParcel(shipment.sendcloudId);
+    const shippingProvider = createShippingProvider();
+    await shippingProvider.cancelParcel(shipment.sendcloudId);
 
     // Update status locally
     await shipmentRepo.updateShipment(shipment.id, { status: 'cancelled' });
@@ -329,6 +388,37 @@ export const handleSendcloudWebhook = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const rawBody = (req as any).rawBody as Buffer | string | undefined;
+    const signature = req.headers['sendcloud-signature'] as string | undefined;
+
+    if (!rawBody) {
+      ResponseHandler.badRequest(
+        res,
+        'Missing raw webhook body',
+        'Webhook signature verification requires the raw request body',
+      );
+      return;
+    }
+
+    if (!signature) {
+      ResponseHandler.badRequest(
+        res,
+        'Missing Sendcloud signature header',
+        'Expected "Sendcloud-Signature" header',
+      );
+      return;
+    }
+
+    const shippingProvider = createShippingProvider();
+    if (!shippingProvider.verifyWebhookSignature(rawBody, signature)) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid Sendcloud webhook signature',
+        'Webhook signature verification failed',
+      );
+      return;
+    }
+
     const { action, parcel, timestamp } = req.body;
 
     console.log('Sendcloud webhook received:', {
@@ -342,21 +432,30 @@ export const handleSendcloudWebhook = async (
       const shipment = await shipmentRepo.getShipmentBySendcloudId(parcel.id);
 
       if (shipment) {
-        // Map Sendcloud status to our status
-        const statusMsg = parcel.status?.message?.toLowerCase() || '';
-        let status: any = 'en_route';
+        const incomingTimestampMs = parseWebhookTimestamp(timestamp);
+        const existingTimestampMs = parseWebhookTimestamp(
+          shipment.lastWebhookTimestamp,
+        );
 
-        if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery'))
-          status = 'out_for_delivery';
-        else if (statusMsg.includes('exception')) status = 'exception';
-        else if (statusMsg.includes('cancelled')) status = 'cancelled';
-        else if (statusMsg.includes('announced')) status = 'announced';
+        if (
+          incomingTimestampMs !== null &&
+          existingTimestampMs !== null &&
+          incomingTimestampMs <= existingTimestampMs
+        ) {
+          res.status(200).json({ received: true, ignored: true });
+          return;
+        }
+
+        const status = mapShipmentStatus(parcel.status?.message);
 
         await shipmentRepo.updateShipment(shipment.id, {
           status,
           trackingNumber: parcel.tracking_number,
           trackingUrl: parcel.tracking_url,
+          lastWebhookTimestamp:
+            incomingTimestampMs !== null
+              ? new Date(incomingTimestampMs)
+              : shipment.lastWebhookTimestamp,
         });
 
         console.log(`Updated shipment ${shipment.id} to status: ${status}`);
@@ -424,8 +523,8 @@ export const getPickupPoints = async (
       return;
     }
 
-    const sendcloudService = new SendcloudService();
-    const pickupPoints = await sendcloudService.getPickupPoints(
+    const shippingProvider = createShippingProvider();
+    const pickupPoints = await shippingProvider.getPickupPoints(
       postcode,
       courier,
     );

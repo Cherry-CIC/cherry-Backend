@@ -12,14 +12,20 @@ export class ShipmentRepository {
    * @param shipmentData - Shipment data without ID
    * @returns Created shipment with generated ID
    */
-  async createShipment(shipmentData: Omit<Shipment, 'id'>): Promise<Shipment> {
+  async createShipment(
+    shipmentData: Omit<Shipment, 'id' | 'createdAt' | 'updatedAt'> &
+      Partial<Pick<Shipment, 'createdAt' | 'updatedAt'>>,
+  ): Promise<Shipment> {
+    const createdAt = shipmentData.createdAt || new Date();
+    const updatedAt = shipmentData.updatedAt || new Date();
+
     const docRef = await firestore.collection(this.collection).add({
       ...shipmentData,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt,
+      updatedAt,
     });
 
-    return { id: docRef.id, ...shipmentData };
+    return { id: docRef.id, ...shipmentData, createdAt, updatedAt } as Shipment;
   }
 
   /**
@@ -163,6 +169,15 @@ export class ShipmentRepository {
       carrier: data.carrier,
       status: data.status || 'pending',
       labelUrl: data.labelUrl,
+      deliveryMethod: data.deliveryMethod,
+      pickupPointId: data.pickupPointId,
+      lastWebhookTimestamp:
+        data.lastWebhookTimestamp &&
+        typeof data.lastWebhookTimestamp.toDate === 'function'
+          ? data.lastWebhookTimestamp.toDate()
+          : data.lastWebhookTimestamp
+            ? new Date(data.lastWebhookTimestamp)
+            : undefined,
       parcel: data.parcel,
       createdAt,
       updatedAt,

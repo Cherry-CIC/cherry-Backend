@@ -15,7 +15,7 @@ export const getAllCategories = async (req: Request, res: Response): Promise<voi
 
 export const getCategoryById = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const category = await repo.getById(id);
         
         if (!category) {
@@ -41,7 +41,7 @@ export const createCategory = async (req: Request, res: Response): Promise<void>
 
 export const updateCategory = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const categoryData = req.body;
         const updatedCategory = await repo.update(id, categoryData);
         
@@ -58,7 +58,7 @@ export const updateCategory = async (req: Request, res: Response): Promise<void>
 
 export const deleteCategory = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const deleted = await repo.delete(id);
         
         if (!deleted) {

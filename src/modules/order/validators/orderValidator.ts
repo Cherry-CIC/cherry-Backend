@@ -46,6 +46,55 @@ export const orderSchema = Joi.object({
    * Only relevant (and expected) when deliveryMethod === "pickup_point".
    */
   pickupPointId: Joi.string().optional(),
+}).custom((value, helpers) => {
+  const shippingAddress = value.shipping?.address;
+
+  if (shippingAddress && !value.deliveryMethod) {
+    return helpers.error('any.custom', {
+      message:
+        '"deliveryMethod" is required when a shipping address is provided',
+    });
+  }
+
+  if (value.deliveryMethod === 'ship_to_home') {
+    if (!shippingAddress) {
+      return helpers.error('any.custom', {
+        message:
+          '"shipping.address" is required when "deliveryMethod" is "ship_to_home"',
+      });
+    }
+
+    const requiredAddressFields = ['line1', 'city', 'postal_code', 'country'];
+    const missingField = requiredAddressFields.find(
+      (field) => !shippingAddress[field],
+    );
+
+    if (missingField) {
+      return helpers.error('any.custom', {
+        message: `"shipping.address.${missingField}" is required when "deliveryMethod" is "ship_to_home"`,
+      });
+    }
+  }
+
+  if (value.deliveryMethod === 'pickup_point') {
+    if (!value.courier) {
+      return helpers.error('any.custom', {
+        message:
+          '"courier" is required when "deliveryMethod" is "pickup_point"',
+      });
+    }
+
+    if (!value.pickupPointId) {
+      return helpers.error('any.custom', {
+        message:
+          '"pickupPointId" is required when "deliveryMethod" is "pickup_point"',
+      });
+    }
+  }
+
+  return value;
+}, 'delivery method validation').messages({
+  'any.custom': '{{#message}}',
 });
 
 export function validateOrder(

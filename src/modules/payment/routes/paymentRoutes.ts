@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import express from 'express';
 import { createPaymentIntent } from '../controllers/paymentController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { stripeWebhook } from '../controllers/paymentController';
@@ -63,6 +62,6 @@ const router = Router();
  */
 
 router.post('/create-payment-intent', authMiddleware, createPaymentIntent);
-router.post('/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+router.post('/webhook', stripeWebhook);
 
 export default router;

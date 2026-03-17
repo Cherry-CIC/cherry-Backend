@@ -6,7 +6,7 @@ export function validateProductId(
     res: Response,
     next: NextFunction
 ): void {
-    const { id } = req.params;
+    const id = req.params.id as string | undefined;
     
     // Check if ID is provided
     if (!id) {
