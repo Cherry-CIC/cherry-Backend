@@ -1,213 +1,102 @@
-# cherry Backend
+# cherry backend
 
-A Node.js/TypeScript cherry backend API Built with Express.js and Firebase to power the Cherry Mobile App: https://github.com/Cherry-CIC/MVP
+The cherry backend is a Node.js and TypeScript API built with Express and Firebase. It powers the cherry mobile app and supports a simple, trustworthy donation checkout flow for pre-loved clothing.
 
-```
-src/
-├── app.ts                    # Express application setup
-├── server.ts                # Server entry point
-├── modules/                 # Feature modules
-│   ├── auth/               # Authentication module
-│   │   ├── controllers/    # Auth controllers
-│   │   ├── model/         # User model
-│   │   ├── repositories/  # User repository
-│   │   ├── routes/        # Auth routes
-│   │   └── validators/    # Auth validation
-│   ├── products/          # Product management
-│   ├── categories/        # Category management
-│   └── charities/         # Charity management
-├── shared/                # Shared utilities
-│   ├── config/           # Configuration files
-│   ├── middleware/       # Custom middleware
-│   └── utils/           # Utility functions
-└── types/               # TypeScript type definitions
-```
+## What this API covers
 
-## 🛠️ Prerequisites
+- Firebase-backed auth and user lookup
+- Product, category, and charity APIs
+- Order creation and CSV export
+- Stripe payment intent creation and webhook handling
+- Sendcloud shipping, pickup-point lookup, and webhook handling
+- Swagger docs for local API exploration
 
-Before running this project, make sure you have:
+## MVP boundary
 
-- **Node.js** (v20 or higher)
-- **npm** or **yarn**
+For the current MVP, the backend is designed to validate the digital checkout loop safely.
 
-## 🚀 Getting Started
+- Use Stripe sandbox only for local development and testing
+- Treat real money flows as out of scope for MVP verification
+- Default non-production shipping to mocked responses so checkout can be exercised without live logistics
+- Keep names optional in checkout payloads unless a later requirement makes them necessary
 
-### 1. Clone the Repository
+The fuller rationale is in `docs/backend-mvp-boundary.md`.
 
-```bash
-git clone <repository-url>
-cd cherry-backend
-```
+## Prerequisites
 
-### 2. Install Dependencies
+- Node.js 20 or later
+- npm
+- A Firebase project for non-test local development
+
+## Quick start
+
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 3. Environment Setup
-
-Create your environment files:
+2. Copy the env template:
 
 ```bash
-cp .env.development .env.productiom
+cp .env.example .env
 ```
 
-Update the environment variables (reach out to cherry mgmt):
+3. Fill in the values you need for your local setup.
 
-```env
-PORT=4000
-
-# Firebase Configuration
-FIREBASE_API_KEY=your-firebase-api-key
-FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
-FIREBASE_MESSAGING_SENDER_ID=your-sender-id
-FIREBASE_APP_ID=your-app-id
-FIREBASE_MEASUREMENT_ID=your-measurement-id
-```
-
-## 🏃‍♂️ Running the Project
-
-### Development Mode
+4. Start the API:
 
 ```bash
 npm run start:dev
 ```
 
-The server will start on `http://localhost:4000` (or your configured PORT).
+The API runs on `http://localhost:3000` by default.
 
-### Production Mode
+Swagger is available at:
+
+```text
+http://localhost:3000/api-docs
+```
+
+## Environment notes
+
+Important vars for local work:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `SENDCLOUD_MODE`
+- `SENDCLOUD_PUBLIC_KEY`
+- `SENDCLOUD_SECRET_KEY`
+- `SENDCLOUD_WEBHOOK_SECRET`
+- `FIREBASE_PROJECT_ID`
+
+Recommended defaults:
+
+- Keep Stripe in test mode locally
+- Set `SENDCLOUD_MODE=mock` outside production
+- Only use live Sendcloud credentials when you are deliberately testing the live shipping integration
+
+See `.env.example` for the full template.
+
+## Development commands
 
 ```bash
-# Build the project
+npm run start:dev
 npm run build
-
-# Start the production server
-npm start
+npm test -- --runInBand
 ```
 
-### Using Docker
+## Key backend ownership
 
-```bash
-# Build the Docker image
-docker build -t cherry-backend .
+These files are the main entry points for the checkout path:
 
-# Run the container
-docker run -p 4000:8080 cherry-backend
-```
+- Auth: `src/shared/middleware/authMiddleWare.ts`, `src/modules/auth/`
+- Orders: `src/modules/order/controllers/orderController.ts`, `src/modules/order/repositories/OrderRepository.ts`
+- Payments: `src/shared/config/stripeConfig.ts`, `src/modules/payment/`
+- Shipping: `src/shared/config/sendcloudConfig.ts`, `src/modules/shipping/`
+- App wiring: `src/app.ts`
 
-## 📖 API Documentation
+## Contributing
 
-Once the server is running, you can access the API documentation at:
-
-```
-http://localhost:4000/api-docs
-```
-
-## 🔧 Development Tools
-
-### Code Formatting
-
-```bash
-# Format code with Prettier
-npm run format
-
-# Lint code with ESLint
-npm run lint
-```
-
-### Build
-
-```bash
-# Compile TypeScript to JavaScript
-npm run build
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these steps:
-
-### 1. Fork the Repository
-
-Click the "Fork" button on the repository page to create your own copy.
-
-### 2. Create a Feature Branch
-
-```bash
-git checkout -b feature/your-feature-name
-```
-
-### 3. Make Your Changes
-
-- Follow the existing code style and patterns
-- Add tests for new functionality
-- Update documentation if needed
-- Ensure all tests pass
-
-### 4. Code Quality Checks
-
-Before submitting, run:
-
-```bash
-# Format your code
-npm run format
-
-# Fix linting issues
-npm run lint
-
-# Run tests
-npm test
-
-# Build the project
-npm run build
-```
-
-### 5. Commit Your Changes
-
-```bash
-git add .
-git commit -m "feat: add your feature description"
-```
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation changes
-- `test:` for adding tests
-- `refactor:` for code refactoring
-
-### 6. Push to Your Fork
-
-```bash
-git push origin feature/your-feature-name
-```
-
-### 7. Create a Pull Request
-
-1. Go to the original repository
-2. Click "New Pull Request"
-3. Select your branch
-4. Fill in the PR template with:
-   - Description of changes
-   - Type of change (feature, bugfix, etc.)
-   - Testing performed
-   - Screenshots (if applicable)
-
-### Development Guidelines
-
-- **Code Style**: Follow the existing conventions and architecture
-- **Documentation**: Update README and API docs for significant changes
-- **Types**: Maintain strong typing throughout the codebase
-- **Error Handling**: Use proper error handling and validation
-
-### Project Structure Guidelines
-
-- **Modules**: Keep related functionality in dedicated modules
-- **Controllers**: Handle HTTP requests and responses
-- **Repositories**: Manage data access and storage
-- **Models**: Define data structures and interfaces
-- **Validators**: Implement input validation using Joi
-- **Routes**: Define API endpoints and middleware
-
+Start with `CONTRIBUTING.md`. It covers local setup, mock-first workflows, and the files that usually need to change together.
