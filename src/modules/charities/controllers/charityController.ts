@@ -15,7 +15,7 @@ export const getAllCharities = async (req: Request, res: Response): Promise<void
 
 export const getCharityById = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const charity = await repo.getById(id);
         
         if (!charity) {
@@ -41,7 +41,7 @@ export const createCharity = async (req: Request, res: Response): Promise<void> 
 
 export const updateCharity = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const charityData = req.body;
         const updatedCharity = await repo.update(id, charityData);
         
@@ -58,7 +58,7 @@ export const updateCharity = async (req: Request, res: Response): Promise<void> 
 
 export const deleteCharity = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = req.params.id as string;
         const deleted = await repo.delete(id);
         
         if (!deleted) {

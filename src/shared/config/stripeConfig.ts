@@ -5,6 +5,12 @@ import Stripe from 'stripe';
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('STRIPE_SECRET_KEY is not defined in the environment.');
 }
+
+if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  console.warn(
+    '⚠️  STRIPE_WEBHOOK_SECRET is not defined. Stripe webhook signature verification will fail until it is configured.',
+  );
+}
  
 // Initialise Stripe with the required API version.
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -58,10 +64,14 @@ const createWebhook = (
   rawBody: Buffer | string,
   sig: string
 ): Stripe.Event => {
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    throw new Error('STRIPE_WEBHOOK_SECRET is not defined in the environment.');
+  }
+
   const event = stripe.webhooks.constructEvent(
     rawBody,
     sig,
-    process.env.STRIPE_SECRET_KEY!
+    process.env.STRIPE_WEBHOOK_SECRET
   )
   return event
 }

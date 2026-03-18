@@ -18,6 +18,8 @@ export interface Shipment {
   deliveryMethod?: 'ship_to_home' | 'pickup_point';
   /** Sendcloud service-point ID (pickup_point shipments only). */
   pickupPointId?: string;
+  /** Timestamp from the latest webhook we accepted for this shipment. */
+  lastWebhookTimestamp?: Date;
   parcel: {
     name: string;
     address: string;
@@ -29,6 +31,10 @@ export interface Shipment {
     telephone?: string;
     weight: number; // in grams
     order_number: string;
+    shipment?: {
+      id: number;
+    };
+    to_service_point?: string;
   };
   createdAt: Date;
   updatedAt: Date;

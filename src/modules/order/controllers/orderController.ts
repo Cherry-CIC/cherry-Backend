@@ -3,8 +3,9 @@ import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { OrderRepository } from '../repositories/OrderRepository';
 import { Order } from '../model/Order';
-import { SendcloudService } from '../../shipping/services/SendcloudService';
 import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
+import { createShippingProvider } from '../../shipping/services/ShippingProviderFactory';
+import { ShippingParcelRequest } from '../../shipping/services/ShippingProvider';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Private helpers
@@ -20,11 +21,11 @@ async function createShipToHomeParcel(
   shipping: any,
   email: string,
 ): Promise<void> {
-  const sendcloudService = new SendcloudService();
+  const shippingProvider = createShippingProvider();
   const shipmentRepo = new ShipmentRepository();
   const orderRepo = new OrderRepository();
 
-  const parcelData: any = {
+  const parcelData: ShippingParcelRequest = {
     name: shipping.name || 'Customer',
     address: shipping.address.line1,
     address_2: shipping.address.line2 || '',
@@ -36,7 +37,7 @@ async function createShipToHomeParcel(
     weight: 1000, // Default 1 kg – can be customised per product
   };
 
-  const sendcloudParcel = await sendcloudService.createParcel(parcelData);
+  const sendcloudParcel = await shippingProvider.createParcel(parcelData);
 
   const shipment = await shipmentRepo.createShipment({
     orderId: savedOrder.id,
@@ -48,8 +49,6 @@ async function createShipToHomeParcel(
     labelUrl: sendcloudParcel.label?.label_printer,
     deliveryMethod: 'ship_to_home',
     parcel: parcelData,
-    createdAt: new Date(),
-    updatedAt: new Date(),
   });
 
   if (sendcloudParcel.tracking_number) {
