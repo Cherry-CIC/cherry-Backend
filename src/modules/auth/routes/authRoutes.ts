@@ -4,6 +4,7 @@ import {
   login,
   getProfile,
   updateProfile,
+  deleteAccount,
 } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
@@ -255,5 +256,43 @@ router.get('/profile', authMiddleware, getProfile);
  *         description: User profile not found
  */
 router.put('/profile', authMiddleware, updateProfile);
+
+/**
+ * @swagger
+ * /api/auth/account:
+ *   delete:
+ *     summary: Delete the authenticated user's account and related Firestore documents
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deletedUserProfiles:
+ *                       type: integer
+ *                     deletedProducts:
+ *                       type: integer
+ *                     deletedOrders:
+ *                       type: integer
+ *                     deletedShipments:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User profile not found
+ */
+router.delete('/account', authMiddleware, deleteAccount);
 
 export default router;

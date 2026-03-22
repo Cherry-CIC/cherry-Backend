@@ -1,6 +1,6 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
-import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
 
 export class UserRepository {
   private db = firestore;
@@ -144,5 +144,65 @@ export class UserRepository {
 
     await docRef.delete();
     return true;
+  }
+
+  async deleteAccountData(firebaseUid: string): Promise<{
+    deletedUserProfiles: number;
+    deletedProducts: number;
+    deletedOrders: number;
+    deletedShipments: number;
+  }> {
+    const userProfilesSnapshot = await this.db
+      .collection(this.collectionName)
+      .where('id', '==', firebaseUid)
+      .get();
+
+    const productsSnapshot = await this.db
+      .collection('products')
+      .where('userId', '==', firebaseUid)
+      .get();
+
+    const ordersSnapshot = await this.db
+      .collection('orders')
+      .where('userId', '==', firebaseUid)
+      .get();
+
+    const orderIds = ordersSnapshot.docs.map((doc) => doc.id);
+    const shipmentSnapshots = await Promise.all(
+      orderIds.map((orderId) =>
+        this.db.collection('shipments').where('orderId', '==', orderId).get(),
+      ),
+    );
+
+    const shipmentDocs = shipmentSnapshots.flatMap((snapshot) => snapshot.docs);
+    const uniqueShipmentDocs = Array.from(
+      new Map(shipmentDocs.map((doc) => [doc.id, doc])).values(),
+    );
+
+    const docsToDelete = [
+      ...userProfilesSnapshot.docs,
+      ...productsSnapshot.docs,
+      ...ordersSnapshot.docs,
+      ...uniqueShipmentDocs,
+    ];
+
+    if (docsToDelete.length > 450) {
+      throw new Error(
+        'Account cleanup exceeds the Firestore atomic batch limit.',
+      );
+    }
+
+    const batch: WriteBatch = this.db.batch();
+    docsToDelete.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+
+    return {
+      deletedUserProfiles: userProfilesSnapshot.size,
+      deletedProducts: productsSnapshot.size,
+      deletedOrders: ordersSnapshot.size,
+      deletedShipments: uniqueShipmentDocs.length,
+    };
   }
 }

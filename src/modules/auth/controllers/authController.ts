@@ -1,10 +1,25 @@
 import { Request, Response } from 'express';
 import { admin, clientAuth } from '../../../shared/config/firebaseConfig';
 import { UserRepository } from '../repositories/UserRepository';
+import { AuthService, IAuthService } from '../services/AuthService';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 
 const userRepo = new UserRepository();
+
+type AuthControllerDependencies = {
+  authService: IAuthService;
+};
+
+const dependencies: AuthControllerDependencies = {
+  authService: new AuthService(userRepo),
+};
+
+export const setAuthControllerDependencies = (
+  overrides: Partial<AuthControllerDependencies>,
+): void => {
+  Object.assign(dependencies, overrides);
+};
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -240,6 +255,50 @@ export const updateProfile = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to update user profile',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const deleteAccount = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const firebaseUid = user?.uid;
+
+    if (!firebaseUid) {
+      ResponseHandler.unauthorized(
+        res,
+        'User not authenticated',
+        'Authentication required',
+      );
+      return;
+    }
+
+    // Attempt deletion and always return a successful response with counts.
+    // AuthService will attempt to delete the Firebase Auth user and then
+    // remove any Firestore documents. If no Firestore profile exists, the
+    // service will still return counts (possibly zeros).
+    const deletedData = await dependencies.authService.deleteAccount(firebaseUid);
+
+    const result = deletedData ?? {
+      deletedUserProfiles: 0,
+      deletedProducts: 0,
+      deletedOrders: 0,
+      deletedShipments: 0,
+    };
+
+    ResponseHandler.success(
+      res,
+      result,
+      'User account and related Firestore documents deleted successfully',
+    );
+  } catch (err) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to delete user account',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }
