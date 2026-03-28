@@ -1,5 +1,6 @@
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
+import { stripe } from '../../../shared/config/stripeConfig';
 
 /**
  * Service that coordinates between the User repository and the Payment repository.
@@ -21,7 +22,7 @@ export class PaymentService {
     amount: number
   ) {
     // Fetch user to obtain email
-    const user = await this.userRepo.getByFirebaseUid(firebaseUid);
+    const user = await this.userRepo.getById(firebaseUid);
     if (!user) {
       throw new Error('User not found');
     }
@@ -29,5 +30,32 @@ export class PaymentService {
 
     // Delegate to the payment repository which handles Stripe logic
     return await this.paymentRepo.createPaymentIntentForUser(email, amount);
+  }
+
+  async verifySucceededPaymentIntentForUser(
+    firebaseUid: string,
+    paymentIntentId: string,
+    expectedAmount: number
+  ) {
+    const user = await this.userRepo.getById(firebaseUid);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'succeeded') {
+      throw new Error('Payment has not succeeded');
+    }
+
+    if (paymentIntent.amount !== expectedAmount) {
+      throw new Error('Payment amount does not match order amount');
+    }
+
+    if (paymentIntent.receipt_email && paymentIntent.receipt_email !== user.email) {
+      throw new Error('Payment does not belong to the authenticated user');
+    }
+
+    return paymentIntent;
   }
 }

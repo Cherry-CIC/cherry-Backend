@@ -20,7 +20,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
         // Create user profile in Firestore
         const userProfileData: any = {
-            firebaseUid: userRecord.uid,
+            id: userRecord.uid,
             email,
             displayName
         };
@@ -65,8 +65,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         const userCredential = await signInWithEmailAndPassword(clientAuth, email, password);
         const firebaseUid = userCredential.user.uid;
         
-        const userProfile = await userRepo.getByFirebaseUid(firebaseUid);
-        console.log(userProfile);
+        const userProfile = await userRepo.getById(firebaseUid);
 
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
@@ -110,7 +109,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
     try {
         const user = (req as any).user;
-        const userProfile = await userRepo.getByFirebaseUid(user.uid);
+        const userProfile = await userRepo.getById(user.uid);
         
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
@@ -135,7 +134,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         });
 
         // Update user profile in Firestore
-        const userProfile = await userRepo.getByFirebaseUid(user.uid);
+        const userProfile = await userRepo.getById(user.uid);
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
             return;

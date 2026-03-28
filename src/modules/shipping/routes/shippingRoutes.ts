@@ -4,21 +4,230 @@ import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { validateRequest } from '../../../shared/middleware/validateRequest';
 import {
   createShipment,
+  getCheckoutShippingOptions,
+  getPickupPoints,
   getShipmentStatus,
   getShippingLabel,
   getShippingMethods,
   cancelShipment,
   handleSendcloudWebhook,
   getAllShipments,
-  getPickupPoints,
 } from '../controllers/shippingController';
 import {
+  checkoutShippingOptionsQueryValidator,
   createShipmentValidator,
   orderIdParamValidator,
+  pickupPointsQueryValidator,
   shipmentStatusQueryValidator,
 } from '../validators/shippingValidator';
 
 const router = Router();
+
+/**
+ * @swagger
+ * /api/shipping/options:
+ *   get:
+ *     summary: Get checkout shipping options for a destination and cart context
+ *     tags: [Shipping]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "GB"
+ *       - in: query
+ *         name: postalCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "SW1A 1AA"
+ *       - in: query
+ *         name: weight
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           example: 2500
+ *         description: Total cart weight in grams
+ *       - in: query
+ *         name: value
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "45.90"
+ *         description: Total cart value in decimal currency format
+ *     responses:
+ *       200:
+ *         description: Checkout shipping options retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     options:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *                           deliveryType:
+ *                             type: string
+ *                             enum: [home, pickup_point]
+ *                           deliveryMethodType:
+ *                             type: string
+ *                           price:
+ *                             type: string
+ *                             nullable: true
+ *                           currency:
+ *                             type: string
+ *                             nullable: true
+ *                           carrier:
+ *                             type: string
+ *                             nullable: true
+ *                           checkoutIdentifier:
+ *                             type: string
+ *                             nullable: true
+ *       400:
+ *         description: Invalid query parameters
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+  '/options',
+  authMiddleware,
+  validateRequest(checkoutShippingOptionsQueryValidator, 'query'),
+  getCheckoutShippingOptions
+);
+
+/**
+ * @swagger
+ * /api/shipping/pickup-points:
+ *   get:
+ *     summary: Get available pickup points for a destination
+ *     tags: [Shipping]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "GB"
+ *       - in: query
+ *         name: postalCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "SW1A 1AA"
+ *       - in: query
+ *         name: city
+ *         required: false
+ *         schema:
+ *           type: string
+ *           example: "London"
+ *       - in: query
+ *         name: address
+ *         required: false
+ *         schema:
+ *           type: string
+ *           example: "10 High Street"
+ *       - in: query
+ *         name: houseNumber
+ *         required: false
+ *         schema:
+ *           type: string
+ *           example: "10"
+ *       - in: query
+ *         name: weight
+ *         required: false
+ *         schema:
+ *           type: number
+ *           example: 2.5
+ *         description: Parcel weight in kilograms if carrier filtering depends on it
+ *       - in: query
+ *         name: carrier
+ *         required: false
+ *         schema:
+ *           type: string
+ *           example: "postnl"
+ *     responses:
+ *       200:
+ *         description: Pickup points retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     pickupPoints:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           addressLine1:
+ *                             type: string
+ *                           city:
+ *                             type: string
+ *                           postalCode:
+ *                             type: string
+ *                           country:
+ *                             type: string
+ *                           carrier:
+ *                             type: string
+ *                             nullable: true
+ *                           distanceMeters:
+ *                             type: number
+ *                             nullable: true
+ *                           latitude:
+ *                             type: string
+ *                             nullable: true
+ *                           longitude:
+ *                             type: string
+ *                             nullable: true
+ *                           openTomorrow:
+ *                             type: boolean
+ *                           openUpcomingWeek:
+ *                             type: boolean
+ *       400:
+ *         description: Invalid query parameters
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+  '/pickup-points',
+  authMiddleware,
+  validateRequest(pickupPointsQueryValidator, 'query'),
+  getPickupPoints
+);
 
 /**
  * @swagger
@@ -121,6 +330,18 @@ router.get(
  *         description: Shipping methods retrieved
  */
 router.get('/methods', authMiddleware, getShippingMethods);
+
+/**
+ * @swagger
+ * /api/shipping/methods-test:
+ *   get:
+ *     summary: Get available shipping methods (TEST - No Auth Required)
+ *     tags: [Shipping]
+ *     responses:
+ *       200:
+ *         description: Shipping methods retrieved
+ */
+router.get('/methods-test', getShippingMethods);
 
 /**
  * @swagger
@@ -234,9 +455,40 @@ router.get('/pickup-points', authMiddleware, getPickupPoints);
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - action
+ *               - parcel
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 example: "parcel_status_changed"
+ *               timestamp:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: number
+ *               parcel:
+ *                 type: object
+ *                 required:
+ *                   - id
+ *                 properties:
+ *                   id:
+ *                     type: number
+ *                   tracking_number:
+ *                     type: string
+ *                     nullable: true
+ *                   tracking_url:
+ *                     type: string
+ *                     nullable: true
+ *                   status:
+ *                     type: object
+ *                     properties:
+ *                       message:
+ *                         type: string
  *     responses:
  *       200:
  *         description: Webhook received
+ *       400:
+ *         description: Invalid webhook payload
  */
 router.post('/webhook', handleSendcloudWebhook);
 

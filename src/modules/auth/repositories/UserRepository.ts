@@ -19,36 +19,35 @@ export class UserRepository {
         });
     }
 
-    async getById(id: string): Promise<User | null> {
-        const doc = await this.db.collection(this.collectionName).doc(id).get();
-        if (!doc.exists) {
-            return null;
-        }
-        const data = doc.data()!;
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-        } as User;
+  async getById(id: string): Promise<User | null> {
+    const querySnap = await this.db
+      .collection(this.collectionName)
+      .where("id", "==", id)
+      .limit(1)
+      .get();
+
+    if (querySnap.empty) {
+      return null;
     }
 
-    async getByFirebaseUid(firebaseUid: string): Promise<User | null> {
-        const snapshot = await this.db.collection(this.collectionName).where('id', '==', firebaseUid).get();
-        if (snapshot.empty) {
-            return null;
-        }
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-        } as User;
-    }
+    const doc = querySnap.docs[0];
+    const data = doc.data()!;
 
-    async getByEmail(email: string): Promise<User | null> {
+    return {
+      id: doc.id,
+      ...data,
+      createdAt:
+        data.createdAt instanceof Timestamp
+          ? data.createdAt.toDate()
+          : data.createdAt,
+      updatedAt:
+        data.updatedAt instanceof Timestamp
+          ? data.updatedAt.toDate()
+          : data.updatedAt,
+    } as User;
+  }
+
+  async getByEmail(email: string): Promise<User | null> {
         const snapshot = await this.db.collection(this.collectionName).where('email', '==', email).get();
         if (snapshot.empty) {
             return null;

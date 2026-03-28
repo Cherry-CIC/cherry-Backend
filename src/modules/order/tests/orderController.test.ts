@@ -1,211 +1,176 @@
-import { Request, Response } from 'express';
+const mockGetUserById = jest.fn();
+const mockVerifySucceededPaymentIntentForUser = jest.fn();
+const mockCreateOrder = jest.fn();
+const mockUpdateOrder = jest.fn();
+const mockCreateShipmentForPaidOrder = jest.fn();
+
+jest.mock('../../auth/repositories/UserRepository', () => ({
+  UserRepository: jest.fn().mockImplementation(() => ({
+    getById: mockGetUserById,
+  })),
+}));
+
+jest.mock('../repositories/OrderRepository', () => ({
+  OrderRepository: jest.fn().mockImplementation(() => ({
+    createOrder: mockCreateOrder,
+    updateOrder: mockUpdateOrder,
+  })),
+}));
+
+jest.mock('../../payment/services/PaymentService', () => ({
+  PaymentService: jest.fn().mockImplementation(() => ({
+    verifySucceededPaymentIntentForUser: mockVerifySucceededPaymentIntentForUser,
+  })),
+}));
+
+jest.mock('../../shipping/services/ShipmentService', () => ({
+  ShipmentService: jest.fn().mockImplementation(() => ({
+    createShipmentForPaidOrder: mockCreateShipmentForPaidOrder,
+  })),
+}));
+
 import { createOrder } from '../controllers/orderController';
 
-// Mock Firebase config
-jest.mock('../../../shared/config/firebaseConfig', () => ({
-  admin: {
-    auth: jest.fn().mockReturnValue({ verifyIdToken: jest.fn() }),
-  },
-  firestore: {
-    collection: jest.fn(),
-  },
-}));
-
-// Mock Sendcloud config (so SendcloudService constructor doesn't throw)
-jest.mock('../../../shared/config/sendcloudConfig', () => ({
-  sendcloudConfig: {
-    publicKey: 'test-pub',
-    secretKey: 'test-sec',
-    apiUrl: 'https://panel.sendcloud.sc/api/v2',
-  },
-}));
-
-// Mock dependencies
-jest.mock('../repositories/OrderRepository');
-jest.mock('../../auth/repositories/UserRepository');
-jest.mock('../../shipping/services/SendcloudService');
-jest.mock('../../shipping/repositories/ShipmentRepository');
-
-import { OrderRepository } from '../repositories/OrderRepository';
-import { UserRepository } from '../../auth/repositories/UserRepository';
-import { SendcloudService } from '../../shipping/services/SendcloudService';
-import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
-
-const makeMockRes = () => {
-  const res: Partial<Response> = {
-    status: jest.fn().mockReturnThis(),
-    json: jest.fn().mockReturnThis(),
-  };
-  return res as Response;
+const createResponse = () => {
+  const res: any = {};
+  res.status = jest.fn().mockReturnValue(res);
+  res.json = jest.fn().mockReturnValue(res);
+  return res;
 };
 
-const makeMockReq = (body: object, uid = 'user-uid'): Request =>
-  ({
-    user: { uid } as any,
-    body,
-  }) as any;
-
-describe('createOrder controller – delivery method branching', () => {
-  const mockSavedOrder = {
-    id: 'order-123',
-    userId: 'user-uid',
-    amount: 5000,
-    createdAt: new Date(),
+describe('orderController.createOrder', () => {
+  const payload = {
+    amount: 2599,
+    paymentIntentId: 'pi_123',
+    productId: 'product-1',
+    productName: 'Winter Coat',
+    deliveryType: 'home' as const,
+    shippingOptionId: '12345',
+    shippingOptionName: 'Home delivery',
+    shippingOptionPrice: '3.99',
+    shippingCarrier: 'evri',
+    shippingWeight: 2500,
+    shipping: {
+      name: 'Jane Doe',
+      address: {
+        line1: '10 High Street',
+        city: 'London',
+        postal_code: 'SW1A 1AA',
+        country: 'GB',
+      },
+    },
   };
-  const mockParcel = {
-    id: 42,
-    tracking_number: 'TN-001',
-    tracking_url: 'https://track.me',
-    carrier: { name: 'DHL' },
-  };
-  const mockShipment = { id: 'shipment-abc' };
 
   beforeEach(() => {
     jest.clearAllMocks();
-
-    // UserRepository always resolves a valid user
-    (UserRepository.prototype.getByFirebaseUid as jest.Mock).mockResolvedValue({
-      email: 'test@example.com',
+    mockGetUserById.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      displayName: 'Jane Doe',
     });
-
-    // OrderRepository always creates successfully
-    (OrderRepository.prototype.createOrder as jest.Mock).mockResolvedValue(
-      mockSavedOrder,
-    );
-    (
-      OrderRepository.prototype.updateOrderTracking as jest.Mock
-    ).mockResolvedValue(undefined);
-
-    // SendcloudService.createParcel resolves with a parcel
-    (SendcloudService.prototype.createParcel as jest.Mock).mockResolvedValue(
-      mockParcel,
-    );
-
-    // ShipmentRepository.createShipment resolves with a shipment
-    (
-      ShipmentRepository.prototype.createShipment as jest.Mock
-    ).mockResolvedValue(mockShipment);
+    mockVerifySucceededPaymentIntentForUser.mockResolvedValue({
+      id: 'pi_123',
+      status: 'succeeded',
+    });
   });
 
-  it('calls SendcloudService.createParcel when deliveryMethod is "ship_to_home"', async () => {
-    const req = makeMockReq({
-      amount: 5000,
-      deliveryMethod: 'ship_to_home',
-      shipping: {
-        name: 'Jane Doe',
-        address: {
-          line1: '1 High St',
-          city: 'London',
-          postal_code: 'SW1A1AA',
-          country: 'GB',
-        },
+  it('creates a paid order and shipment', async () => {
+    mockCreateOrder.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'user@example.com',
+      ...payload,
+      paymentStatus: 'succeeded',
+      shipmentStatus: 'pending',
+      status: 'completed',
+      createdAt: new Date(),
+    });
+    mockCreateShipmentForPaidOrder.mockResolvedValue({
+      shipment: {
+        id: 'shipment-1',
+        status: 'announced',
+      },
+      sendcloudParcel: {
+        id: 99,
       },
     });
-    const res = makeMockRes();
 
-    await createOrder(req, res);
-
-    expect(SendcloudService.prototype.createParcel).toHaveBeenCalledTimes(1);
-    expect(ShipmentRepository.prototype.createShipment).toHaveBeenCalledTimes(
-      1,
-    );
-    expect(OrderRepository.prototype.updateOrderTracking).toHaveBeenCalledWith(
-      mockSavedOrder.id,
-      mockParcel.tracking_number,
-      mockShipment.id,
-    );
-  });
-
-  it('does NOT call SendcloudService.createParcel when deliveryMethod is "pickup_point"', async () => {
-    const req = makeMockReq({
-      amount: 5000,
-      deliveryMethod: 'pickup_point',
-      courier: 'dhl',
-      pickupPointId: '12345',
-    });
-    const res = makeMockRes();
-
-    await createOrder(req, res);
-
-    expect(SendcloudService.prototype.createParcel).not.toHaveBeenCalled();
-    expect(ShipmentRepository.prototype.createShipment).not.toHaveBeenCalled();
-  });
-
-  it('does NOT call SendcloudService.createParcel when no deliveryMethod is provided', async () => {
-    const req = makeMockReq({
-      amount: 5000,
-      shipping: {
-        address: {
-          line1: '1 High St',
-          city: 'London',
-          postal_code: 'SW1A1AA',
-          country: 'GB',
-        },
+    const req: any = {
+      user: {
+        uid: 'user-1',
       },
-    });
-    const res = makeMockRes();
+      body: payload,
+    };
+    const res = createResponse();
 
     await createOrder(req, res);
 
-    expect(SendcloudService.prototype.createParcel).not.toHaveBeenCalled();
+    expect(mockVerifySucceededPaymentIntentForUser).toHaveBeenCalledWith(
+      'user-1',
+      'pi_123',
+      2599,
+    );
+    expect(mockCreateOrder).toHaveBeenCalled();
+    expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
+      shipmentId: 'shipment-1',
+      shipmentStatus: 'announced',
+    });
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 
-  it('persists deliveryMethod and shippingProvider on the order', async () => {
-    const req = makeMockReq({
-      amount: 2500,
-      deliveryMethod: 'pickup_point',
-      courier: 'ups',
-      pickupPointId: '999',
+  it('returns 202 when shipment creation fails after order creation', async () => {
+    mockCreateOrder.mockResolvedValue({
+      id: 'order-2',
+      userId: 'user-1',
+      email: 'user@example.com',
+      ...payload,
+      paymentStatus: 'succeeded',
+      shipmentStatus: 'pending',
+      status: 'completed',
+      createdAt: new Date(),
     });
-    const res = makeMockRes();
+    mockCreateShipmentForPaidOrder.mockRejectedValue(
+      new Error('Sendcloud unavailable'),
+    );
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payload,
+    };
+    const res = createResponse();
 
     await createOrder(req, res);
 
-    expect(OrderRepository.prototype.createOrder).toHaveBeenCalledWith(
+    expect(mockUpdateOrder).toHaveBeenCalledWith('order-2', {
+      shipmentStatus: 'pending',
+    });
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryMethod: 'pickup_point',
-        shippingProvider: 'sendcloud',
-        courier: 'ups',
-        pickupPointId: '999',
+        success: true,
+        message: 'Order created, shipment pending',
       }),
     );
   });
 
-  it('still returns 200 when Sendcloud parcel creation fails (order is safe)', async () => {
-    (SendcloudService.prototype.createParcel as jest.Mock).mockRejectedValue(
-      new Error('Sendcloud is down'),
+  it('returns 400 when payment verification fails', async () => {
+    mockVerifySucceededPaymentIntentForUser.mockRejectedValue(
+      new Error('Payment has not succeeded'),
     );
 
-    const req = makeMockReq({
-      amount: 5000,
-      deliveryMethod: 'ship_to_home',
-      shipping: {
-        address: {
-          line1: '1 High St',
-          city: 'London',
-          postal_code: 'SW1A1AA',
-          country: 'GB',
-        },
+    const req: any = {
+      user: {
+        uid: 'user-1',
       },
-    });
-    const res = makeMockRes();
+      body: payload,
+    };
+    const res = createResponse();
 
     await createOrder(req, res);
 
-    // Order should still be saved; the shipment failure is swallowed
-    expect(OrderRepository.prototype.createOrder).toHaveBeenCalledTimes(1);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true }),
-    );
-  });
-
-  it('returns 401 when user is not authenticated', async () => {
-    const req = { user: null, body: { amount: 5000 } } as any;
-    const res = makeMockRes();
-
-    await createOrder(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(OrderRepository.prototype.createOrder).not.toHaveBeenCalled();
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
   });
 });

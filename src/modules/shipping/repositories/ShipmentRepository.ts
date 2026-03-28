@@ -157,6 +157,11 @@ export class ShipmentRepository {
     return {
       id,
       orderId: data.orderId,
+      deliveryType: data.deliveryType,
+      shippingOptionId: data.shippingOptionId,
+      provider: data.provider,
+      checkoutIdentifier: data.checkoutIdentifier,
+      pickupPoint: data.pickupPoint,
       sendcloudId: data.sendcloudId,
       trackingNumber: data.trackingNumber,
       trackingUrl: data.trackingUrl,
