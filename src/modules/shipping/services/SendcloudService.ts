@@ -1,22 +1,24 @@
 import axios from 'axios';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
+import { SendcloudParcel, SendcloudShippingMethod } from '../models/Shipment';
 import {
-  SendcloudParcel,
-  SendcloudPickupPoint,
-  SendcloudShippingMethod,
-} from '../models/Shipment';
+  CheckoutShippingOptionsQuery,
+  PickupPointsQuery,
+} from './CheckoutShippingService';
 
-/**
- * Service for interacting with the Sendcloud API
- * Handles parcel creation, tracking, label generation, shipping methods,
- * and pickup-point (service-point) lookups.
- */
 export class SendcloudService {
-  private readonly client: any;
-  private readonly servicePointsClient: any;
+  private client: any;
+  private dynamicCheckoutClient: any;
+  private servicePointsClient: any;
 
   constructor() {
-    const { publicKey, secretKey, apiUrl } = sendcloudConfig;
+    const {
+      publicKey,
+      secretKey,
+      apiUrl,
+      dynamicCheckoutApiUrl,
+      servicePointsApiUrl,
+    } = sendcloudConfig;
 
     if (!publicKey || !secretKey) {
       throw new Error(
@@ -33,7 +35,32 @@ export class SendcloudService {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 30000, // 30 seconds
+      timeout: 30000,
+    });
+
+    this.dynamicCheckoutClient = axios.create({
+      baseURL: dynamicCheckoutApiUrl,
+      auth: {
+        username: publicKey,
+        password: secretKey,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    });
+
+    this.servicePointsClient = axios.create({
+      baseURL: servicePointsApiUrl,
+      auth: {
+        username: publicKey,
+        password: secretKey,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      timeout: 30000,
     });
     this.servicePointsClient = axios.create({
       baseURL:
@@ -50,11 +77,6 @@ export class SendcloudService {
     });
   }
 
-  /**
-   * Create a parcel (shipment) in Sendcloud
-   * @param parcelData - Parcel information including address, weight, etc.
-   * @returns Created parcel from Sendcloud
-   */
   async createParcel(parcelData: any): Promise<SendcloudParcel> {
     try {
       const response = await this.client.post('/parcels', {
@@ -70,11 +92,6 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Get parcel details by Sendcloud parcel ID
-   * @param parcelId - Sendcloud parcel ID
-   * @returns Parcel details
-   */
   async getParcel(parcelId: number): Promise<SendcloudParcel> {
     try {
       const response = await this.client.get(`/parcels/${parcelId}`);
@@ -88,10 +105,6 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Get all available shipping methods
-   * @returns List of shipping methods
-   */
   async getShippingMethods(): Promise<SendcloudShippingMethod[]> {
     try {
       const response = await this.client.get('/shipping_methods');
@@ -105,11 +118,100 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Cancel a parcel
-   * @param parcelId - Sendcloud parcel ID
-   * @returns Response from Sendcloud
-   */
+  async getCheckoutDeliveryOptions(
+    query: CheckoutShippingOptionsQuery,
+  ): Promise<any[]> {
+    const { checkoutConfigurationId, senderCountry } = sendcloudConfig;
+
+    if (!checkoutConfigurationId) {
+      throw new Error(
+        'Sendcloud checkout configuration is missing. Please set SENDCLOUD_CHECKOUT_CONFIGURATION_ID.',
+      );
+    }
+
+    if (!senderCountry) {
+      throw new Error(
+        'Sendcloud sender country is missing. Please set SENDCLOUD_SENDER_COUNTRY.',
+      );
+    }
+
+    try {
+      const response = await this.dynamicCheckoutClient.get(
+        `/checkout/configurations/${checkoutConfigurationId}/delivery-options`,
+        {
+          params: {
+            weight_value: query.weight,
+            total_order_value: query.value,
+            from_country_code: senderCountry,
+            to_country_code: query.country,
+            to_postal_code: query.postalCode,
+            checkout_identifier_type: 'shipping_option_code',
+          },
+        },
+      );
+
+      return response.data?.delivery_options || [];
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        JSON.stringify(error.response?.data) ||
+        error.message;
+      throw new Error(`Sendcloud API Error: ${errorMessage}`);
+    }
+  }
+
+  async getServicePoints(query: PickupPointsQuery): Promise<any[]> {
+    try {
+      const response = await this.servicePointsClient.get('/service-points', {
+        params: {
+          access_token: sendcloudConfig.publicKey,
+          country: query.country,
+          postal_code: query.postalCode,
+          city: query.city,
+          address: query.address,
+          house_number: query.houseNumber,
+          weight: query.weight,
+          carrier: query.carrier,
+        },
+      });
+
+      return response.data || [];
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.message;
+      throw new Error(`Sendcloud API Error: ${errorMessage}`);
+    }
+  }
+
+  async getPickupPoints(postcode: string, courier?: string): Promise<any[]> {
+    try {
+      const params: Record<string, string> = {
+        country: 'GB',
+        postcode,
+      };
+
+      if (courier) {
+        params.carrier = courier;
+      }
+
+      const response = await this.servicePointsClient.get('/service-points', {
+        params,
+      });
+
+      return response.data || [];
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.message;
+      throw new Error(`Sendcloud API Error (pickup points): ${errorMessage}`);
+    }
+  }
+
   async cancelParcel(parcelId: number): Promise<any> {
     try {
       const response = await this.client.post(`/parcels/${parcelId}/cancel`);
@@ -123,11 +225,6 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Get label PDF URL for a parcel
-   * @param parcelId - Sendcloud parcel ID
-   * @returns Label PDF URL
-   */
   async getLabelUrl(parcelId: number): Promise<string> {
     try {
       const response = await this.client.get(`/labels/${parcelId}`);
@@ -145,14 +242,9 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Get tracking information for a parcel
-   * @param trackingNumber - Tracking number
-   * @returns Tracking information
-   */
   async getTrackingInfo(trackingNumber: string): Promise<any> {
     try {
-      const response = await this.client.get(`/parcels`, {
+      const response = await this.client.get('/parcels', {
         params: {
           tracking_number: trackingNumber,
         },
@@ -167,13 +259,10 @@ export class SendcloudService {
     }
   }
 
-  /**
-   * Update parcel information
-   * @param parcelId - Sendcloud parcel ID
-   * @param updates - Fields to update
-   * @returns Updated parcel
-   */
-  async updateParcel(parcelId: number, updates: any): Promise<SendcloudParcel> {
+  async updateParcel(
+    parcelId: number,
+    updates: any,
+  ): Promise<SendcloudParcel> {
     try {
       const response = await this.client.put(`/parcels/${parcelId}`, {
         parcel: updates,

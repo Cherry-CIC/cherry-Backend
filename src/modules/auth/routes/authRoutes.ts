@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import {
-    register,
-    login,
-    getProfile,
-    updateProfile,
-    syncProfile
+  register,
+  login,
+  getProfile,
+  updateProfile,
+  syncProfile,
+  deleteAccount,
 } from '../controllers/authController';
 import { validateRegister, validateLogin } from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
@@ -55,7 +56,7 @@ const router = Router();
  *         photoURL: "https://example.com/photo.jpg"
  *         createdAt: "2023-01-01T00:00:00.000Z"
  *         updatedAt: "2023-01-01T00:00:00.000Z"
- *     
+ *
  *     AuthResponse:
  *       type: object
  *       properties:
@@ -279,5 +280,43 @@ router.get('/profile', authMiddleware, getProfile);
  *         description: User profile not found
  */
 router.put('/profile', authMiddleware, updateProfile);
+
+/**
+ * @swagger
+ * /api/auth/account:
+ *   delete:
+ *     summary: Delete the authenticated user's account and related Firestore documents
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deletedUserProfiles:
+ *                       type: integer
+ *                     deletedProducts:
+ *                       type: integer
+ *                     deletedOrders:
+ *                       type: integer
+ *                     deletedShipments:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User profile not found
+ */
+router.delete('/account', authMiddleware, deleteAccount);
 
 export default router;

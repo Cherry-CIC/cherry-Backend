@@ -1,37 +1,56 @@
+export type DeliveryType = 'home' | 'pickup_point';
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed';
+export type ShipmentStatus =
+  | 'not_created'
+  | 'pending'
+  | 'announced'
+  | 'en_route'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'exception'
+  | 'cancelled';
+
+export interface ShippingAddress {
+  line1: string;
+  line2?: string;
+  city: string;
+  state?: string;
+  postal_code: string;
+  country: string;
+}
+
+export interface PickupPointSelection {
+  id: string;
+  name: string;
+  addressLine1: string;
+  city: string;
+  postalCode: string;
+  country: string;
+  carrier?: string | null;
+}
+
 export interface Order {
   id: string;
-  userId: string; // ID of the user who placed the order
-  email?: string; // Email of the user (stored for reporting purposes)
-  amount: number; // amount in the smallest currency unit (e.g., pence)
+  userId: string;
+  email?: string;
+  amount: number;
   productId?: string;
   productName?: string;
-  shipping?: {
-    address: {
-      line1?: string;
-      line2?: string;
-      city?: string;
-      state?: string;
-      postal_code?: string;
-      country?: string;
-    };
-    name?: string;
+  deliveryType: DeliveryType;
+  shippingOptionId: string;
+  shippingOptionName?: string;
+  shippingOptionPrice?: string;
+  shippingCarrier?: string;
+  shippingWeight: number;
+  shipping: {
+    address: ShippingAddress;
+    name: string;
   };
-  /**
-   * How this order should be delivered.
-   * - "ship_to_home"  → Sendcloud creates a parcel and ships to the provided address.
-   * - "pickup_point"  → Customer collects from a Sendcloud service point; parcel creation
-   *                     is deferred until the pickup-point ID and courier are confirmed.
-   */
-  deliveryMethod?: 'ship_to_home' | 'pickup_point';
-  /** Shipping provider – "sendcloud" for now; structured so a future provider can be added. */
-  shippingProvider?: 'sendcloud';
-  /** Courier slug used for pickup-point orders (e.g. "dhl", "ups"). */
-  courier?: string;
-  /** Sendcloud service-point ID chosen by the customer (pickup_point orders only). */
-  pickupPointId?: string;
-  /** Populated once the Sendcloud parcel is created. */
-  trackingNumber?: string;
-  status?: 'completed' | 'pending' | 'failed'; // Order status for tracking
-  shipmentId?: string; // Reference to shipment document
+  pickupPoint?: PickupPointSelection;
+  paymentIntentId?: string;
+  paymentStatus: PaymentStatus;
+  status?: 'completed' | 'pending' | 'failed';
+  shipmentStatus: ShipmentStatus;
+  shipmentId?: string;
   createdAt: Date;
 }

@@ -4,6 +4,13 @@ import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { SendcloudService } from '../services/SendcloudService';
 import { ShipmentRepository } from '../repositories/ShipmentRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
+import { CheckoutShippingService } from '../services/CheckoutShippingService';
+import { ShipmentService } from '../services/ShipmentService';
+import { mapSendcloudStatusToShipmentStatus } from '../utils/statusMapper';
+import { sendcloudWebhookValidator } from '../validators/shippingValidator';
+
+const checkoutShippingService = new CheckoutShippingService();
+const shipmentService = new ShipmentService();
 
 const getSendcloudWebhookSecret = (): string | null =>
   process.env.SENDCLOUD_WEBHOOK_SECRET || process.env.SENDCLOUD_SECRET_KEY || null;
@@ -41,10 +48,8 @@ export const createShipment = async (
       return;
     }
 
-    // Get order details
     const orderRepo = new OrderRepository();
-    const orders = await orderRepo.getAllOrders();
-    const order = orders.find((o) => o.id === orderId);
+    const order = await orderRepo.getOrderById(orderId);
 
     if (!order) {
       ResponseHandler.notFound(
@@ -64,52 +69,20 @@ export const createShipment = async (
       return;
     }
 
-    // Check if shipment already exists
-    const shipmentRepo = new ShipmentRepository();
-    const existingShipment = await shipmentRepo.getShipmentByOrderId(orderId);
-
-    if (existingShipment) {
-      ResponseHandler.badRequest(
-        res,
-        'Shipment exists',
-        'A shipment already exists for this order',
-      );
-      return;
-    }
-
-    // Create parcel in Sendcloud
-    const sendcloudService = new SendcloudService();
-    const parcelData: any = {
-      name: order.shipping.name || 'Customer',
-      address: order.shipping.address.line1,
-      address_2: order.shipping.address.line2 || '',
-      city: order.shipping.address.city,
-      postal_code: order.shipping.address.postal_code,
-      country: order.shipping.address.country || 'GB',
-      email: order.email,
-      order_number: order.id,
-      weight: weight || 1000, // Default 1kg if not provided
+    const orderForShipment = {
+      ...order,
+      shippingWeight: weight || order.shippingWeight,
+      shippingOptionId: shippingMethodId
+        ? String(shippingMethodId)
+        : order.shippingOptionId,
     };
 
-    // Add shipping method if provided
-    if (shippingMethodId) {
-      parcelData.shipment = { id: shippingMethodId };
-    }
+    const { shipment } =
+      await shipmentService.createShipmentForPaidOrder(orderForShipment);
 
-    const sendcloudParcel = await sendcloudService.createParcel(parcelData);
-
-    // Save to Firestore
-    const shipment = await shipmentRepo.createShipment({
-      orderId: order.id,
-      sendcloudId: sendcloudParcel.id,
-      trackingNumber: sendcloudParcel.tracking_number,
-      trackingUrl: sendcloudParcel.tracking_url,
-      carrier: sendcloudParcel.carrier?.name,
-      status: 'announced',
-      labelUrl: sendcloudParcel.label?.label_printer,
-      parcel: parcelData,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    await orderRepo.updateOrder(order.id, {
+      shipmentId: shipment.id,
+      shipmentStatus: shipment.status,
     });
 
     ResponseHandler.success(res, { shipment }, 'Shipment created successfully');
@@ -123,10 +96,6 @@ export const createShipment = async (
   }
 };
 
-/**
- * Get shipment status by order ID
- * GET /api/shipping/shipment/:orderId
- */
 export const getShipmentStatus = async (
   req: Request,
   res: Response,
@@ -146,22 +115,11 @@ export const getShipmentStatus = async (
       return;
     }
 
-    // Optionally fetch latest status from Sendcloud
     if (shipment.sendcloudId) {
       try {
         const sendcloudService = new SendcloudService();
         const parcel = await sendcloudService.getParcel(shipment.sendcloudId);
-
-        // Update local record with latest info
-        const statusMsg = parcel.status?.message?.toLowerCase() || 'pending';
-        let status: any = 'en_route';
-
-        if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery'))
-          status = 'out_for_delivery';
-        else if (statusMsg.includes('exception')) status = 'exception';
-        else if (statusMsg.includes('cancelled')) status = 'cancelled';
-        else if (statusMsg.includes('announced')) status = 'announced';
+        const status = mapSendcloudStatusToShipmentStatus(parcel.status?.message);
 
         await shipmentRepo.updateShipment(shipment.id, {
           status,
@@ -174,7 +132,6 @@ export const getShipmentStatus = async (
         shipment.trackingUrl = parcel.tracking_url;
       } catch (sendcloudErr) {
         console.error('Error fetching from Sendcloud:', sendcloudErr);
-        // Continue with local data if Sendcloud fails
       }
     }
 
@@ -193,10 +150,6 @@ export const getShipmentStatus = async (
   }
 };
 
-/**
- * Get shipping label URL for an order
- * GET /api/shipping/label/:orderId
- */
 export const getShippingLabel = async (
   req: Request,
   res: Response,
@@ -225,7 +178,6 @@ export const getShippingLabel = async (
       return;
     }
 
-    // Fetch label URL from Sendcloud
     const sendcloudService = new SendcloudService();
     const labelUrl = await sendcloudService.getLabelUrl(shipment.sendcloudId);
 
@@ -238,7 +190,6 @@ export const getShippingLabel = async (
       return;
     }
 
-    // Update shipment with label URL
     await shipmentRepo.updateShipment(shipment.id, { labelUrl });
 
     ResponseHandler.success(
@@ -260,10 +211,6 @@ export const getShippingLabel = async (
   }
 };
 
-/**
- * Get available shipping methods
- * GET /api/shipping/methods
- */
 export const getShippingMethods = async (
   req: Request,
   res: Response,
@@ -287,10 +234,69 @@ export const getShippingMethods = async (
   }
 };
 
-/**
- * Cancel a shipment
- * POST /api/shipping/cancel/:orderId
- */
+export const getCheckoutShippingOptions = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { country, postalCode, weight, value } =
+      req.query as Record<string, string>;
+
+    const options = await checkoutShippingService.getDeliveryOptions({
+      country,
+      postalCode,
+      weight: Number(weight),
+      value,
+    });
+
+    ResponseHandler.success(
+      res,
+      { options },
+      'Checkout shipping options retrieved successfully',
+    );
+  } catch (err) {
+    console.error('Error fetching checkout shipping options:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch checkout shipping options',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const getPickupPoints = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { country, postalCode, city, address, houseNumber, weight, carrier } =
+      req.query as Record<string, string>;
+
+    const pickupPoints = await checkoutShippingService.getPickupPoints({
+      country,
+      postalCode,
+      city,
+      address,
+      houseNumber,
+      weight: weight ? Number(weight) : undefined,
+      carrier,
+    });
+
+    ResponseHandler.success(
+      res,
+      { pickupPoints },
+      'Pickup points retrieved successfully',
+    );
+  } catch (err) {
+    console.error('Error fetching pickup points:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch pickup points',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
 export const cancelShipment = async (
   req: Request,
   res: Response,
@@ -319,11 +325,8 @@ export const cancelShipment = async (
       return;
     }
 
-    // Cancel in Sendcloud
     const sendcloudService = new SendcloudService();
     await sendcloudService.cancelParcel(shipment.sendcloudId);
-
-    // Update status locally
     await shipmentRepo.updateShipment(shipment.id, { status: 'cancelled' });
 
     ResponseHandler.success(
@@ -341,10 +344,6 @@ export const cancelShipment = async (
   }
 };
 
-/**
- * Webhook handler for Sendcloud status updates
- * POST /api/shipping/webhook
- */
 export const handleSendcloudWebhook = async (
   req: Request,
   res: Response,
@@ -401,16 +400,7 @@ export const handleSendcloudWebhook = async (
       const shipment = await shipmentRepo.getShipmentBySendcloudId(parcel.id);
 
       if (shipment) {
-        // Map Sendcloud status to our status
-        const statusMsg = parcel.status?.message?.toLowerCase() || '';
-        let status: any = 'en_route';
-
-        if (statusMsg.includes('delivered')) status = 'delivered';
-        else if (statusMsg.includes('out for delivery'))
-          status = 'out_for_delivery';
-        else if (statusMsg.includes('exception')) status = 'exception';
-        else if (statusMsg.includes('cancelled')) status = 'cancelled';
-        else if (statusMsg.includes('announced')) status = 'announced';
+        const status = mapSendcloudStatusToShipmentStatus(parcel.status?.message);
 
         await shipmentRepo.updateShipment(shipment.id, {
           status,
@@ -418,10 +408,13 @@ export const handleSendcloudWebhook = async (
           trackingUrl: parcel.tracking_url,
         });
 
-        console.log(`Updated shipment ${shipment.id} to status: ${status}`);
+        const orderRepo = new OrderRepository();
+        await orderRepo.updateOrder(shipment.orderId, {
+          shipmentStatus: status,
+          shipmentId: shipment.id,
+        });
 
-        // TODO: Send email notification to customer
-        // await sendTrackingUpdateEmail(order.email, status, trackingUrl);
+        console.log(`Updated shipment ${shipment.id} to status: ${status}`);
       }
     }
 
@@ -432,10 +425,6 @@ export const handleSendcloudWebhook = async (
   }
 };
 
-/**
- * Get all shipments (admin only)
- * GET /api/shipping/shipments
- */
 export const getAllShipments = async (
   req: Request,
   res: Response,
@@ -456,49 +445,6 @@ export const getAllShipments = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch shipments',
-      err instanceof Error ? err.message : 'Unknown error',
-    );
-  }
-};
-
-/**
- * Get Sendcloud pickup points (service points) near a postcode.
- * GET /api/shipping/pickup-points?postcode=SW1A1AA&courier=dhl
- *
- * Called by the Flutter checkout screen to populate the pickup-point picker.
- */
-export const getPickupPoints = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { postcode, courier } = req.query as Record<string, string>;
-
-    if (!postcode) {
-      ResponseHandler.badRequest(
-        res,
-        'Missing parameter',
-        '"postcode" query parameter is required',
-      );
-      return;
-    }
-
-    const sendcloudService = new SendcloudService();
-    const pickupPoints = await sendcloudService.getPickupPoints(
-      postcode,
-      courier,
-    );
-
-    ResponseHandler.success(
-      res,
-      { pickupPoints, count: pickupPoints.length },
-      'Pickup points retrieved successfully',
-    );
-  } catch (err) {
-    console.error('Error fetching pickup points:', err);
-    ResponseHandler.internalServerError(
-      res,
-      'Failed to fetch pickup points',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }
