@@ -3,13 +3,23 @@ import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 
 const addressSchema = Joi.object({
-  line1: Joi.string().optional(),
+  line1: Joi.string().required(),
   line2: Joi.string().optional(),
-  city: Joi.string().optional(),
+  city: Joi.string().required(),
   state: Joi.string().optional(),
-  postal_code: Joi.string().optional(),
-  country: Joi.string().optional(),
-}).optional();
+  postal_code: Joi.string().required(),
+  country: Joi.string().length(2).uppercase().required(),
+});
+
+const pickupPointSchema = Joi.object({
+  id: Joi.string().required(),
+  name: Joi.string().required(),
+  addressLine1: Joi.string().required(),
+  city: Joi.string().required(),
+  postalCode: Joi.string().required(),
+  country: Joi.string().length(2).uppercase().required(),
+  carrier: Joi.string().allow(null).optional(),
+});
 
 export const orderSchema = Joi.object({
   amount: Joi.number().integer().positive().required().messages({
@@ -20,32 +30,22 @@ export const orderSchema = Joi.object({
   }),
   productId: Joi.string().optional(),
   productName: Joi.string().optional(),
+  paymentIntentId: Joi.string().required(),
+  deliveryType: Joi.string().valid('home', 'pickup_point').required(),
+  shippingOptionId: Joi.string().required(),
+  shippingOptionName: Joi.string().optional(),
+  shippingOptionPrice: Joi.string().optional(),
+  shippingCarrier: Joi.string().optional(),
+  shippingWeight: Joi.number().integer().min(1).max(100000).required(),
   shipping: Joi.object({
-    address: addressSchema,
-    name: Joi.string().optional(),
-  }).optional(),
-  /**
-   * deliveryMethod drives what the backend does at checkout:
-   *   "ship_to_home"  → a Sendcloud parcel is created immediately
-   *   "pickup_point"  → parcel creation is deferred; pickupPointId & courier capture the intent
-   */
-  deliveryMethod: Joi.string()
-    .valid('ship_to_home', 'pickup_point')
-    .optional()
-    .messages({
-      'any.only':
-        '"deliveryMethod" must be either "ship_to_home" or "pickup_point"',
-    }),
-  /**
-   * courier slug (e.g. "dhl", "ups", "hermes") – required for pickup_point orders so the
-   * backend knows which carrier's service points to look up.
-   */
-  courier: Joi.string().optional(),
-  /**
-   * Sendcloud service-point ID selected by the user in the app's pickup-point picker.
-   * Only relevant (and expected) when deliveryMethod === "pickup_point".
-   */
-  pickupPointId: Joi.string().optional(),
+    address: addressSchema.required(),
+    name: Joi.string().required(),
+  }).required(),
+  pickupPoint: pickupPointSchema.when('deliveryType', {
+    is: 'pickup_point',
+    then: Joi.required(),
+    otherwise: Joi.forbidden(),
+  }),
 });
 
 export function validateOrder(
@@ -53,7 +53,10 @@ export function validateOrder(
   res: Response,
   next: NextFunction,
 ): void {
-  const { error } = orderSchema.validate(req.body);
+  const { error, value } = orderSchema.validate(req.body, {
+    abortEarly: true,
+    stripUnknown: true,
+  });
   if (error) {
     ResponseHandler.badRequest(
       res,
@@ -62,5 +65,6 @@ export function validateOrder(
     );
     return;
   }
+  req.body = value;
   next();
 }

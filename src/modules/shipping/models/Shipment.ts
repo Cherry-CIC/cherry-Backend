@@ -1,10 +1,17 @@
+import { DeliveryType, PickupPointSelection } from '../../order/model/Order';
+
 export interface Shipment {
   id: string;
   orderId: string;
+  deliveryType?: DeliveryType;
+  shippingOptionId?: string;
+  provider?: 'sendcloud';
+  checkoutIdentifier?: string | null;
+  pickupPoint?: PickupPointSelection;
   sendcloudId?: number;
-  trackingNumber?: string;
-  trackingUrl?: string;
-  carrier?: string;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  carrier?: string | null;
   status:
     | 'pending'
     | 'announced'
@@ -13,11 +20,7 @@ export interface Shipment {
     | 'delivered'
     | 'exception'
     | 'cancelled';
-  labelUrl?: string;
-  /** How this shipment is being delivered – mirrors Order.deliveryMethod. */
-  deliveryMethod?: 'ship_to_home' | 'pickup_point';
-  /** Sendcloud service-point ID (pickup_point shipments only). */
-  pickupPointId?: string;
+  labelUrl?: string | null;
   parcel: {
     name: string;
     address: string;
@@ -27,7 +30,7 @@ export interface Shipment {
     country: string;
     email?: string;
     telephone?: string;
-    weight: number; // in grams
+    weight: number;
     order_number: string;
   };
   createdAt: Date;
@@ -58,26 +61,4 @@ export interface SendcloudShippingMethod {
   max_weight: number;
   countries: string[];
   price: number;
-}
-
-/**
- * A Sendcloud service point (pickup location) returned by
- * GET /service-points.
- */
-export interface SendcloudPickupPoint {
-  id: number;
-  name: string;
-  street: string;
-  house_number: string;
-  city: string;
-  postal_code: string;
-  country: string;
-  latitude?: number;
-  longitude?: number;
-  /** Carrier slug, e.g. "dhl", "ups", "hermes". */
-  carrier: string;
-  /** Opening hours keyed by weekday name (0 = Monday). */
-  formatted_opening_times?: Record<string, string[]>;
-  /** Extra info provided by Sendcloud (e.g. business name at the location). */
-  extra?: Record<string, any>;
 }

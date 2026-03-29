@@ -26,11 +26,19 @@ export class UserRepository {
   }
 
   async getById(id: string): Promise<User | null> {
-    const doc = await this.db.collection(this.collectionName).doc(id).get();
-    if (!doc.exists) {
+    const querySnap = await this.db
+      .collection(this.collectionName)
+      .where("id", "==", id)
+      .limit(1)
+      .get();
+
+    if (querySnap.empty) {
       return null;
     }
+
+    const doc = querySnap.docs[0];
     const data = doc.data()!;
+
     return {
       id: doc.id,
       ...data,
@@ -50,11 +58,14 @@ export class UserRepository {
       .collection(this.collectionName)
       .where('id', '==', firebaseUid)
       .get();
+
     if (snapshot.empty) {
       return null;
     }
+
     const doc = snapshot.docs[0];
     const data = doc.data();
+
     return {
       id: doc.id,
       ...data,
@@ -74,11 +85,14 @@ export class UserRepository {
       .collection(this.collectionName)
       .where('email', '==', email)
       .get();
+
     if (snapshot.empty) {
       return null;
     }
+
     const doc = snapshot.docs[0];
     const data = doc.data();
+
     return {
       id: doc.id,
       ...data,
@@ -94,7 +108,7 @@ export class UserRepository {
   }
 
   async create(
-    user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>,
+    user: Omit<User, 'createdAt' | 'updatedAt'>,
   ): Promise<User> {
     // Filter out undefined values to prevent Firestore errors
     const cleanUser = Object.fromEntries(
@@ -168,6 +182,7 @@ export class UserRepository {
       .get();
 
     const orderIds = ordersSnapshot.docs.map((doc) => doc.id);
+
     const shipmentSnapshots = await Promise.all(
       orderIds.map((orderId) =>
         this.db.collection('shipments').where('orderId', '==', orderId).get(),
@@ -175,6 +190,7 @@ export class UserRepository {
     );
 
     const shipmentDocs = shipmentSnapshots.flatMap((snapshot) => snapshot.docs);
+
     const uniqueShipmentDocs = Array.from(
       new Map(shipmentDocs.map((doc) => [doc.id, doc])).values(),
     );
