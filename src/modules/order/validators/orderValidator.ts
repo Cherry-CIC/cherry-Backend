@@ -8,7 +8,17 @@ const addressSchema = Joi.object({
   city: Joi.string().optional(),
   state: Joi.string().optional(),
   postal_code: Joi.string().optional(),
-  country: Joi.string().optional(),
+  country: Joi.string().valid('GB').optional(),
+}).optional();
+
+const pickupPointSchema = Joi.object({
+  id: Joi.string().optional(),
+  name: Joi.string().optional(),
+  addressLine1: Joi.string().optional(),
+  city: Joi.string().optional(),
+  postalCode: Joi.string().optional(),
+  country: Joi.string().valid('GB').optional(),
+  carrier: Joi.string().optional(),
 }).optional();
 
 export const orderSchema = Joi.object({
@@ -18,8 +28,18 @@ export const orderSchema = Joi.object({
     'number.positive': `"amount" must be greater than 0`,
     'any.required': `"amount" is required`,
   }),
-  productId: Joi.string().optional(),
+  paymentIntentId: Joi.string().required().messages({
+    'string.base': `"paymentIntentId" should be a type of 'text'`,
+    'string.empty': `"paymentIntentId" cannot be empty`,
+    'any.required': `"paymentIntentId" is required`,
+  }),
+  productId: Joi.string().required().messages({
+    'string.base': `"productId" should be a type of 'text'`,
+    'string.empty': `"productId" cannot be empty`,
+    'any.required': `"productId" is required`,
+  }),
   productName: Joi.string().optional(),
+  deliveryType: Joi.string().valid('home', 'pickup_point').optional(),
   shipping: Joi.object({
     address: addressSchema,
     name: Joi.string().optional(),
@@ -46,56 +66,121 @@ export const orderSchema = Joi.object({
    * Only relevant (and expected) when deliveryMethod === "pickup_point".
    */
   pickupPointId: Joi.string().optional(),
-}).custom((value, helpers) => {
-  const shippingAddress = value.shipping?.address;
+  shippingOptionId: Joi.string().required().messages({
+    'string.base': `"shippingOptionId" should be a type of 'text'`,
+    'string.empty': `"shippingOptionId" cannot be empty`,
+    'any.required': `"shippingOptionId" is required`,
+  }),
+  shippingOptionName: Joi.string().optional(),
+  shippingOptionPrice: Joi.number().integer().min(0).optional(),
+  shippingCarrier: Joi.string().optional(),
+  shippingWeight: Joi.number().integer().positive().optional(),
+  pickupPoint: pickupPointSchema,
+})
+  .custom((value, helpers) => {
+    const shippingAddress = value.shipping?.address;
+    const deliveryType =
+      value.deliveryType ||
+      (value.deliveryMethod === 'ship_to_home' ? 'home' : value.deliveryMethod);
 
-  if (shippingAddress && !value.deliveryMethod) {
-    return helpers.error('any.custom', {
-      message:
-        '"deliveryMethod" is required when a shipping address is provided',
-    });
-  }
-
-  if (value.deliveryMethod === 'ship_to_home') {
-    if (!shippingAddress) {
+    if (!deliveryType) {
       return helpers.error('any.custom', {
         message:
-          '"shipping.address" is required when "deliveryMethod" is "ship_to_home"',
+          '"deliveryType" is required and must be either "home" or "pickup_point"',
       });
     }
 
-    const requiredAddressFields = ['line1', 'city', 'postal_code', 'country'];
-    const missingField = requiredAddressFields.find(
-      (field) => !shippingAddress[field],
-    );
-
-    if (missingField) {
-      return helpers.error('any.custom', {
-        message: `"shipping.address.${missingField}" is required when "deliveryMethod" is "ship_to_home"`,
-      });
-    }
-  }
-
-  if (value.deliveryMethod === 'pickup_point') {
-    if (!value.courier) {
+    if (
+      value.deliveryType === 'home' &&
+      value.deliveryMethod &&
+      value.deliveryMethod !== 'ship_to_home'
+    ) {
       return helpers.error('any.custom', {
         message:
-          '"courier" is required when "deliveryMethod" is "pickup_point"',
+          '"deliveryType" and "deliveryMethod" describe different delivery flows',
       });
     }
 
-    if (!value.pickupPointId) {
+    if (
+      value.deliveryType === 'pickup_point' &&
+      value.deliveryMethod &&
+      value.deliveryMethod !== 'pickup_point'
+    ) {
       return helpers.error('any.custom', {
         message:
-          '"pickupPointId" is required when "deliveryMethod" is "pickup_point"',
+          '"deliveryType" and "deliveryMethod" describe different delivery flows',
       });
     }
-  }
 
-  return value;
-}, 'delivery method validation').messages({
-  'any.custom': '{{#message}}',
-});
+    if (deliveryType === 'home') {
+      if (!shippingAddress) {
+        return helpers.error('any.custom', {
+          message:
+            '"shipping.address" is required when "deliveryType" is "home"',
+        });
+      }
+
+      const requiredAddressFields = ['line1', 'city', 'postal_code', 'country'];
+      const missingField = requiredAddressFields.find(
+        (field) => !shippingAddress[field],
+      );
+
+      if (missingField) {
+        return helpers.error('any.custom', {
+          message: `"shipping.address.${missingField}" is required when "deliveryType" is "home"`,
+        });
+      }
+
+      if (value.shippingOptionId !== 'mvp-home-delivery') {
+        return helpers.error('any.custom', {
+          message:
+            '"shippingOptionId" must be "mvp-home-delivery" when "deliveryType" is "home"',
+        });
+      }
+    }
+
+    if (deliveryType === 'pickup_point') {
+      const pickupPoint = value.pickupPoint;
+      if (!pickupPoint && !(value.pickupPointId && value.courier)) {
+        return helpers.error('any.custom', {
+          message:
+            '"pickupPoint" is required when "deliveryType" is "pickup_point"',
+        });
+      }
+
+      if (pickupPoint) {
+        const requiredPickupFields = [
+          'id',
+          'name',
+          'addressLine1',
+          'city',
+          'postalCode',
+          'country',
+        ];
+        const missingPickupField = requiredPickupFields.find(
+          (field) => !pickupPoint[field],
+        );
+
+        if (missingPickupField) {
+          return helpers.error('any.custom', {
+            message: `"pickupPoint.${missingPickupField}" is required when "deliveryType" is "pickup_point"`,
+          });
+        }
+      }
+
+      if (value.shippingOptionId !== 'mvp-pickup-point-delivery') {
+        return helpers.error('any.custom', {
+          message:
+            '"shippingOptionId" must be "mvp-pickup-point-delivery" when "deliveryType" is "pickup_point"',
+        });
+      }
+    }
+
+    return value;
+  }, 'delivery method validation')
+  .messages({
+    'any.custom': '{{#message}}',
+  });
 
 export function validateOrder(
   req: Request,

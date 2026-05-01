@@ -1,5 +1,6 @@
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
+import Stripe from 'stripe';
 
 /**
  * Service that coordinates between the User repository and the Payment repository.
@@ -13,13 +14,10 @@ export class PaymentService {
   /**
    * Creates a Stripe PaymentIntent for a user identified by Firebase UID.
    * @param firebaseUid - Firebase UID of the authenticated user.
-   * @param amount - Amount in the smallest currency unit (e.g., cents).
+   * @param amount - Amount in pence.
    * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
    */
-  async createPaymentIntentForUserByUid(
-    firebaseUid: string,
-    amount: number
-  ) {
+  async createPaymentIntentForUserByUid(firebaseUid: string, amount: number) {
     // Fetch user to obtain email
     const user = await this.userRepo.getByFirebaseUid(firebaseUid);
     if (!user) {
@@ -28,6 +26,20 @@ export class PaymentService {
     const email = user.email;
 
     // Delegate to the payment repository which handles Stripe logic
-    return await this.paymentRepo.createPaymentIntentForUser(email, amount);
+    return await this.paymentRepo.createPaymentIntentForUser(
+      email,
+      amount,
+      firebaseUid,
+    );
+  }
+
+  async getPaymentIntent(
+    paymentIntentId: string,
+  ): Promise<Stripe.PaymentIntent> {
+    return this.paymentRepo.getPaymentIntent(paymentIntentId);
+  }
+
+  async getCustomerEmail(customerId: string): Promise<string | undefined> {
+    return this.paymentRepo.getCustomerEmail(customerId);
   }
 }

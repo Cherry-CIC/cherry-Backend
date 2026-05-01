@@ -1,8 +1,12 @@
 import { Request, Response } from 'express';
+import Stripe from 'stripe';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { OrderRepository } from '../repositories/OrderRepository';
 import { Order } from '../model/Order';
+import { Product } from '../../products/model/Product';
+import { ProductRepository } from '../../products/repositories/ProductRepository';
+import { PaymentService } from '../../payment/services/PaymentService';
 import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
 import { createShippingProvider } from '../../shipping/services/ShippingProviderFactory';
 import { ShippingParcelRequest } from '../../shipping/services/ShippingProvider';
@@ -11,16 +15,102 @@ import { ShippingParcelRequest } from '../../shipping/services/ShippingProvider'
 // Private helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+type DeliveryType = 'home' | 'pickup_point';
+
+interface ShippingOption {
+  id: string;
+  deliveryType: DeliveryType;
+  deliveryMethod: 'ship_to_home' | 'pickup_point';
+  name: string;
+  pricePence: number;
+  carrier: string;
+}
+
+const MVP_SHIPPING_OPTIONS: Record<string, ShippingOption> = {
+  'mvp-home-delivery': {
+    id: 'mvp-home-delivery',
+    deliveryType: 'home',
+    deliveryMethod: 'ship_to_home',
+    name: 'MVP home delivery',
+    pricePence: 299,
+    carrier: 'evri',
+  },
+  'mvp-pickup-point-delivery': {
+    id: 'mvp-pickup-point-delivery',
+    deliveryType: 'pickup_point',
+    deliveryMethod: 'pickup_point',
+    name: 'MVP pick-up point delivery',
+    pricePence: 0,
+    carrier: 'inpost',
+  },
+};
+
+const normaliseDeliveryType = (body: any): DeliveryType | null => {
+  if (body.deliveryType === 'home' || body.deliveryMethod === 'ship_to_home') {
+    return 'home';
+  }
+
+  if (
+    body.deliveryType === 'pickup_point' ||
+    body.deliveryMethod === 'pickup_point'
+  ) {
+    return 'pickup_point';
+  }
+
+  return null;
+};
+
+const productPriceToPence = (product: Product): number => {
+  if (!Number.isFinite(product.price) || product.price <= 0) {
+    throw new Error('Product price is invalid');
+  }
+
+  // Product prices are stored in pounds in the current product catalogue.
+  return Math.round(product.price * 100);
+};
+
+const getPaymentIntentCustomerId = (customer: unknown): string | null => {
+  if (typeof customer === 'string') return customer;
+  if (customer && typeof customer === 'object' && 'id' in customer) {
+    const customerId = (customer as { id?: unknown }).id;
+    return typeof customerId === 'string' ? customerId : null;
+  }
+
+  return null;
+};
+
+const buildProductSnapshot = (product: Product): Order['productSnapshot'] => ({
+  id: product.id,
+  name: product.name,
+  charityId: product.charityId,
+  price: product.price,
+  donation: product.donation,
+});
+
+const buildPickupPoint = (pickupPoint: any): Order['pickupPoint'] => {
+  if (!pickupPoint) return undefined;
+
+  return {
+    id: pickupPoint.id,
+    name: pickupPoint.name,
+    addressLine1: pickupPoint.addressLine1,
+    city: pickupPoint.city,
+    postalCode: pickupPoint.postalCode,
+    country: pickupPoint.country || 'GB',
+    carrier: pickupPoint.carrier,
+  };
+};
+
 /**
  * Creates a Sendcloud parcel for a ship_to_home order and writes the
  * resulting tracking number back onto the saved order.
- * Errors are logged but swallowed so the order is never rolled back.
  */
 async function createShipToHomeParcel(
   savedOrder: Order,
   shipping: any,
   email: string,
-): Promise<void> {
+  weight: number,
+): Promise<{ shipmentId: string; shipmentStatus: 'announced' }> {
   const shippingProvider = createShippingProvider();
   const shipmentRepo = new ShipmentRepository();
   const orderRepo = new OrderRepository();
@@ -34,7 +124,7 @@ async function createShipToHomeParcel(
     country: shipping.address.country || 'GB',
     email,
     order_number: savedOrder.id,
-    weight: 1000, // Default 1 kg – can be customised per product
+    weight,
   };
 
   const sendcloudParcel = await shippingProvider.createParcel(parcelData);
@@ -57,11 +147,20 @@ async function createShipToHomeParcel(
       sendcloudParcel.tracking_number,
       shipment.id,
     );
+  } else {
+    await orderRepo.updateOrderShipmentStatus(
+      savedOrder.id,
+      'announced',
+      shipment.id,
+    );
   }
 
-  console.log(
-    `✅ Shipment created automatically for order ${savedOrder.id}: ${shipment.id}`,
-  );
+  console.log(`Shipment created for order ${savedOrder.id}: ${shipment.id}`);
+
+  return {
+    shipmentId: shipment.id,
+    shipmentStatus: 'announced',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,19 +168,11 @@ async function createShipToHomeParcel(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Creates an Order in Firestore and, when deliveryMethod === "ship_to_home",
- * automatically creates a Sendcloud parcel.
+ * Creates an order after Stripe PaymentSheet has completed.
  *
- * Expected request body (JSON):
- * {
- *   "amount": number,
- *   "productId": string,
- *   "productName": string,
- *   "deliveryMethod": "ship_to_home" | "pickup_point",
- *   "courier": string,        // e.g. "dhl"  (pickup_point only)
- *   "pickupPointId": string,  // Sendcloud service-point ID (pickup_point only)
- *   "shipping": { ... }       // Required for ship_to_home
- * }
+ * The order is keyed by paymentIntentId so frontend retries cannot create
+ * duplicate orders. Product price, shipping option and Stripe state are all
+ * checked server-side before anything is written to Firestore.
  */
 export const createOrder = async (
   req: Request,
@@ -113,62 +204,292 @@ export const createOrder = async (
 
     const {
       amount,
+      paymentIntentId,
       productId,
-      productName,
       shipping,
-      deliveryMethod,
-      courier,
-      pickupPointId,
+      shippingOptionId,
+      shippingWeight,
+      pickupPoint,
     } = req.body;
-    if (!amount) {
-      ResponseHandler.badRequest(res, 'Invalid request', 'Amount is required');
+
+    const deliveryType = normaliseDeliveryType(req.body);
+    if (!deliveryType) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid request',
+        'deliveryType is required',
+      );
+      return;
+    }
+
+    const shippingOption = MVP_SHIPPING_OPTIONS[shippingOptionId];
+    if (!shippingOption) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid request',
+        'Unsupported shippingOptionId',
+      );
+      return;
+    }
+
+    if (shippingOption.deliveryType !== deliveryType) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid request',
+        'Shipping option does not match delivery type',
+      );
       return;
     }
 
     const orderRepo = new OrderRepository();
-    const savedOrder = await orderRepo.createOrder({
-      userId: firebaseUid,
-      email,
-      amount,
-      productId,
-      productName,
-      shipping,
-      deliveryMethod,
-      shippingProvider: deliveryMethod ? 'sendcloud' : undefined,
-      courier,
-      pickupPointId,
-    });
-
-    // Trigger Sendcloud only for ship_to_home; pickup_point defers parcel creation.
-    if (deliveryMethod === 'ship_to_home' && shipping?.address) {
-      try {
-        await createShipToHomeParcel(savedOrder, shipping, email);
-      } catch (shipErr) {
-        // Shipment failure must NOT undo the order – admin can re-trigger manually.
-        console.error(
-          '⚠️ Shipment creation failed (order still saved):',
-          shipErr,
+    const existingOrder = await orderRepo.getByPaymentIntentId(paymentIntentId);
+    if (existingOrder) {
+      if (existingOrder.userId !== firebaseUid) {
+        ResponseHandler.forbidden(
+          res,
+          'Order does not belong to this user',
+          'The existing order belongs to a different authenticated user',
         );
+        return;
       }
-    } else if (deliveryMethod === 'pickup_point') {
-      console.log(
-        `📦 Order ${savedOrder.id} flagged for pickup_point. ` +
-          `courier=${courier ?? 'n/a'}, pickupPointId=${pickupPointId ?? 'n/a'}`,
+
+      const shipmentRepo = new ShipmentRepository();
+      const existingShipment = await shipmentRepo.getShipmentByOrderId(
+        existingOrder.id,
       );
-    } else if (!deliveryMethod && shipping?.address) {
-      console.warn(
-        `⚠️ Order ${savedOrder.id}: shipping address present but no deliveryMethod. ` +
-          'Pass deliveryMethod="ship_to_home" to auto-create a Sendcloud parcel.',
+      const shipmentStatus =
+        existingShipment?.status || existingOrder.shipmentStatus || 'pending';
+
+      ResponseHandler.success(
+        res,
+        {
+          orderId: existingOrder.id,
+          paymentIntentId,
+          paymentStatus: existingOrder.paymentStatus,
+          deliveryType: existingOrder.deliveryType || deliveryType,
+          deliveryMethod:
+            existingOrder.deliveryMethod || shippingOption.deliveryMethod,
+          shipmentStatus,
+          shipmentId: existingShipment?.id || existingOrder.shipmentId,
+          idempotent: true,
+        },
+        'Order already exists',
       );
+      return;
+    }
+
+    const productRepo = new ProductRepository();
+    const product = await productRepo.getById(productId);
+    if (!product) {
+      ResponseHandler.notFound(
+        res,
+        'Product not found',
+        `Product ${productId} does not exist`,
+      );
+      return;
+    }
+
+    let expectedAmount: number;
+    try {
+      expectedAmount = productPriceToPence(product) + shippingOption.pricePence;
+    } catch (err) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid product price',
+        err instanceof Error ? err.message : 'Product price is invalid',
+      );
+      return;
+    }
+
+    if (amount !== expectedAmount) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid order amount',
+        'Order total does not match server pricing',
+      );
+      return;
+    }
+
+    const paymentService = new PaymentService();
+    let paymentIntent: Stripe.PaymentIntent;
+    try {
+      paymentIntent = await paymentService.getPaymentIntent(paymentIntentId);
+    } catch (err) {
+      ResponseHandler.badRequest(
+        res,
+        'Payment could not be confirmed',
+        'Stripe PaymentIntent could not be retrieved',
+      );
+      return;
+    }
+
+    if (paymentIntent.status !== 'succeeded') {
+      ResponseHandler.badRequest(
+        res,
+        'Payment has not completed',
+        `Stripe PaymentIntent status is ${paymentIntent.status}`,
+      );
+      return;
+    }
+
+    if (paymentIntent.amount !== amount) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid payment amount',
+        'Stripe PaymentIntent amount does not match the order total',
+      );
+      return;
+    }
+
+    if (paymentIntent.currency.toLowerCase() !== 'gbp') {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid payment currency',
+        'Stripe PaymentIntent currency must be gbp',
+      );
+      return;
+    }
+
+    if (
+      paymentIntent.metadata?.firebaseUid &&
+      paymentIntent.metadata.firebaseUid !== firebaseUid
+    ) {
+      ResponseHandler.forbidden(
+        res,
+        'Payment does not belong to this user',
+        'PaymentIntent metadata does not match the authenticated user',
+      );
+      return;
+    }
+
+    const customerId = getPaymentIntentCustomerId(paymentIntent.customer);
+    if (!customerId) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid payment customer',
+        'Stripe PaymentIntent is missing a customer',
+      );
+      return;
+    }
+
+    const paymentCustomerEmail =
+      await paymentService.getCustomerEmail(customerId);
+    if (
+      !paymentCustomerEmail ||
+      paymentCustomerEmail.toLowerCase() !== email.toLowerCase()
+    ) {
+      ResponseHandler.forbidden(
+        res,
+        'Payment does not belong to this user',
+        'Stripe customer does not match the authenticated user',
+      );
+      return;
+    }
+
+    const deliveryMethod = shippingOption.deliveryMethod;
+    const orderShipping =
+      deliveryType === 'home'
+        ? shipping
+        : pickupPoint
+          ? {
+              name: pickupPoint.name,
+              address: {
+                line1: pickupPoint.addressLine1,
+                city: pickupPoint.city,
+                postal_code: pickupPoint.postalCode,
+                country: pickupPoint.country || 'GB',
+              },
+            }
+          : undefined;
+    const orderPickupPoint = buildPickupPoint(pickupPoint);
+    const resolvedShippingWeight =
+      typeof shippingWeight === 'number' ? shippingWeight : 500;
+    const { order: savedOrder, created } =
+      await orderRepo.createOrderIdempotently({
+        userId: firebaseUid,
+        email,
+        amount,
+        currency: 'gbp',
+        paymentIntentId,
+        paymentStatus: paymentIntent.status,
+        productId,
+        productName: product.name,
+        productSnapshot: buildProductSnapshot(product),
+        shipping: orderShipping,
+        deliveryType,
+        deliveryMethod,
+        shippingProvider: 'sendcloud',
+        shippingOptionId: shippingOption.id,
+        shippingOptionName: shippingOption.name,
+        shippingOptionPrice: shippingOption.pricePence,
+        shippingCarrier: shippingOption.carrier,
+        shippingWeight: resolvedShippingWeight,
+        courier: orderPickupPoint?.carrier || shippingOption.carrier,
+        pickupPointId: orderPickupPoint?.id,
+        pickupPoint: orderPickupPoint,
+        status: 'completed',
+        shipmentStatus: 'pending',
+      });
+
+    let shipmentStatus: string = savedOrder.shipmentStatus || 'pending';
+    let shipmentId: string | undefined = savedOrder.shipmentId;
+
+    if (
+      created &&
+      deliveryMethod === 'ship_to_home' &&
+      orderShipping?.address
+    ) {
+      try {
+        const shipmentResult = await createShipToHomeParcel(
+          savedOrder,
+          orderShipping,
+          email,
+          resolvedShippingWeight,
+        );
+        shipmentStatus = shipmentResult.shipmentStatus;
+        shipmentId = shipmentResult.shipmentId;
+      } catch (shipErr) {
+        // Shipment failure must not undo the paid order. Admin can retry later.
+        await orderRepo.updateOrderShipmentStatus(savedOrder.id, 'pending');
+        console.error(`Shipment creation failed for order ${savedOrder.id}`);
+        if (shipErr instanceof Error) {
+          console.error(`Shipment error: ${shipErr.name}: ${shipErr.message}`);
+        }
+        shipmentStatus = 'pending';
+      }
+    } else if (!created) {
+      const shipmentRepo = new ShipmentRepository();
+      const existingShipment = await shipmentRepo.getShipmentByOrderId(
+        savedOrder.id,
+      );
+
+      if (existingShipment) {
+        shipmentStatus = existingShipment.status;
+        shipmentId = existingShipment.id;
+      }
     }
 
     ResponseHandler.success(
       res,
-      { orderId: savedOrder.id },
-      'Order created successfully',
+      {
+        orderId: savedOrder.id,
+        paymentIntentId,
+        paymentStatus: paymentIntent.status,
+        deliveryType,
+        deliveryMethod,
+        shipmentStatus,
+        shipmentId,
+        idempotent: !created,
+      },
+      created ? 'Order created successfully' : 'Order already exists',
     );
   } catch (err) {
-    console.error('Error creating order:', err);
+    if (err instanceof Error) {
+      console.error(`Error creating order: ${err.name}: ${err.message}`);
+    } else {
+      console.error('Error creating order');
+    }
+
     ResponseHandler.internalServerError(
       res,
       'Failed to create order',

@@ -31,7 +31,7 @@ const router = Router();
  *             properties:
  *               amount:
  *                 type: integer
- *                 description: Amount in the smallest currency unit (e.g., cents)
+ *                 description: Total amount in pence
  *     responses:
  *       200:
  *         description: PaymentIntent created successfully
@@ -49,6 +49,10 @@ const router = Router();
  *                   properties:
  *                     paymentIntent:
  *                       type: string
+ *                       description: Stripe client secret for PaymentSheet
+ *                     paymentIntentId:
+ *                       type: string
+ *                       description: Stripe PaymentIntent ID for order creation
  *                     ephemeralKey:
  *                       type: string
  *                     customer:
