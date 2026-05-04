@@ -1,5 +1,6 @@
 const mockGetUserById = jest.fn();
 const mockVerifySucceededPaymentIntentForUser = jest.fn();
+const mockGetDeliveryOptions = jest.fn();
 const mockCreateOrder = jest.fn();
 const mockUpdateOrder = jest.fn();
 const mockCreateShipmentForPaidOrder = jest.fn();
@@ -20,6 +21,12 @@ jest.mock('../repositories/OrderRepository', () => ({
 jest.mock('../../payment/services/PaymentService', () => ({
   PaymentService: jest.fn().mockImplementation(() => ({
     verifySucceededPaymentIntentForUser: mockVerifySucceededPaymentIntentForUser,
+  })),
+}));
+
+jest.mock('../../shipping/services/CheckoutShippingService', () => ({
+  CheckoutShippingService: jest.fn().mockImplementation(() => ({
+    getDeliveryOptions: mockGetDeliveryOptions,
   })),
 }));
 
@@ -44,20 +51,28 @@ describe('orderController.createOrder', () => {
     paymentIntentId: 'pi_123',
     productId: 'product-1',
     productName: 'Winter Coat',
-    deliveryType: 'home' as const,
-    shippingOptionId: '12345',
-    shippingOptionName: 'Home delivery',
-    shippingOptionPrice: '3.99',
-    shippingCarrier: 'evri',
+    shippingMethodId: '12345',
+    shippingCarrier: 'inpost_gb',
     shippingWeight: 2500,
     shipping: {
       name: 'Jane Doe',
-      address: {
+          telephone: '+447700900000',
+          address: {
         line1: '10 High Street',
-        city: 'London',
+            house_number: '10',
+            city: 'London',
         postal_code: 'SW1A 1AA',
         country: 'GB',
       },
+    },
+    pickupPoint: {
+      id: '999',
+      name: 'Locker A',
+      addressLine1: '10 High Street',
+      city: 'London',
+      postalCode: 'SW1A 1AA',
+      country: 'GB',
+      carrier: 'inpost_gb',
     },
   };
 
@@ -72,6 +87,13 @@ describe('orderController.createOrder', () => {
       id: 'pi_123',
       status: 'succeeded',
     });
+    mockGetDeliveryOptions.mockResolvedValue([
+      {
+        id: '12345',
+        name: 'InPost locker',
+        price: '3.99',
+      },
+    ]);
   });
 
   it('creates a paid order and shipment', async () => {
@@ -110,7 +132,13 @@ describe('orderController.createOrder', () => {
       'pi_123',
       2599,
     );
-    expect(mockCreateOrder).toHaveBeenCalled();
+    expect(mockCreateOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shippingOptionId: '12345',
+        shippingOptionName: 'InPost locker',
+        shippingOptionPrice: '3.99',
+      }),
+    );
     expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
       shipmentId: 'shipment-1',
       shipmentStatus: 'announced',
@@ -159,6 +187,29 @@ describe('orderController.createOrder', () => {
     mockVerifySucceededPaymentIntentForUser.mockRejectedValue(
       new Error('Payment has not succeeded'),
     );
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payload,
+    };
+    const res = createResponse();
+
+    await createOrder(req, res);
+
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('returns 400 when shipping method is invalid for pickup point', async () => {
+    mockGetDeliveryOptions.mockResolvedValue([
+      {
+        id: '99999',
+        name: 'Another method',
+        price: '4.99',
+      },
+    ]);
 
     const req: any = {
       user: {

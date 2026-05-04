@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { CategoryRepository } from '../repositories/CategoryRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 const repo = new CategoryRepository();
 
@@ -15,7 +16,11 @@ export const getAllCategories = async (req: Request, res: Response): Promise<voi
 
 export const getCategoryById = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Category ID is required');
+            return;
+        }
         const category = await repo.getById(id);
         
         if (!category) {
@@ -41,7 +46,11 @@ export const createCategory = async (req: Request, res: Response): Promise<void>
 
 export const updateCategory = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Category ID is required');
+            return;
+        }
         const categoryData = req.body;
         const updatedCategory = await repo.update(id, categoryData);
         
@@ -58,7 +67,11 @@ export const updateCategory = async (req: Request, res: Response): Promise<void>
 
 export const deleteCategory = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Category ID is required');
+            return;
+        }
         const deleted = await repo.delete(id);
         
         if (!deleted) {

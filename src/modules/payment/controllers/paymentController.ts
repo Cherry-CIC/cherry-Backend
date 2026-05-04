@@ -39,7 +39,9 @@ import { PaymentService } from '../services/PaymentService';
  *                 data:
  *                   type: object
  *                   properties:
- *                     paymentIntent:
+ *                     paymentIntentId:
+ *                       type: string
+ *                     clientSecret:
  *                       type: string
  *                     ephemeralKey:
  *                       type: string

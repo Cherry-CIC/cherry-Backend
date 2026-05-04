@@ -7,9 +7,14 @@ import { CheckoutShippingService } from '../services/CheckoutShippingService';
 import { ShipmentService } from '../services/ShipmentService';
 import { mapSendcloudStatusToShipmentStatus } from '../utils/statusMapper';
 import { sendcloudWebhookValidator } from '../validators/shippingValidator';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
+import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
+import { PostcodeLookupService } from '../services/postcode/PostcodeLookupService';
 
 const checkoutShippingService = new CheckoutShippingService();
 const shipmentService = new ShipmentService();
+const postcodeLookupService = new PostcodeLookupService();
+const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
 
 export const createShipment = async (
   req: Request,
@@ -71,12 +76,44 @@ export const createShipment = async (
   }
 };
 
+export const createTestParcel = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { parcel } = req.body as { parcel: any };
+    const testParcel = {
+      ...parcel,
+      request_label: false,
+    };
+    const sendcloudService = new SendcloudService();
+    const sendcloudParcel = await sendcloudService.createParcel(testParcel);
+
+    ResponseHandler.success(
+      res,
+      { sendcloudParcel },
+      'Test parcel created successfully',
+    );
+  } catch (err) {
+    console.error('Error creating test parcel:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to create test parcel',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
 export const getShipmentStatus = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = requireSingleParam(req.params.orderId);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -130,7 +167,11 @@ export const getShippingLabel = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = requireSingleParam(req.params.orderId);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -214,26 +255,27 @@ export const getCheckoutShippingOptions = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { country, postalCode, weight, value } =
+    const { servicePointId, country, postalCode, isReturn } =
       req.query as Record<string, string>;
 
-    const options = await checkoutShippingService.getDeliveryOptions({
+    const shippingMethods = await checkoutShippingService.getDeliveryOptions({
+      servicePointId,
       country,
       postalCode,
-      weight: Number(weight),
-      value,
+      isReturn: isReturn === undefined ? undefined : String(isReturn).toLowerCase() === 'true',
+      carrier: ENFORCED_CARRIER,
     });
 
     ResponseHandler.success(
       res,
-      { options },
-      'Checkout shipping options retrieved successfully',
+      { shippingMethods },
+      'Shipping methods retrieved successfully',
     );
   } catch (err) {
     console.error('Error fetching checkout shipping options:', err);
     ResponseHandler.internalServerError(
       res,
-      'Failed to fetch checkout shipping options',
+      'Failed to fetch shipping methods',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }
@@ -244,17 +286,14 @@ export const getPickupPoints = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { country, postalCode, city, address, houseNumber, weight, carrier } =
+    const { country, address, radius } =
       req.query as Record<string, string>;
 
     const pickupPoints = await checkoutShippingService.getPickupPoints({
       country,
-      postalCode,
-      city,
       address,
-      houseNumber,
-      weight: weight ? Number(weight) : undefined,
-      carrier,
+      radius: radius ? Number(radius) : undefined,
+      carrier: ENFORCED_CARRIER,
     });
 
     ResponseHandler.success(
@@ -277,7 +316,11 @@ export const cancelShipment = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const { orderId } = req.params;
+    const orderId = requireSingleParam(req.params.orderId);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
 
     const shipmentRepo = new ShipmentRepository();
     const shipment = await shipmentRepo.getShipmentByOrderId(orderId);
@@ -396,6 +439,38 @@ export const getAllShipments = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch shipments',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const validatePostcode = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { postcode } = req.query as { postcode: string };
+    const result = await postcodeLookupService.validatePostcode(postcode);
+
+    if (!result) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid postcode',
+        'Postcode could not be validated',
+      );
+      return;
+    }
+
+    ResponseHandler.success(
+      res,
+      { postcode: result },
+      'Postcode validated successfully',
+    );
+  } catch (err) {
+    console.error('Error validating postcode:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to validate postcode',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }

@@ -1,37 +1,38 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
-import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { validateRequest } from '../../../shared/middleware/validateRequest';
 import {
-  createShipment,
+  createTestParcel,
   getCheckoutShippingOptions,
   getPickupPoints,
-  getShipmentStatus,
-  getShippingLabel,
-  getShippingMethods,
-  cancelShipment,
   handleSendcloudWebhook,
-  getAllShipments,
+  validatePostcode,
 } from '../controllers/shippingController';
 import {
   checkoutShippingOptionsQueryValidator,
-  createShipmentValidator,
-  orderIdParamValidator,
+  createTestParcelValidator,
+  postcodeValidationQueryValidator,
   pickupPointsQueryValidator,
-  shipmentStatusQueryValidator,
 } from '../validators/shippingValidator';
 
 const router = Router();
 
 /**
  * @swagger
- * /api/shipping/options:
+ * /api/shipping/shipping-methods:
  *   get:
- *     summary: Get checkout shipping options for a destination and cart context
+ *     summary: Get shipping methods for selected service point
  *     tags: [Shipping]
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: servicePointId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "12345678"
+ *         description: Selected service point id (locker id)
  *       - in: query
  *         name: country
  *         required: true
@@ -43,24 +44,18 @@ const router = Router();
  *         required: true
  *         schema:
  *           type: string
- *           example: "SW1A 1AA"
+ *           example: "SE18 4QH"
+ *         description: Destination postal code
  *       - in: query
- *         name: weight
- *         required: true
+ *         name: isReturn
+ *         required: false
  *         schema:
- *           type: integer
- *           example: 2500
- *         description: Total cart weight in grams
- *       - in: query
- *         name: value
- *         required: true
- *         schema:
- *           type: string
- *           example: "45.90"
- *         description: Total cart value in decimal currency format
+ *           type: boolean
+ *           example: false
+ *         description: Optional return-method lookup flag
  *     responses:
  *       200:
- *         description: Checkout shipping options retrieved successfully
+ *         description: Shipping methods retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -73,7 +68,7 @@ const router = Router();
  *                 data:
  *                   type: object
  *                   properties:
- *                     options:
+ *                     shippingMethods:
  *                       type: array
  *                       items:
  *                         type: object
@@ -86,7 +81,7 @@ const router = Router();
  *                             type: string
  *                           deliveryType:
  *                             type: string
- *                             enum: [home, pickup_point]
+ *                             enum: [pickup_point]
  *                           deliveryMethodType:
  *                             type: string
  *                           price:
@@ -109,7 +104,7 @@ const router = Router();
  *         description: Internal server error
  */
 router.get(
-  '/options',
+  '/shipping-methods',
   authMiddleware,
   validateRequest(checkoutShippingOptionsQueryValidator, 'query'),
   getCheckoutShippingOptions
@@ -119,7 +114,7 @@ router.get(
  * @swagger
  * /api/shipping/pickup-points:
  *   get:
- *     summary: Get available pickup points for a destination
+ *     summary: Get available InPost pickup points for a destination
  *     tags: [Shipping]
  *     security:
  *       - bearerAuth: []
@@ -131,42 +126,19 @@ router.get(
  *           type: string
  *           example: "GB"
  *       - in: query
- *         name: postalCode
+ *         name: address
  *         required: true
  *         schema:
  *           type: string
- *           example: "SW1A 1AA"
+ *           example: "SE18 4QH"
+ *         description: Free-text address or postcode used for service-point lookup.
  *       - in: query
- *         name: city
+ *         name: radius
  *         required: false
  *         schema:
- *           type: string
- *           example: "London"
- *       - in: query
- *         name: address
- *         required: false
- *         schema:
- *           type: string
- *           example: "10 High Street"
- *       - in: query
- *         name: houseNumber
- *         required: false
- *         schema:
- *           type: string
- *           example: "10"
- *       - in: query
- *         name: weight
- *         required: false
- *         schema:
- *           type: number
- *           example: 2.5
- *         description: Parcel weight in kilograms if carrier filtering depends on it
- *       - in: query
- *         name: carrier
- *         required: false
- *         schema:
- *           type: string
- *           example: "postnl"
+ *           type: integer
+ *           example: 5000
+ *         description: Search radius in meters for address/postcode geocoding. Default 5000.
  *     responses:
  *       200:
  *         description: Pickup points retrieved successfully
@@ -231,9 +203,68 @@ router.get(
 
 /**
  * @swagger
- * /api/shipping/shipment:
+ * /api/shipping/postcodes/validate:
+ *   get:
+ *     summary: Validate postcode and return normalized location fields
+ *     tags: [Shipping]
+ *     parameters:
+ *       - in: query
+ *         name: postcode
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "SW1A 2AA"
+ *         description: UK postcode to validate.
+ *     responses:
+ *       200:
+ *         description: Postcode validated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     postcode:
+ *                       type: object
+ *                       properties:
+ *                         postcode:
+ *                           type: string
+ *                         city:
+ *                           type: string
+ *                         region:
+ *                           type: string
+ *                         country:
+ *                           type: string
+ *                         adminDistrict:
+ *                           type: string
+ *                         latitude:
+ *                           type: number
+ *                           nullable: true
+ *                         longitude:
+ *                           type: number
+ *                           nullable: true
+ *       400:
+ *         description: Invalid postcode
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+  '/postcodes/validate',
+  validateRequest(postcodeValidationQueryValidator, 'query'),
+  validatePostcode,
+);
+
+/**
+ * @swagger
+ * /api/shipping/test-create-parcel:
  *   post:
- *     summary: Create a shipment for an order
+ *     summary: "[TEST ONLY - DO NOT USE IN APP FLOW] Create Sendcloud parcel directly"
  *     tags: [Shipping]
  *     security:
  *       - bearerAuth: []
@@ -244,204 +275,85 @@ router.get(
  *           schema:
  *             type: object
  *             required:
- *               - orderId
+ *               - parcel
  *             properties:
- *               orderId:
- *                 type: string
- *               weight:
- *                 type: number
- *               shippingMethodId:
- *                 type: number
+ *               parcel:
+ *                 type: object
+ *                 required:
+ *                   - name
+ *                   - address
+ *                   - house_number
+ *                   - city
+ *                   - postal_code
+ *                   - country
+ *                   - email
+ *                   - telephone
+ *                   - request_label
+ *                   - shipment
+ *                   - to_service_point
+ *                   - weight
+ *                   - order_number
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                     example: "John Doe"
+ *                   address:
+ *                     type: string
+ *                     example: "18 Calderwood Street"
+ *                   house_number:
+ *                     type: string
+ *                     example: "18"
+ *                   city:
+ *                     type: string
+ *                     example: "London"
+ *                   postal_code:
+ *                     type: string
+ *                     example: "SE18 5AB"
+ *                   country:
+ *                     type: string
+ *                     example: "GB"
+ *                   email:
+ *                     type: string
+ *                     example: "sol@gmail.com"
+ *                   telephone:
+ *                     type: string
+ *                     example: "+447700900000"
+ *                   request_label:
+ *                     type: boolean
+ *                     example: false
+ *                   shipment:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 3747
+ *                   to_service_point:
+ *                     type: integer
+ *                     example: 13127548
+ *                   weight:
+ *                     oneOf:
+ *                       - type: string
+ *                       - type: number
+ *                     example: "2.5"
+ *                   order_number:
+ *                     type: string
+ *                     example: "ORDER-123"
  *     responses:
  *       200:
- *         description: Shipment created successfully
+ *         description: Test parcel created successfully
  *       400:
- *         description: Bad request
- *       401:
- *         description: Unauthorized
- */
-router.post(
-  '/shipment',
-  authMiddleware,
-  adminMiddleware,
-  validateRequest(createShipmentValidator),
-  createShipment,
-);
-
-/**
- * @swagger
- * /api/shipping/shipment/{orderId}:
- *   get:
- *     summary: Get shipment status by order ID
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Shipment status retrieved
- *       404:
- *         description: Shipment not found
- */
-router.get('/shipment/:orderId', authMiddleware, getShipmentStatus);
-
-/**
- * @swagger
- * /api/shipping/label/{orderId}:
- *   get:
- *     summary: Get shipping label URL
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Label URL retrieved
- *       404:
- *         description: Label not found
- */
-router.get(
-  '/label/:orderId',
-  authMiddleware,
-  adminMiddleware,
-  getShippingLabel,
-);
-
-/**
- * @swagger
- * /api/shipping/methods:
- *   get:
- *     summary: Get available shipping methods
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Shipping methods retrieved
- */
-router.get('/methods', authMiddleware, getShippingMethods);
-
-/**
- * @swagger
- * /api/shipping/methods-test:
- *   get:
- *     summary: Get available shipping methods (TEST - No Auth Required)
- *     tags: [Shipping]
- *     responses:
- *       200:
- *         description: Shipping methods retrieved
- */
-router.get('/methods-test', getShippingMethods);
-
-/**
- * @swagger
- * /api/shipping/cancel/{orderId}:
- *   post:
- *     summary: Cancel a shipment
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Shipment cancelled
- *       404:
- *         description: Shipment not found
- */
-router.post(
-  '/cancel/:orderId',
-  authMiddleware,
-  adminMiddleware,
-  cancelShipment,
-);
-
-/**
- * @swagger
- * /api/shipping/shipments:
- *   get:
- *     summary: Get all shipments (admin only)
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [pending, announced, en_route, out_for_delivery, delivered, exception, cancelled]
- *     responses:
- *       200:
- *         description: Shipments retrieved
- */
-router.get('/shipments', authMiddleware, adminMiddleware, getAllShipments);
-
-/**
- * @swagger
- * /api/shipping/pickup-points:
- *   get:
- *     summary: Get Sendcloud pickup points (service points) near a postcode
- *     description: >
- *       Returns a list of available carrier pickup locations near the given postcode.
- *       Called by the Flutter checkout screen to populate the pickup-point picker
- *       before the user selects "Pickup Point" as delivery method.
- *     tags: [Shipping]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: postcode
- *         required: true
- *         schema:
- *           type: string
- *         description: Postal code to search around (e.g. SW1A1AA)
- *       - in: query
- *         name: courier
- *         required: false
- *         schema:
- *           type: string
- *         description: Carrier slug to filter results (e.g. dhl, ups, hermes). Omit for all carriers.
- *     responses:
- *       200:
- *         description: Pickup points retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     pickupPoints:
- *                       type: array
- *                       items:
- *                         type: object
- *                     count:
- *                       type: integer
- *       400:
- *         description: Missing postcode parameter
+ *         description: Invalid request payload
  *       401:
  *         description: Unauthorized
  *       500:
  *         description: Internal server error
  */
-router.get('/pickup-points', authMiddleware, getPickupPoints);
+router.post(
+  '/test-create-parcel',
+  authMiddleware,
+  validateRequest(createTestParcelValidator),
+  createTestParcel,
+);
 
 /**
  * @swagger

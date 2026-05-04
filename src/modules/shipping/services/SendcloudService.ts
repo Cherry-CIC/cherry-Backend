@@ -8,7 +8,6 @@ import {
 
 export class SendcloudService {
   private client: any;
-  private dynamicCheckoutClient: any;
   private servicePointsClient: any;
 
   constructor() {
@@ -16,7 +15,6 @@ export class SendcloudService {
       publicKey,
       secretKey,
       apiUrl,
-      dynamicCheckoutApiUrl,
       servicePointsApiUrl,
     } = sendcloudConfig;
 
@@ -28,18 +26,6 @@ export class SendcloudService {
 
     this.client = axios.create({
       baseURL: apiUrl,
-      auth: {
-        username: publicKey,
-        password: secretKey,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    this.dynamicCheckoutClient = axios.create({
-      baseURL: dynamicCheckoutApiUrl,
       auth: {
         username: publicKey,
         password: secretKey,
@@ -108,36 +94,29 @@ export class SendcloudService {
   async getCheckoutDeliveryOptions(
     query: CheckoutShippingOptionsQuery,
   ): Promise<any[]> {
-    const { checkoutConfigurationId, senderCountry } = sendcloudConfig;
-
-    if (!checkoutConfigurationId) {
-      throw new Error(
-        'Sendcloud checkout configuration is missing. Please set SENDCLOUD_CHECKOUT_CONFIGURATION_ID.',
-      );
-    }
-
-    if (!senderCountry) {
-      throw new Error(
-        'Sendcloud sender country is missing. Please set SENDCLOUD_SENDER_COUNTRY.',
-      );
-    }
-
     try {
-      const response = await this.dynamicCheckoutClient.get(
-        `/checkout/configurations/${checkoutConfigurationId}/delivery-options`,
+      const response = await this.client.get(
+        '/shipping_methods',
         {
           params: {
-            weight_value: query.weight,
-            total_order_value: query.value,
-            from_country_code: senderCountry,
-            to_country_code: query.country,
+            service_point_id: query.servicePointId,
+            to_country: query.country,
             to_postal_code: query.postalCode,
-            checkout_identifier_type: 'shipping_option_code',
+            is_return: query.isReturn,
           },
         },
       );
 
-      return response.data?.delivery_options || [];
+      const methods = response.data?.shipping_methods || [];
+      if (!query.carrier) {
+        return methods;
+      }
+
+      const targetCarrier = query.carrier.toLowerCase();
+      return methods.filter(
+        (method: any) =>
+          String(method?.carrier || '').toLowerCase() === targetCarrier,
+      );
     } catch (error: any) {
       const errorMessage =
         error.response?.data?.error?.message ||
@@ -155,11 +134,8 @@ export class SendcloudService {
         params: {
           access_token: sendcloudConfig.publicKey,
           country: query.country,
-          postal_code: query.postalCode,
-          city: query.city,
           address: query.address,
-          house_number: query.houseNumber,
-          weight: query.weight,
+          radius: query.radius ?? 5000,
           carrier: query.carrier,
         },
       });

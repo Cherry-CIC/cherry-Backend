@@ -57,10 +57,9 @@ describe('shippingController', () => {
 
     const req: any = {
       query: {
+        servicePointId: '12345678',
         country: 'GB',
         postalCode: 'SW1A 1AA',
-        weight: '2500',
-        value: '45.90',
       },
     };
     const res = createResponse();
@@ -68,17 +67,18 @@ describe('shippingController', () => {
     await getCheckoutShippingOptions(req, res);
 
     expect(mockGetDeliveryOptions).toHaveBeenCalledWith({
+      servicePointId: '12345678',
       country: 'GB',
       postalCode: 'SW1A 1AA',
-      weight: 2500,
-      value: '45.90',
+      isReturn: undefined,
+      carrier: 'inpost_gb',
     });
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
         data: {
-          options: [
+          shippingMethods: [
             expect.objectContaining({
               id: 'opt_1',
             }),
@@ -99,8 +99,7 @@ describe('shippingController', () => {
     const req: any = {
       query: {
         country: 'GB',
-        postalCode: 'SW1A 1AA',
-        carrier: 'postnl',
+        address: 'SW1A 1AA',
       },
     };
     const res = createResponse();
@@ -109,12 +108,9 @@ describe('shippingController', () => {
 
     expect(mockGetPickupPoints).toHaveBeenCalledWith({
       country: 'GB',
-      postalCode: 'SW1A 1AA',
-      city: undefined,
-      address: undefined,
-      houseNumber: undefined,
-      weight: undefined,
-      carrier: 'postnl',
+      address: 'SW1A 1AA',
+      radius: undefined,
+      carrier: 'inpost_gb',
     });
     expect(res.status).toHaveBeenCalledWith(200);
   });

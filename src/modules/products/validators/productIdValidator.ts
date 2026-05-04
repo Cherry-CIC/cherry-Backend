@@ -1,12 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 export function validateProductId(
     req: Request,
     res: Response,
     next: NextFunction
 ): void {
-    const { id } = req.params;
+    const id = requireSingleParam(req.params.id);
     
     // Check if ID is provided
     if (!id) {

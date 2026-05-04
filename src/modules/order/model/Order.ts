@@ -13,6 +13,7 @@ export type ShipmentStatus =
 export interface ShippingAddress {
   line1: string;
   line2?: string;
+  house_number?: string;
   city: string;
   state?: string;
   postal_code: string;
@@ -45,6 +46,7 @@ export interface Order {
   shipping: {
     address: ShippingAddress;
     name: string;
+    telephone?: string;
   };
   pickupPoint?: PickupPointSelection;
   paymentIntentId?: string;

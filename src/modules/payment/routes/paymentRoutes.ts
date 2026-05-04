@@ -48,7 +48,9 @@ const router = Router();
  *                 data:
  *                   type: object
  *                   properties:
- *                     paymentIntent:
+ *                     paymentIntentId:
+ *                       type: string
+ *                     clientSecret:
  *                       type: string
  *                     ephemeralKey:
  *                       type: string

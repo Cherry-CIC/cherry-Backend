@@ -4,6 +4,11 @@ import { UserRepository } from '../../auth/repositories/UserRepository';
 import { OrderRepository } from '../repositories/OrderRepository';
 import { ShipmentService } from '../../shipping/services/ShipmentService';
 import { PaymentService } from '../../payment/services/PaymentService';
+import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
+import { CheckoutShippingService } from '../../shipping/services/CheckoutShippingService';
+
+const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
+const checkoutShippingService = new CheckoutShippingService();
 
 export const createOrder = async (
   req: Request,
@@ -40,10 +45,7 @@ export const createOrder = async (
       productId,
       productName,
       paymentIntentId,
-      deliveryType,
-      shippingOptionId,
-      shippingOptionName,
-      shippingOptionPrice,
+      shippingMethodId,
       shippingCarrier,
       shippingWeight,
       shipping,
@@ -52,6 +54,51 @@ export const createOrder = async (
 
     if (!amount) {
       ResponseHandler.badRequest(res, 'Invalid request', 'Amount is required');
+      return;
+    }
+
+    let resolvedShippingMethodName: string | undefined;
+    let resolvedShippingMethodPrice: string | undefined;
+    try {
+      const shippingMethods = await checkoutShippingService.getDeliveryOptions({
+        servicePointId: pickupPoint.id,
+        country: shipping.address.country,
+        postalCode: shipping.address.postal_code,
+        carrier: ENFORCED_CARRIER,
+      });
+
+      const selectedShippingMethod = shippingMethods.find(
+        (method) => method.id === String(shippingMethodId),
+      );
+
+      if (!selectedShippingMethod) {
+        ResponseHandler.badRequest(
+          res,
+          'Invalid shipping method',
+          'Selected shipping method is not valid for this pickup point',
+        );
+        return;
+      }
+
+      resolvedShippingMethodName = selectedShippingMethod.name;
+      resolvedShippingMethodPrice = selectedShippingMethod.price ?? undefined;
+    } catch (err) {
+      ResponseHandler.internalServerError(
+        res,
+        'Failed to resolve shipping method',
+        err instanceof Error ? err.message : 'Unknown error',
+      );
+      return;
+    }
+
+    const normalizedCarrier = String(shippingCarrier || '').toLowerCase();
+    const normalizedPickupCarrier = String(pickupPoint?.carrier || '').toLowerCase();
+    if (normalizedCarrier !== ENFORCED_CARRIER || normalizedPickupCarrier !== ENFORCED_CARRIER) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid carrier',
+        `Only ${ENFORCED_CARRIER} carrier is supported`,
+      );
       return;
     }
 
@@ -78,10 +125,10 @@ export const createOrder = async (
       amount,
       productId,
       productName,
-      deliveryType,
-      shippingOptionId,
-      shippingOptionName,
-      shippingOptionPrice,
+      deliveryType: 'pickup_point',
+      shippingOptionId: shippingMethodId,
+      shippingOptionName: resolvedShippingMethodName,
+      shippingOptionPrice: resolvedShippingMethodPrice,
       shippingCarrier,
       shippingWeight,
       shipping,
@@ -136,24 +183,6 @@ export const createOrder = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to create order',
-      err instanceof Error ? err.message : 'Unknown error',
-    );
-  }
-};
-
-export const getAllOrders = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const orderRepo = new OrderRepository();
-    const orders = await orderRepo.getAllOrders();
-    ResponseHandler.success(res, { orders }, 'All orders fetched successfully');
-  } catch (err) {
-    console.error('Error fetching orders:', err);
-    ResponseHandler.internalServerError(
-      res,
-      'Failed to fetch orders',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }

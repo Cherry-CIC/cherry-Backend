@@ -1,10 +1,14 @@
 import Joi from 'joi';
 import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
+
+const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
 
 const addressSchema = Joi.object({
   line1: Joi.string().required(),
   line2: Joi.string().optional(),
+  house_number: Joi.string().required(),
   city: Joi.string().required(),
   state: Joi.string().optional(),
   postal_code: Joi.string().required(),
@@ -18,7 +22,10 @@ const pickupPointSchema = Joi.object({
   city: Joi.string().required(),
   postalCode: Joi.string().required(),
   country: Joi.string().length(2).uppercase().required(),
-  carrier: Joi.string().allow(null).optional(),
+  carrier: Joi.string().trim().lowercase().valid(ENFORCED_CARRIER).required().messages({
+    'any.only': `"pickupPoint.carrier" must be "${ENFORCED_CARRIER}"`,
+    'any.required': `"pickupPoint.carrier" is required`,
+  }),
 });
 
 export const orderSchema = Joi.object({
@@ -31,21 +38,18 @@ export const orderSchema = Joi.object({
   productId: Joi.string().optional(),
   productName: Joi.string().optional(),
   paymentIntentId: Joi.string().required(),
-  deliveryType: Joi.string().valid('home', 'pickup_point').required(),
-  shippingOptionId: Joi.string().required(),
-  shippingOptionName: Joi.string().optional(),
-  shippingOptionPrice: Joi.string().optional(),
-  shippingCarrier: Joi.string().optional(),
+  shippingMethodId: Joi.string().required(),
+  shippingCarrier: Joi.string().trim().lowercase().valid(ENFORCED_CARRIER).required().messages({
+    'any.only': `"shippingCarrier" must be "${ENFORCED_CARRIER}"`,
+    'any.required': `"shippingCarrier" is required`,
+  }),
   shippingWeight: Joi.number().integer().min(1).max(100000).required(),
   shipping: Joi.object({
     address: addressSchema.required(),
     name: Joi.string().required(),
+    telephone: Joi.string().required(),
   }).required(),
-  pickupPoint: pickupPointSchema.when('deliveryType', {
-    is: 'pickup_point',
-    then: Joi.required(),
-    otherwise: Joi.forbidden(),
-  }),
+  pickupPoint: pickupPointSchema.required(),
 });
 
 export function validateOrder(

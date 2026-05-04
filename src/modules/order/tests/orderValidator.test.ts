@@ -13,13 +13,15 @@ describe('orderValidator', () => {
       body: {
         amount: 2599,
         paymentIntentId: 'pi_123',
-        deliveryType: 'pickup_point',
-        shippingOptionId: '12345',
+        shippingMethodId: '12345',
         shippingWeight: 2500,
+        shippingCarrier: 'inpost_gb',
         shipping: {
           name: 'Jane Doe',
+          telephone: '+447700900000',
           address: {
             line1: '10 High Street',
+            house_number: '10',
             city: 'London',
             postal_code: 'SW1A 1AA',
             country: 'GB',
@@ -41,13 +43,15 @@ describe('orderValidator', () => {
       body: {
         amount: 2599,
         paymentIntentId: 'pi_123',
-        deliveryType: 'pickup_point',
-        shippingOptionId: '12345',
+        shippingMethodId: '12345',
         shippingWeight: 2500,
+        shippingCarrier: 'inpost_gb',
         shipping: {
           name: 'Jane Doe',
+          telephone: '+447700900000',
           address: {
             line1: '10 High Street',
+            house_number: '10',
             city: 'London',
             postal_code: 'SW1A 1AA',
             country: 'GB',
@@ -60,6 +64,7 @@ describe('orderValidator', () => {
           city: 'London',
           postalCode: 'SW1A 1AA',
           country: 'GB',
+          carrier: 'inpost_gb',
         },
       },
     };

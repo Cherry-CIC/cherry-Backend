@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { CharityRepository } from '../repositories/CharityRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 const repo = new CharityRepository();
 
@@ -15,7 +16,11 @@ export const getAllCharities = async (req: Request, res: Response): Promise<void
 
 export const getCharityById = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Charity ID is required');
+            return;
+        }
         const charity = await repo.getById(id);
         
         if (!charity) {
@@ -41,7 +46,11 @@ export const createCharity = async (req: Request, res: Response): Promise<void> 
 
 export const updateCharity = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Charity ID is required');
+            return;
+        }
         const charityData = req.body;
         const updatedCharity = await repo.update(id, charityData);
         
@@ -58,7 +67,11 @@ export const updateCharity = async (req: Request, res: Response): Promise<void> 
 
 export const deleteCharity = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Charity ID is required');
+            return;
+        }
         const deleted = await repo.delete(id);
         
         if (!deleted) {

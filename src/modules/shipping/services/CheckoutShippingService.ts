@@ -1,20 +1,18 @@
 import { SendcloudService } from './SendcloudService';
 
 export interface CheckoutShippingOptionsQuery {
+  servicePointId: string;
   country: string;
   postalCode: string;
-  weight: number;
-  value: string;
+  isReturn?: boolean;
+  carrier?: string;
 }
 
 export interface PickupPointsQuery {
   country: string;
-  postalCode: string;
-  city?: string;
-  address?: string;
-  houseNumber?: string;
-  weight?: number;
+  address: string;
   carrier?: string;
+  radius?: number;
 }
 
 export interface NormalizedShippingOption {
@@ -50,7 +48,9 @@ export class CheckoutShippingService {
 
   async getDeliveryOptions(query: CheckoutShippingOptionsQuery): Promise<NormalizedShippingOption[]> {
     const deliveryOptions = await this.sendcloudService.getCheckoutDeliveryOptions(query);
-    return deliveryOptions.map((option: any) => this.normalizeDeliveryOption(option));
+    return deliveryOptions
+      .map((option: any) => this.normalizeDeliveryOption(option, query.country))
+      .filter((option) => option.deliveryType === 'pickup_point');
   }
 
   async getPickupPoints(query: PickupPointsQuery): Promise<NormalizedPickupPoint[]> {
@@ -58,9 +58,21 @@ export class CheckoutShippingService {
     return pickupPoints.map((point: any) => this.normalizePickupPoint(point));
   }
 
-  private normalizeDeliveryOption(option: any): NormalizedShippingOption {
+  private normalizeDeliveryOption(
+    option: any,
+    destinationCountry: string,
+  ): NormalizedShippingOption {
+    const matchingCountryPrice = Array.isArray(option?.countries)
+      ? option.countries.find(
+          (country: any) =>
+            String(country?.iso_2 || '').toUpperCase() ===
+            destinationCountry.toUpperCase(),
+        )?.price
+      : undefined;
+
     const priceAmount =
       option?.shipping_rate?.value ??
+      matchingCountryPrice ??
       option?.price?.amount ??
       option?.price ??
       option?.total_price?.amount ??
@@ -74,8 +86,12 @@ export class CheckoutShippingService {
       option?.currency ??
       null;
 
-    const deliveryMethodType = option?.delivery_method_type || 'standard_delivery';
-    const deliveryType = deliveryMethodType.includes('service_point')
+    const requiresServicePoint =
+      String(option?.service_point_input || '').toLowerCase() === 'required';
+    const deliveryMethodType = requiresServicePoint
+      ? 'service_point_delivery'
+      : 'home_delivery';
+    const deliveryType = requiresServicePoint
       ? 'pickup_point'
       : 'home';
 
@@ -91,7 +107,7 @@ export class CheckoutShippingService {
       carrierName: option?.carrier?.name || option?.carrier_name || null,
       checkoutIdentifier: option?.checkout_identifier?.value
         ? String(option.checkout_identifier.value)
-        : null,
+        : String(option?.id ?? ''),
     };
   }
 

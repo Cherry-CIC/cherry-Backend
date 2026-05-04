@@ -46,7 +46,8 @@ export class PaymentRepository {
     );
 
     return {
-      paymentIntent: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
       customer: customer.id,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,

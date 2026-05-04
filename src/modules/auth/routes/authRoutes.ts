@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import {
-  register,
-  login,
-  getProfile,
-  updateProfile,
-  deleteAccount,
+    register,
+    login,
+    getProfile,
+    updateProfile,
+    saveAddress,
 } from '../controllers/authController';
-import { validateRegister, validateLogin } from '../validators/authValidator';
+import {
+    validateRegister,
+    validateLogin,
+    validateSaveAddress,
+} from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
 const router = Router();
@@ -55,7 +59,7 @@ const router = Router();
  *         photoURL: "https://example.com/photo.jpg"
  *         createdAt: "2023-01-01T00:00:00.000Z"
  *         updatedAt: "2023-01-01T00:00:00.000Z"
- *
+ *     
  *     AuthResponse:
  *       type: object
  *       properties:
@@ -259,40 +263,55 @@ router.put('/profile', authMiddleware, updateProfile);
 
 /**
  * @swagger
- * /api/auth/account:
- *   delete:
- *     summary: Delete the authenticated user's account and related Firestore documents
+ * /api/auth/address:
+ *   put:
+ *     summary: Save or update user delivery address
  *     tags: [Authentication]
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - country
+ *               - addressLine1
+ *               - postcode
+ *               - city
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               addressLine1:
+ *                 type: string
+ *               addressLine2:
+ *                 type: string
+ *                 nullable: true
+ *               postcode:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *             example:
+ *               fullName: "Jimoh Yusuph"
+ *               country: "United Kingdom"
+ *               addressLine1: "71 gol street"
+ *               addressLine2: "Flat 2"
+ *               postcode: "SE18 5AB"
+ *               city: "London"
  *     responses:
  *       200:
- *         description: Account deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     deletedUserProfiles:
- *                       type: integer
- *                     deletedProducts:
- *                       type: integer
- *                     deletedOrders:
- *                       type: integer
- *                     deletedShipments:
- *                       type: integer
+ *         description: Address saved successfully
+ *       400:
+ *         description: Validation error
  *       401:
  *         description: Unauthorized
  *       404:
  *         description: User profile not found
  */
-router.delete('/account', authMiddleware, deleteAccount);
+router.put('/address', authMiddleware, validateSaveAddress, saveAddress);
 
 export default router;

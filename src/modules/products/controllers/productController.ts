@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ServiceFactory } from '../services/ServiceFactory';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 export const getAllProducts = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -35,7 +36,11 @@ export const createProduct = async (
 export const getProductById = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Product ID is required');
+            return;
+        }
         const product = await productService.getProductById(id);
         
         if (!product) {
@@ -52,7 +57,11 @@ export const getProductById = async (req: Request, res: Response): Promise<void>
 export const getProductWithDetails = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Product ID is required');
+            return;
+        }
         const product = await productService.getProductWithDetails(id);
         
         if (!product) {
@@ -79,7 +88,11 @@ export const getAllProductsWithDetails = async (req: Request, res: Response): Pr
 export const updateProduct = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Product ID is required');
+            return;
+        }
         const user = (req as any).user;
         const updateData = req.body;
         
@@ -109,7 +122,11 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
 export const deleteProduct = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const { id } = req.params;
+        const id = requireSingleParam(req.params.id);
+        if (!id) {
+            ResponseHandler.badRequest(res, 'Product ID is required');
+            return;
+        }
         const user = (req as any).user;
         
         // First check if the product exists and belongs to the user
@@ -133,7 +150,11 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
 export const likeProduct = async (req: Request, res: Response): Promise<void> => {
   try {
     const productService = ServiceFactory.getProductService();
-    const { id } = req.params;
+    const id = requireSingleParam(req.params.id);
+    if (!id) {
+      ResponseHandler.badRequest(res, 'Product ID is required');
+      return;
+    }
     const { like } = req.body;
 
     if (typeof like !== 'boolean') {

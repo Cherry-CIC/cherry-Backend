@@ -20,13 +20,14 @@ export class ShipmentService {
     const parcelData: any = {
       name: order.shipping.name || 'Customer',
       address: order.shipping.address.line1,
-      address_2: order.shipping.address.line2 || '',
+      house_number: order.shipping.address.house_number || '',
       city: order.shipping.address.city,
       postal_code: order.shipping.address.postal_code,
       country: order.shipping.address.country || 'GB',
       email: order.email,
+      telephone: order.shipping.telephone || '',
       order_number: order.id,
-      weight: order.shippingWeight,
+      weight: (order.shippingWeight / 1000).toFixed(3),
       request_label: true,
       shipment: {
         id: Number(order.shippingOptionId),
