@@ -7,6 +7,7 @@ import {
   stripBotMention
 } from '../src/app';
 import { createIndexFromDocuments, searchIndex } from '../src/retrieval';
+import { isApprovedDocPath } from '../src/sources/github';
 import type { RuntimeConfig, SearchIndex } from '../src/types';
 
 function createTestRuntime(overrides: Partial<RuntimeConfig> = {}): {
@@ -173,5 +174,14 @@ describe('cherry-help bot behaviour', () => {
     );
 
     expect(reply).toBeNull();
+  });
+
+  it('only treats approved documentation paths as indexable', () => {
+    expect(isApprovedDocPath('README.md')).toBe(true);
+    expect(isApprovedDocPath('AGENTS.md')).toBe(true);
+    expect(isApprovedDocPath('docs/README.md')).toBe(true);
+    expect(isApprovedDocPath('.devcontainer/devcontainer.json')).toBe(true);
+    expect(isApprovedDocPath('src/README.md')).toBe(false);
+    expect(isApprovedDocPath('package.json')).toBe(false);
   });
 });
