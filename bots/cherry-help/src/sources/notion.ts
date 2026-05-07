@@ -1,6 +1,7 @@
 import { Client } from '@notionhq/client';
 
 import type { SourceDocument } from '../types';
+import { redactSensitiveLines } from './safety';
 
 export async function fetchNotionDocs(env: NodeJS.ProcessEnv = process.env): Promise<SourceDocument[]> {
   const token = env.NOTION_TOKEN?.trim();
@@ -17,7 +18,7 @@ export async function fetchNotionDocs(env: NodeJS.ProcessEnv = process.env): Pro
     const page = await notion.pages.retrieve({ page_id: pageId });
     const title = getPageTitle(page);
     const blocks = await readBlocks(notion, pageId);
-    const text = blocks.join('\n\n').trim();
+    const text = redactSensitiveLines(blocks.join('\n\n')).trim();
 
     if (!text) {
       continue;

@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import type { SourceDocument } from '../types';
+import { redactSensitiveLines } from './safety';
 
 const APPROVED_ROOT_FILES = new Set(['README.md', 'AGENTS.md', 'CONTRIBUTING.md']);
 const APPROVED_DIRECTORIES = ['docs/', '.devcontainer/'];
@@ -94,14 +95,13 @@ export async function fetchGitHubDocs(env: NodeJS.ProcessEnv = process.env): Pro
 
 export function isApprovedDocPath(filePath: string): boolean {
   const cleanPath = toPosixPath(filePath);
-  const basename = path.posix.basename(cleanPath);
   const extension = path.posix.extname(cleanPath);
 
   if (!APPROVED_EXTENSIONS.has(extension)) {
     return false;
   }
 
-  if (APPROVED_ROOT_FILES.has(cleanPath) || APPROVED_ROOT_FILES.has(basename)) {
+  if (APPROVED_ROOT_FILES.has(cleanPath)) {
     return true;
   }
 
@@ -214,13 +214,6 @@ function isBlockedPath(filePath: string): boolean {
     cleanPath.includes('/dist/') ||
     cleanPath.includes('/coverage/')
   );
-}
-
-function redactSensitiveLines(text: string): string {
-  return text
-    .split(/\r?\n/)
-    .filter((line) => !/\b(xoxb|xapp|sk_live|ghp_|github_pat_|password\s*=|secret\s*=|token\s*=)\b/i.test(line))
-    .join('\n');
 }
 
 function encodePath(filePath: string): string {
