@@ -292,7 +292,7 @@ export const getPickupPoints = async (
     const pickupPoints = await checkoutShippingService.getPickupPoints({
       country,
       address,
-      radius: radius ? Number(radius) : undefined,
+      radius: radius ? Number(radius) : 5000,
       carrier: ENFORCED_CARRIER,
     });
 

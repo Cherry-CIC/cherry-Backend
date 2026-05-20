@@ -28,12 +28,9 @@ const router = Router();
  *             type: object
  *             required:
  *               - amount
+ *               - deliveryMethod
  *               - paymentIntentId
- *               - shippingMethodId
- *               - shippingCarrier
- *               - shippingWeight
  *               - shipping
- *               - pickupPoint
  *             properties:
  *               amount:
  *                 type: integer
@@ -49,13 +46,18 @@ const router = Router();
  *               productName:
  *                 type: string
  *                 example: "Denim Jacket"
+ *               deliveryMethod:
+ *                 type: string
+ *                 enum: [home, pickup_point]
+ *                 example: "pickup_point"
  *               shippingMethodId:
  *                 type: string
- *                 description: Sendcloud shipping method id selected during checkout
+ *                 description: Sendcloud shipping method id selected during checkout. For pickup-point delivery this can be resolved from backend config.
  *                 example: "3747"
  *               shippingCarrier:
  *                 type: string
- *                 enum: [inpost_gb]
+ *                 description: Optional carrier hint. The backend resolves the final carrier and shipping method.
+ *                 example: "inpost_gb"
  *               shippingWeight:
  *                 type: integer
  *                 description: Parcel weight in grams
@@ -104,7 +106,7 @@ const router = Router();
  *                     example: "+447700900000"
  *               pickupPoint:
  *                 type: object
- *                 description: Required. Must be an InPost pickup point.
+ *                 description: Required only when deliveryMethod is pickup_point.
  *                 required:
  *                   - id
  *                   - name

@@ -28,6 +28,11 @@ export interface PickupPointSelection {
   postalCode: string;
   country: string;
   carrier?: string | null;
+  distanceMeters?: number | null;
+  latitude?: string | null;
+  longitude?: string | null;
+  openTomorrow?: boolean;
+  openUpcomingWeek?: boolean;
 }
 
 export interface Order {
@@ -49,6 +54,13 @@ export interface Order {
     telephone?: string;
   };
   pickupPoint?: PickupPointSelection;
+  pickupPointId?: string;
+  pickupPointName?: string;
+  pickupPointAddressLine1?: string;
+  pickupPointCity?: string;
+  pickupPointPostalCode?: string;
+  pickupPointCountry?: string;
+  pickupPointCarrier?: string | null;
   paymentIntentId?: string;
   paymentStatus: PaymentStatus;
   status?: 'completed' | 'pending' | 'failed';

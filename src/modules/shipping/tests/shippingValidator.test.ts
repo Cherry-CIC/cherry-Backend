@@ -32,4 +32,14 @@ describe('shipping validators', () => {
 
     expect(error).toBeUndefined();
   });
+
+  it('rejects pickup points query with a radius outside the supported range', () => {
+    const { error } = pickupPointsQueryValidator.validate({
+      country: 'GB',
+      address: 'SE18 5AB',
+      radius: 75000,
+    });
+
+    expect(error).toBeDefined();
+  });
 });

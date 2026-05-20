@@ -69,6 +69,9 @@ Important vars for local work:
 - `SENDCLOUD_PUBLIC_KEY`
 - `SENDCLOUD_SECRET_KEY`
 - `SENDCLOUD_WEBHOOK_SECRET`
+- `SENDCLOUD_PICKUP_POINT_SHIPPING_METHOD_ID`
+- `SENDCLOUD_PICKUP_POINT_SHIPPING_METHOD_IDS`
+- `SENDCLOUD_HOME_SHIPPING_METHOD_ID`
 - `FIREBASE_PROJECT_ID`
 
 Recommended defaults:
@@ -76,6 +79,7 @@ Recommended defaults:
 - Keep Stripe in test mode locally
 - Set `SENDCLOUD_MODE=mock` outside production
 - Only use live Sendcloud credentials when you are deliberately testing the live shipping integration
+- Set pickup-point shipping method IDs from Sendcloud rather than relying on carrier values submitted by the mobile app
 
 See `.env.example` for the full template.
 

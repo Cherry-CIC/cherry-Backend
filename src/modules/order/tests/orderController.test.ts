@@ -48,11 +48,11 @@ const createResponse = () => {
 describe('orderController.createOrder', () => {
   const payload = {
     amount: 2599,
+    deliveryMethod: 'pickup_point',
     paymentIntentId: 'pi_123',
     productId: 'product-1',
     productName: 'Winter Coat',
     shippingMethodId: '12345',
-    shippingCarrier: 'inpost_gb',
     shippingWeight: 2500,
     shipping: {
       name: 'Jane Doe',
@@ -92,6 +92,7 @@ describe('orderController.createOrder', () => {
         id: '12345',
         name: 'InPost locker',
         price: '3.99',
+        carrierCode: 'inpost_gb',
       },
     ]);
   });
@@ -102,6 +103,11 @@ describe('orderController.createOrder', () => {
       userId: 'user-1',
       email: 'user@example.com',
       ...payload,
+      deliveryType: 'pickup_point',
+      shippingOptionId: '12345',
+      shippingOptionName: 'InPost locker',
+      shippingOptionPrice: '3.99',
+      shippingCarrier: 'inpost_gb',
       paymentStatus: 'succeeded',
       shipmentStatus: 'pending',
       status: 'completed',
@@ -134,9 +140,14 @@ describe('orderController.createOrder', () => {
     );
     expect(mockCreateOrder).toHaveBeenCalledWith(
       expect.objectContaining({
+        deliveryType: 'pickup_point',
         shippingOptionId: '12345',
         shippingOptionName: 'InPost locker',
         shippingOptionPrice: '3.99',
+        shippingCarrier: 'inpost_gb',
+        pickupPointId: '999',
+        pickupPointName: 'Locker A',
+        pickupPointAddressLine1: '10 High Street',
       }),
     );
     expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
@@ -152,6 +163,8 @@ describe('orderController.createOrder', () => {
       userId: 'user-1',
       email: 'user@example.com',
       ...payload,
+      deliveryType: 'pickup_point',
+      shippingOptionId: '12345',
       paymentStatus: 'succeeded',
       shipmentStatus: 'pending',
       status: 'completed',
@@ -223,5 +236,51 @@ describe('orderController.createOrder', () => {
 
     expect(mockCreateOrder).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('uses the only available pickup-point shipping method when none is submitted', async () => {
+    const payloadWithoutShippingMethod = {
+      ...payload,
+      shippingMethodId: undefined,
+    };
+    mockCreateOrder.mockResolvedValue({
+      id: 'order-3',
+      userId: 'user-1',
+      email: 'user@example.com',
+      ...payloadWithoutShippingMethod,
+      deliveryType: 'pickup_point',
+      shippingOptionId: '12345',
+      paymentStatus: 'succeeded',
+      shipmentStatus: 'pending',
+      status: 'completed',
+      createdAt: new Date(),
+    });
+    mockCreateShipmentForPaidOrder.mockResolvedValue({
+      shipment: {
+        id: 'shipment-3',
+        status: 'announced',
+      },
+      sendcloudParcel: {
+        id: 101,
+      },
+    });
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payloadWithoutShippingMethod,
+    };
+    const res = createResponse();
+
+    await createOrder(req, res);
+
+    expect(mockCreateOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shippingOptionId: '12345',
+        shippingCarrier: 'inpost_gb',
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 });
