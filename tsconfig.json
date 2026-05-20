@@ -9,5 +9,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "typeRoots": ["./node_modules/@types", "./src/types"]
-  }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "bots"]
 }

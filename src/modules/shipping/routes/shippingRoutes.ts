@@ -114,7 +114,7 @@ router.get(
  * @swagger
  * /api/shipping/pickup-points:
  *   get:
- *     summary: Get available InPost pickup points for a destination
+ *     summary: Get available pickup points for a destination
  *     tags: [Shipping]
  *     security:
  *       - bearerAuth: []
@@ -138,7 +138,7 @@ router.get(
  *         schema:
  *           type: integer
  *           example: 5000
- *         description: Search radius in meters for address/postcode geocoding. Default 5000.
+ *         description: Search radius in metres for address/postcode geocoding. Default 5000.
  *     responses:
  *       200:
  *         description: Pickup points retrieved successfully
@@ -205,7 +205,7 @@ router.get(
  * @swagger
  * /api/shipping/postcodes/validate:
  *   get:
- *     summary: Validate postcode and return normalized location fields
+ *     summary: Validate postcode and return normalised location fields
  *     tags: [Shipping]
  *     parameters:
  *       - in: query

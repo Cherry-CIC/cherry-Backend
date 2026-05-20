@@ -61,6 +61,10 @@ export class SendcloudService {
         error.response?.data?.error?.message ||
         error.response?.data?.message ||
         error.message;
+      console.error('Sendcloud parcel creation failed:', {
+        status: error.response?.status,
+        message: errorMessage,
+      });
       throw new Error(`Sendcloud API Error: ${errorMessage}`);
     }
   }

@@ -25,13 +25,19 @@ export interface Shipment {
     name: string;
     address: string;
     address_2?: string;
+    house_number?: string;
     city: string;
     postal_code: string;
     country: string;
     email?: string;
     telephone?: string;
-    weight: number;
+    weight: number | string;
     order_number: string;
+    request_label?: boolean;
+    shipment?: {
+      id: number;
+    };
+    to_service_point?: number | string;
   };
   createdAt: Date;
   updatedAt: Date;

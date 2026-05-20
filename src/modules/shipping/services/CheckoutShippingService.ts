@@ -55,7 +55,9 @@ export class CheckoutShippingService {
 
   async getPickupPoints(query: PickupPointsQuery): Promise<NormalizedPickupPoint[]> {
     const pickupPoints = await this.sendcloudService.getServicePoints(query);
-    return pickupPoints.map((point: any) => this.normalizePickupPoint(point));
+    return pickupPoints
+      .map((point: any) => this.normalizePickupPoint(point))
+      .filter((point) => this.hasRequiredPickupPointFields(point));
   }
 
   private normalizeDeliveryOption(
@@ -112,26 +114,100 @@ export class CheckoutShippingService {
   }
 
   private normalizePickupPoint(point: any): NormalizedPickupPoint {
-    const addressParts = [point?.street, point?.house_number].filter(Boolean);
+    const nestedAddress = point?.address || {};
+    const street =
+      point?.street ||
+      point?.addressLine1 ||
+      point?.address_line_1 ||
+      point?.line1 ||
+      nestedAddress?.street ||
+      nestedAddress?.line1 ||
+      nestedAddress?.address_line_1 ||
+      '';
+    const houseNumber =
+      point?.house_number ||
+      point?.houseNumber ||
+      nestedAddress?.house_number ||
+      nestedAddress?.houseNumber ||
+      '';
+    const addressParts = [street, houseNumber].filter(Boolean);
+    const carrier =
+      point?.carrier?.code ||
+      point?.carrier_code ||
+      point?.carrier ||
+      point?.carrierName ||
+      null;
 
     return {
-      id: String(point?.id ?? ''),
+      id: String(point?.id ?? point?.service_point_id ?? point?.code ?? ''),
       name: point?.name || 'Pickup point',
-      addressLine1: addressParts.join(' ').trim(),
-      city: point?.city || '',
-      postalCode: point?.postal_code || '',
-      country: point?.country || '',
-      carrier: point?.carrier || null,
+      addressLine1:
+        addressParts.join(' ').trim() ||
+        String(nestedAddress?.addressLine1 || nestedAddress?.address || '').trim(),
+      city: point?.city || nestedAddress?.city || '',
+      postalCode:
+        point?.postal_code ||
+        point?.postalCode ||
+        point?.postcode ||
+        nestedAddress?.postal_code ||
+        nestedAddress?.postalCode ||
+        nestedAddress?.postcode ||
+        '',
+      country: String(point?.country || nestedAddress?.country || '').toUpperCase(),
+      carrier: carrier ? String(carrier).toLowerCase() : null,
       distanceMeters:
-        typeof point?.distance === 'number'
-          ? point.distance
-          : point?.distance
-            ? Number(point.distance)
-            : null,
-      latitude: point?.latitude ? String(point.latitude) : null,
-      longitude: point?.longitude ? String(point.longitude) : null,
-      openTomorrow: Boolean(point?.open_tomorrow),
-      openUpcomingWeek: Boolean(point?.open_upcoming_week),
+        this.readNumber(point?.distanceMeters ?? point?.distance) ?? null,
+      latitude: this.readString(point?.latitude ?? point?.lat),
+      longitude: this.readString(point?.longitude ?? point?.long ?? point?.lng),
+      openTomorrow: this.readBoolean(point?.openTomorrow ?? point?.open_tomorrow),
+      openUpcomingWeek: this.readBoolean(
+        point?.openUpcomingWeek ?? point?.open_upcoming_week,
+      ),
     };
+  }
+
+  private hasRequiredPickupPointFields(point: NormalizedPickupPoint): boolean {
+    return [
+      point.id,
+      point.name,
+      point.addressLine1,
+      point.city,
+      point.postalCode,
+      point.country,
+    ].every((value) => value.trim().length > 0);
+  }
+
+  private readNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    return undefined;
+  }
+
+  private readString(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const trimmed = String(value).trim();
+    return trimmed ? trimmed : null;
+  }
+
+  private readBoolean(value: unknown): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+
+    return Boolean(value);
   }
 }

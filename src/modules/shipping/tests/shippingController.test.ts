@@ -11,6 +11,12 @@ jest.mock('../services/CheckoutShippingService', () => ({
   })),
 }));
 
+jest.mock('../services/ShipmentService', () => ({
+  ShipmentService: jest.fn().mockImplementation(() => ({
+    createShipmentForPaidOrder: jest.fn(),
+  })),
+}));
+
 jest.mock('../repositories/ShipmentRepository', () => ({
   ShipmentRepository: jest.fn().mockImplementation(() => ({
     getShipmentBySendcloudId: mockGetShipmentBySendcloudId,
@@ -93,6 +99,11 @@ describe('shippingController', () => {
       {
         id: 'sp_1',
         name: 'Locker A',
+        addressLine1: '1 Test Street',
+        city: 'London',
+        postalCode: 'SW1A 1AA',
+        country: 'GB',
+        carrier: 'inpost_gb',
       },
     ]);
 
@@ -109,10 +120,24 @@ describe('shippingController', () => {
     expect(mockGetPickupPoints).toHaveBeenCalledWith({
       country: 'GB',
       address: 'SW1A 1AA',
-      radius: undefined,
+      radius: 5000,
       carrier: 'inpost_gb',
     });
     expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Pickup points retrieved successfully',
+        data: {
+          pickupPoints: [
+            expect.objectContaining({
+              id: 'sp_1',
+              addressLine1: '1 Test Street',
+            }),
+          ],
+        },
+      }),
+    );
   });
 
   it('updates shipment and order state from a webhook', async () => {

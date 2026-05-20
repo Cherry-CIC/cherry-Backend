@@ -95,8 +95,8 @@ export const pickupPointsQueryValidator = Joi.object({
   radius: Joi.number().integer().min(100).max(50000).optional().messages({
     'number.base': 'Radius must be a number',
     'number.integer': 'Radius must be an integer',
-    'number.min': 'Radius must be at least 100 meters',
-    'number.max': 'Radius must not exceed 50000 meters',
+    'number.min': 'Radius must be at least 100 metres',
+    'number.max': 'Radius must not exceed 50000 metres',
   }),
   carrier: Joi.string().trim().optional(),
 });

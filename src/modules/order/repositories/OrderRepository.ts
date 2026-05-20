@@ -15,6 +15,13 @@ export interface CreateOrderInput {
   shippingWeight: number;
   shipping: Order['shipping'];
   pickupPoint?: Order['pickupPoint'];
+  pickupPointId?: string;
+  pickupPointName?: string;
+  pickupPointAddressLine1?: string;
+  pickupPointCity?: string;
+  pickupPointPostalCode?: string;
+  pickupPointCountry?: string;
+  pickupPointCarrier?: string | null;
   paymentIntentId?: string;
   paymentStatus: Order['paymentStatus'];
   shipmentStatus: Order['shipmentStatus'];
@@ -37,6 +44,13 @@ export class OrderRepository {
       shippingWeight: input.shippingWeight,
       shipping: input.shipping,
       pickupPoint: input.pickupPoint,
+      pickupPointId: input.pickupPointId,
+      pickupPointName: input.pickupPointName,
+      pickupPointAddressLine1: input.pickupPointAddressLine1,
+      pickupPointCity: input.pickupPointCity,
+      pickupPointPostalCode: input.pickupPointPostalCode,
+      pickupPointCountry: input.pickupPointCountry,
+      pickupPointCarrier: input.pickupPointCarrier,
       paymentIntentId: input.paymentIntentId,
       paymentStatus: input.paymentStatus,
       shipmentStatus: input.shipmentStatus,
@@ -65,6 +79,13 @@ export class OrderRepository {
       shippingWeight: input.shippingWeight,
       shipping: input.shipping,
       pickupPoint: input.pickupPoint,
+      pickupPointId: input.pickupPointId,
+      pickupPointName: input.pickupPointName,
+      pickupPointAddressLine1: input.pickupPointAddressLine1,
+      pickupPointCity: input.pickupPointCity,
+      pickupPointPostalCode: input.pickupPointPostalCode,
+      pickupPointCountry: input.pickupPointCountry,
+      pickupPointCarrier: input.pickupPointCarrier,
       paymentIntentId: input.paymentIntentId,
       paymentStatus: input.paymentStatus,
       shipmentStatus: input.shipmentStatus,
@@ -127,6 +148,13 @@ export class OrderRepository {
         shippingCarrier: data.shippingCarrier,
         shippingWeight: data.shippingWeight || 0,
         pickupPoint: data.pickupPoint,
+        pickupPointId: data.pickupPointId,
+        pickupPointName: data.pickupPointName,
+        pickupPointAddressLine1: data.pickupPointAddressLine1,
+        pickupPointCity: data.pickupPointCity,
+        pickupPointPostalCode: data.pickupPointPostalCode,
+        pickupPointCountry: data.pickupPointCountry,
+        pickupPointCarrier: data.pickupPointCarrier,
         paymentIntentId: data.paymentIntentId,
         paymentStatus: data.paymentStatus || 'pending',
         shipmentStatus: data.shipmentStatus || 'not_created',
