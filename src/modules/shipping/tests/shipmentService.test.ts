@@ -23,6 +23,7 @@ const baseOrder: Order = {
     telephone: '+447700900000',
     address: {
       line1: '10 Buyer Street',
+      house_number: '10',
       city: 'London',
       postal_code: 'SW1A 1AA',
       country: 'GB',
@@ -75,6 +76,7 @@ describe('ShipmentService', () => {
     expect(sendcloudService.createParcel).toHaveBeenCalledWith(
       expect.objectContaining({
         address: '1 Locker Street',
+        house_number: '',
         city: 'London',
         postal_code: 'SW1A 2AA',
         country: 'GB',

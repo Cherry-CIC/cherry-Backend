@@ -39,7 +39,10 @@ export class ShipmentService {
     const parcelData: any = {
       name: order.shipping.name || 'Customer',
       address: destinationAddress.address,
-      house_number: order.shipping.address.house_number || '',
+      house_number:
+        order.deliveryType === 'pickup_point'
+          ? ''
+          : order.shipping.address.house_number || '',
       city: destinationAddress.city,
       postal_code: destinationAddress.postal_code,
       country: destinationAddress.country,
@@ -110,10 +113,11 @@ export class ShipmentService {
   private resolveShippingMethodId(order: Order): string {
     if (order.deliveryType === 'pickup_point') {
       const configuredMethod = resolveConfiguredPickupPointShippingMethod(
+        order.shippingOptionId,
         order.shippingCarrier || order.pickupPoint?.carrier,
       );
       const methodId = String(
-        configuredMethod?.id || order.shippingOptionId || '',
+        configuredMethod?.id || '',
       ).trim();
 
       if (!methodId) {

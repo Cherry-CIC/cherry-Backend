@@ -76,7 +76,7 @@ function normaliseOrderBody(body: Record<string, any>): Record<string, any> {
     shippingMethodId:
       body.shippingMethodId || body.shipping_method_id || body.shippingOptionId,
     shippingCarrier: body.shippingCarrier || body.shipping_carrier,
-    shippingWeight: body.shippingWeight || body.shipping_weight,
+    shippingWeight: body.shippingWeight ?? body.shipping_weight,
   };
 }
 

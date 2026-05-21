@@ -44,6 +44,7 @@ const resolvePickupPointShipping = async (
   requestedShippingMethodId?: string,
 ): Promise<ResolvedOrderShipping> => {
   const configuredMethod = resolveConfiguredPickupPointShippingMethod(
+    undefined,
     pickupPoint.carrier,
   );
   const requestedOrConfiguredMethodId = String(

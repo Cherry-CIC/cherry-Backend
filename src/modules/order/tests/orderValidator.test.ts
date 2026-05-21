@@ -141,4 +141,46 @@ describe('orderValidator', () => {
     expect(req.body.shippingMethodId).toBe('12345');
     expect(req.body.shippingWeight).toBe(1000);
   });
+
+  it('rejects a zero shippingWeight instead of applying the default weight', () => {
+    const req: any = {
+      body: {
+        amount: 2599,
+        deliveryMethod: 'pickup_point',
+        paymentIntentId: 'pi_123',
+        shippingMethodId: '12345',
+        shippingWeight: 0,
+        shipping: {
+          name: 'Jane Doe',
+          telephone: '+447700900000',
+          address: {
+            line1: '10 High Street',
+            city: 'London',
+            postal_code: 'SW1A 1AA',
+            country: 'GB',
+          },
+        },
+        pickupPoint: {
+          id: '999',
+          name: 'Locker A',
+          addressLine1: '10 High Street',
+          city: 'London',
+          postalCode: 'SW1A 1AA',
+          country: 'GB',
+        },
+      },
+    };
+    const res = createResponse();
+    const next = jest.fn();
+
+    validateOrder(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringContaining('shippingWeight'),
+      }),
+    );
+  });
 });

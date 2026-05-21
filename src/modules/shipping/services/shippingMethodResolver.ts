@@ -5,14 +5,36 @@ export interface ResolvedShippingMethod {
   carrier: string | null;
 }
 
-export function normaliseCarrier(value?: string | null): string | null {
+type CarrierInput = string | Record<string, unknown> | null | undefined;
+
+export function normaliseCarrier(value?: CarrierInput): string | null {
+  if (value !== null && value !== undefined && typeof value === 'object') {
+    const carrierCode = value.code;
+    const carrierName = value.name;
+    value =
+      typeof carrierCode === 'string'
+        ? carrierCode
+        : typeof carrierName === 'string'
+          ? carrierName
+          : null;
+  }
+
   const carrier = String(value || '').trim().toLowerCase();
   return carrier || null;
 }
 
 export function resolveConfiguredPickupPointShippingMethod(
-  carrierHint?: string | null,
+  shippingMethodId?: string | null,
+  carrierHint?: CarrierInput,
 ): ResolvedShippingMethod | null {
+  const methodId = String(shippingMethodId || '').trim();
+  if (methodId) {
+    return {
+      id: methodId,
+      carrier: normaliseCarrier(carrierHint),
+    };
+  }
+
   const configuredMethods = sendcloudConfig.pickupPointShippingMethodIds;
   const carrier = normaliseCarrier(carrierHint);
 
