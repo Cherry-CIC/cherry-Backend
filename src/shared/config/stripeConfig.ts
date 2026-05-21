@@ -1,11 +1,18 @@
 
 import Stripe from 'stripe';
 
-// Ensure the secret key is present; throw a clear error if not.
+// Ensure the Stripe API secret key is present at boot time.
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('STRIPE_SECRET_KEY is not defined in the environment.');
 }
- 
+
+// Ensure the webhook signing secret is present at boot time.
+// This is the whsec_... value from the Stripe Dashboard → Webhooks → your endpoint.
+// It is DIFFERENT from STRIPE_SECRET_KEY and must not be used interchangeably.
+if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  throw new Error('STRIPE_WEBHOOK_SECRET is not defined in the environment.');
+}
+
 // Initialise Stripe with the required API version.
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -23,19 +30,19 @@ const addNewCustomer = async (email: string): Promise<Stripe.Customer> => {
   const customer = await stripe.customers.create({
     email,
     description: 'New Customer'
-  })
+  });
 
-  return customer
-}
+  return customer;
+};
 
 const createEphemeralKey = async (customerId: string): Promise<Stripe.EphemeralKey> => {
   const ephemeralKey = await stripe.ephemeralKeys.create(
-    {customer: customerId},
-    {apiVersion: '2022-08-01'}
+    { customer: customerId },
+    { apiVersion: '2022-08-01' }
   );
 
-  return ephemeralKey
-}
+  return ephemeralKey;
+};
 
 const createPaymentIntent = async (
   amount: number,
@@ -51,20 +58,28 @@ const createPaymentIntent = async (
     },
   });
 
-  return paymentIntent
-}
+  return paymentIntent;
+};
 
+/**
+ * Verifies and constructs a Stripe webhook event from the raw request body.
+ *
+ * Uses STRIPE_WEBHOOK_SECRET (whsec_...) — the signing secret specific to this
+ * webhook endpoint — NOT the Stripe API secret key. Throws if the signature is
+ * invalid or the payload is malformed; callers must catch and return HTTP 400.
+ */
 const createWebhook = (
   rawBody: Buffer | string,
   sig: string
 ): Stripe.Event => {
+  // STRIPE_WEBHOOK_SECRET presence is guaranteed by the boot-time guard above.
   const event = stripe.webhooks.constructEvent(
     rawBody,
     sig,
-    process.env.STRIPE_SECRET_KEY!
-  )
-  return event
-}
+    process.env.STRIPE_WEBHOOK_SECRET!
+  );
+  return event;
+};
 
 export {
   stripe,
@@ -74,3 +89,4 @@ export {
   createPaymentIntent,
   createWebhook
 };
+

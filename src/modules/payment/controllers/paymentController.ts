@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
-import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { PaymentService } from '../services/PaymentService';
+import { WebhookService } from '../services/WebhookService';
+import { WebhookEventRepository } from '../WebhookEventRepository';
 
 /**
  * @swagger
@@ -75,32 +76,111 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
     );
   }
 };
- 
-// Stripe webhook endpoint (moved from webhookController)
+
+/**
+ * POST /api/payment/webhook
+ *
+ * Stripe webhook endpoint. Handles the following subscribed events:
+ *   - payment_intent.succeeded
+ *   - payment_intent.processing
+ *   - payment_intent.payment_failed
+ *   - payment_intent.canceled
+ *
+ * Security:
+ *   - Signature is verified using stripe.webhooks.constructEvent with
+ *     STRIPE_WEBHOOK_SECRET. Invalid signatures return 400 immediately.
+ *
+ * Idempotency:
+ *   - Each Stripe event ID is stored in Firestore after successful processing.
+ *   - Duplicate event deliveries (Stripe retries) return 200 immediately without
+ *     repeating any side effects.
+ *
+ * Error handling:
+ *   - 400: missing or invalid Stripe signature
+ *   - 200: valid event processed (or safely skipped as duplicate/unsupported)
+ *   - 500: unexpected internal error (Stripe will retry; event NOT marked processed)
+ */
 export const stripeWebhook = async (req: Request, res: Response): Promise<void> => {
+  // ── Step 1: Verify the Stripe signature ──────────────────────────────────────
+  const sig = req.headers['stripe-signature'] as string | undefined;
+
+  if (!sig) {
+    console.warn('[Webhook] Rejected: missing stripe-signature header.');
+    ResponseHandler.badRequest(res, 'Missing Stripe signature header');
+    return;
+  }
+
+  let event;
   try {
-    const sig = req.headers['stripe-signature'] as string;
-    if (!sig) {
-      ResponseHandler.badRequest(res, 'Missing Stripe signature header');
+    // req.body is the raw Buffer provided by express.raw() in paymentRoutes.ts.
+    event = createWebhook(req.body as Buffer, sig);
+  } catch (err) {
+    // constructEvent throws when the signature is invalid or the payload is
+    // malformed. This is not a server error — return 400 so Stripe stops retrying.
+    console.warn(
+      `[Webhook] Rejected: invalid signature. Error: ${err instanceof Error ? err.message : String(err)}`
+    );
+    ResponseHandler.badRequest(
+      res,
+      'Invalid webhook signature',
+      err instanceof Error ? err.message : 'Signature verification failed'
+    );
+    return;
+  }
+
+  console.log(`[Webhook] Received event: ${event.type} (id: ${event.id})`);
+
+  // ── Step 2: Idempotency check ─────────────────────────────────────────────────
+  const webhookEventRepo = new WebhookEventRepository();
+
+  try {
+    const alreadyProcessed = await webhookEventRepo.hasBeenProcessed(event.id);
+    if (alreadyProcessed) {
+      console.log(
+        `[Webhook] Duplicate event ignored: ${event.type} (id: ${event.id})`
+      );
+      // Return 200 so Stripe knows we received the event and stops retrying.
+      ResponseHandler.success(res, { received: true }, 'Duplicate event ignored');
       return;
     }
-
-    // Raw body is required for signature verification
-    const rawBody = (req as any).rawBody || req.body;
-    const event = createWebhook(rawBody, sig);
-
-    // Example handling – extend as needed
-    if (event.type === 'payment_intent.succeeded') {
-      console.log('✅ Payment succeeded:', (event.data.object as any).id);
-    }
-
-    ResponseHandler.success(res, {}, 'Webhook received');
   } catch (err) {
-    console.error('⚠️ Webhook error:', err);
+    // Firestore read failure. Return 500 so Stripe retries — we would rather
+    // retry than risk processing a duplicate without the idempotency guard.
+    console.error(
+      `[Webhook] Failed to check idempotency for event ${event.id}:`,
+      err
+    );
     ResponseHandler.internalServerError(
       res,
-      'Failed to process webhook',
+      'Webhook idempotency check failed',
+      err instanceof Error ? err.message : 'Unknown error'
+    );
+    return;
+  }
+
+  // ── Step 3: Process the event ─────────────────────────────────────────────────
+  try {
+    const webhookService = new WebhookService();
+    await webhookService.handleStripeEvent(event);
+
+    // Mark as processed ONLY after successful side effects. If handleStripeEvent
+    // throws, we intentionally skip this call so Stripe will retry.
+    await webhookEventRepo.markAsProcessed(event.id, event.type);
+
+    console.log(`[Webhook] Successfully processed event: ${event.type} (id: ${event.id})`);
+    ResponseHandler.success(res, { received: true }, 'Webhook processed');
+  } catch (err) {
+    // An unexpected error in business logic or the Firestore write.
+    // Do NOT mark the event as processed — Stripe will retry and we will attempt
+    // to process it again.
+    console.error(
+      `[Webhook] Unexpected error processing event ${event.type} (id: ${event.id}):`,
+      err
+    );
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to process webhook event',
       err instanceof Error ? err.message : 'Unknown error'
     );
   }
-};
+};
