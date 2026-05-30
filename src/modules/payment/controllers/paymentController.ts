@@ -23,7 +23,7 @@ import { PaymentService } from '../services/PaymentService';
  *             properties:
  *               amount:
  *                 type: integer
- *                 description: Amount in the smallest currency unit (e.g., cents)
+ *                 description: Amount in the smallest currency unit, pence for GBP
  *     responses:
  *       200:
  *         description: PaymentIntent created successfully
@@ -41,6 +41,9 @@ import { PaymentService } from '../services/PaymentService';
  *                   properties:
  *                     paymentIntentId:
  *                       type: string
+ *                     paymentIntent:
+ *                       type: string
+ *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
  *                     clientSecret:
  *                       type: string
  *                     ephemeralKey:
@@ -68,6 +71,14 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message === 'Amount must be a positive integer in the smallest currency unit'
+    ) {
+      ResponseHandler.badRequest(res, 'Invalid amount', err.message);
+      return;
+    }
+
     ResponseHandler.internalServerError(
       res,
       'Failed to create PaymentIntent',

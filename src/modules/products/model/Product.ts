@@ -7,6 +7,7 @@ export interface Product {
     userId: string;
     quality: string;
     size: string;
+    postage_size?: string;
     product_images: string[];
     donation: number;
     price: number;

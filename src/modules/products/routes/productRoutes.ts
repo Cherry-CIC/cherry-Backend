@@ -59,6 +59,11 @@ const router = Router();
  *           type: string
  *           description: Product size
  *           example: "Medium"
+ *         postage_size:
+ *           type: string
+ *           description: Selected postage size for fulfilment
+ *           enum: [small, medium, large]
+ *           example: "small"
  *         product_images:
  *           type: array
  *           items:
@@ -338,6 +343,10 @@ router.get('/:id/with-details', authMiddleware, validateProductId, getProductWit
  *               size:
  *                 type: string
  *                 example: "Medium"
+ *               postage_size:
+ *                 type: string
+ *                 enum: [small, medium, large]
+ *                 example: "small"
  *               product_images:
  *                 type: array
  *                 items:
@@ -417,6 +426,10 @@ router.post('/', authMiddleware, validateProduct, createProduct);
  *               size:
  *                 type: string
  *                 example: "Large"
+ *               postage_size:
+ *                 type: string
+ *                 enum: [small, medium, large]
+ *                 example: "medium"
  *               product_images:
  *                 type: array
  *                 items:
@@ -650,4 +663,3 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
 router.post('/:id/like', authMiddleware, likeProduct);
 
 export default router;
-

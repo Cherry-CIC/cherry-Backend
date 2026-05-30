@@ -32,7 +32,7 @@ const router = Router();
  *             properties:
  *               amount:
  *                 type: integer
- *                 description: Amount in the smallest currency unit (e.g., cents)
+ *                 description: Amount in the smallest currency unit, pence for GBP
  *     responses:
  *       200:
  *         description: PaymentIntent created successfully
@@ -50,6 +50,9 @@ const router = Router();
  *                   properties:
  *                     paymentIntentId:
  *                       type: string
+ *                     paymentIntent:
+ *                       type: string
+ *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
  *                     clientSecret:
  *                       type: string
  *                     ephemeralKey:

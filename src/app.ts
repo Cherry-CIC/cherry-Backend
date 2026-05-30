@@ -21,10 +21,12 @@ import paymentRoutes from './modules/payment/routes/paymentRoutes';
 import orderRoutes from './modules/order/routes/orderRoutes';
 import adminRoutes from './modules/order/routes/adminRoutes';
 import shippingRoutes from './modules/shipping/routes/shippingRoutes';
+import postageSizeRoutes from './modules/postageSizes/routes/postageSizeRoutes';
 
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/charities', charityRoutes);
+app.use('/api/postage-sizes', postageSizeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/order', orderRoutes);
