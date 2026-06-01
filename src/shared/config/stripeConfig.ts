@@ -1,4 +1,3 @@
-
 import Stripe from 'stripe';
 
 // Ensure the Stripe API secret key is present at boot time.
@@ -11,6 +10,15 @@ if (!process.env.STRIPE_SECRET_KEY) {
 // It is DIFFERENT from STRIPE_SECRET_KEY and must not be used interchangeably.
 if (!process.env.STRIPE_WEBHOOK_SECRET) {
   throw new Error('STRIPE_WEBHOOK_SECRET is not defined in the environment.');
+}
+
+// Ensure the publishable key is present at boot time.
+// PaymentRepository returns this to the mobile client so the Stripe SDK can
+// initialise. If missing, the client receives null and crashes with "Null is
+// not a subtype of type 'String'". Fail fast at boot rather than at first
+// /create-payment-intent call.
+if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+  throw new Error('STRIPE_PUBLISHABLE_KEY is not defined in the environment.');
 }
 
 // Initialise Stripe with the required API version.
@@ -29,16 +37,18 @@ const getCustomerByID = async (id: string): Promise<Stripe.Customer> => {
 const addNewCustomer = async (email: string): Promise<Stripe.Customer> => {
   const customer = await stripe.customers.create({
     email,
-    description: 'New Customer'
+    description: 'New Customer',
   });
 
   return customer;
 };
 
-const createEphemeralKey = async (customerId: string): Promise<Stripe.EphemeralKey> => {
+const createEphemeralKey = async (
+  customerId: string,
+): Promise<Stripe.EphemeralKey> => {
   const ephemeralKey = await stripe.ephemeralKeys.create(
     { customer: customerId },
-    { apiVersion: '2022-08-01' }
+    { apiVersion: '2022-08-01' },
   );
 
   return ephemeralKey;
@@ -47,7 +57,7 @@ const createEphemeralKey = async (customerId: string): Promise<Stripe.EphemeralK
 const createPaymentIntent = async (
   amount: number,
   currency: string,
-  customerId: string
+  customerId: string,
 ): Promise<Stripe.PaymentIntent> => {
   const paymentIntent = await stripe.paymentIntents.create({
     amount: amount,
@@ -68,15 +78,12 @@ const createPaymentIntent = async (
  * webhook endpoint — NOT the Stripe API secret key. Throws if the signature is
  * invalid or the payload is malformed; callers must catch and return HTTP 400.
  */
-const createWebhook = (
-  rawBody: Buffer | string,
-  sig: string
-): Stripe.Event => {
+const createWebhook = (rawBody: Buffer | string, sig: string): Stripe.Event => {
   // STRIPE_WEBHOOK_SECRET presence is guaranteed by the boot-time guard above.
   const event = stripe.webhooks.constructEvent(
     rawBody,
     sig,
-    process.env.STRIPE_WEBHOOK_SECRET!
+    process.env.STRIPE_WEBHOOK_SECRET!,
   );
   return event;
 };
@@ -87,6 +94,5 @@ export {
   addNewCustomer,
   createEphemeralKey,
   createPaymentIntent,
-  createWebhook
+  createWebhook,
 };
-

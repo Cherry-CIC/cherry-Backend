@@ -8,12 +8,14 @@ jest.mock('../../../shared/config/stripeConfig', () => ({
 }));
 
 // ── WebhookEventRepository ─────────────────────────────────────────────────────
-const mockHasBeenProcessed = jest.fn();
+const mockClaim = jest.fn();
 const mockMarkAsProcessed = jest.fn();
+const mockReleaseClaim = jest.fn();
 jest.mock('../WebhookEventRepository', () => ({
   WebhookEventRepository: jest.fn().mockImplementation(() => ({
-    hasBeenProcessed: mockHasBeenProcessed,
+    claim: mockClaim,
     markAsProcessed: mockMarkAsProcessed,
+    releaseClaim: mockReleaseClaim,
   })),
 }));
 
@@ -45,7 +47,7 @@ const createResponse = () => {
 /** Builds a minimal mock Stripe event object for the given type. */
 const buildStripeEvent = (
   type: string,
-  paymentIntentId = 'pi_test_123'
+  paymentIntentId = 'pi_test_123',
 ): any => ({
   id: 'evt_test_001',
   type,
@@ -71,7 +73,7 @@ describe('stripeWebhook controller', () => {
   describe('signature verification', () => {
     it('returns 400 when the stripe-signature header is absent', async () => {
       const req: any = {
-        headers: {},          // no stripe-signature
+        headers: {}, // no stripe-signature
         body: Buffer.from('{}'),
       };
       const res = createResponse();
@@ -80,14 +82,16 @@ describe('stripeWebhook controller', () => {
 
       expect(res.status).toHaveBeenCalledWith(400);
       // Idempotency and business logic must never be reached
-      expect(mockHasBeenProcessed).not.toHaveBeenCalled();
+      expect(mockClaim).not.toHaveBeenCalled();
       expect(mockHandleStripeEvent).not.toHaveBeenCalled();
     });
 
     it('returns 400 when the stripe signature is invalid', async () => {
       // Simulate Stripe's signature mismatch error
       mockCreateWebhook.mockImplementation(() => {
-        throw new Error('No signatures found matching the expected signature for payload.');
+        throw new Error(
+          'No signatures found matching the expected signature for payload.',
+        );
       });
 
       const req: any = {
@@ -99,8 +103,8 @@ describe('stripeWebhook controller', () => {
       await stripeWebhook(req, res);
 
       expect(res.status).toHaveBeenCalledWith(400);
-      // Event must not be marked processed or acted upon
-      expect(mockHasBeenProcessed).not.toHaveBeenCalled();
+      // Event must not be claimed, marked processed, or acted upon
+      expect(mockClaim).not.toHaveBeenCalled();
       expect(mockMarkAsProcessed).not.toHaveBeenCalled();
       expect(mockHandleStripeEvent).not.toHaveBeenCalled();
     });
@@ -111,11 +115,11 @@ describe('stripeWebhook controller', () => {
   // ────────────────────────────────────────────────────────────────────────────
 
   describe('idempotency', () => {
-    it('returns 200 without processing a duplicate event', async () => {
+    it('returns 200 without processing a duplicate event (claim fails)', async () => {
       const event = buildStripeEvent('payment_intent.succeeded');
       mockCreateWebhook.mockReturnValue(event);
-      // The event has already been stored in Firestore
-      mockHasBeenProcessed.mockResolvedValue(true);
+      // Another delivery already claimed this event ID — atomic create lost.
+      mockClaim.mockResolvedValue(false);
 
       const req: any = {
         headers: { 'stripe-signature': 'valid_sig' },
@@ -125,8 +129,30 @@ describe('stripeWebhook controller', () => {
 
       await stripeWebhook(req, res);
 
+      expect(mockClaim).toHaveBeenCalledWith(event.id, event.type);
       expect(res.status).toHaveBeenCalledWith(200);
-      // Business logic and Firestore write must NOT run
+      // Business logic, mark-processed and release must NOT run on a duplicate
+      expect(mockHandleStripeEvent).not.toHaveBeenCalled();
+      expect(mockMarkAsProcessed).not.toHaveBeenCalled();
+      expect(mockReleaseClaim).not.toHaveBeenCalled();
+    });
+
+    it('returns 500 and skips side effects if the claim write itself fails', async () => {
+      // A non-"already exists" Firestore error during claim — e.g. transient
+      // network failure. We must return 500 so Stripe retries.
+      const event = buildStripeEvent('payment_intent.succeeded');
+      mockCreateWebhook.mockReturnValue(event);
+      mockClaim.mockRejectedValue(new Error('Firestore unavailable'));
+
+      const req: any = {
+        headers: { 'stripe-signature': 'valid_sig' },
+        body: Buffer.from('{}'),
+      };
+      const res = createResponse();
+
+      await stripeWebhook(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
       expect(mockHandleStripeEvent).not.toHaveBeenCalled();
       expect(mockMarkAsProcessed).not.toHaveBeenCalled();
     });
@@ -140,7 +166,7 @@ describe('stripeWebhook controller', () => {
     it('processes a valid succeeded event and returns 200', async () => {
       const event = buildStripeEvent('payment_intent.succeeded');
       mockCreateWebhook.mockReturnValue(event);
-      mockHasBeenProcessed.mockResolvedValue(false);
+      mockClaim.mockResolvedValue(true);
       mockHandleStripeEvent.mockResolvedValue(undefined);
       mockMarkAsProcessed.mockResolvedValue(undefined);
 
@@ -156,15 +182,20 @@ describe('stripeWebhook controller', () => {
       expect(mockHandleStripeEvent).toHaveBeenCalledWith(event);
       // Verify it was marked as processed after successful handling
       expect(mockMarkAsProcessed).toHaveBeenCalledWith(event.id, event.type);
+      // Successful path must not release the claim
+      expect(mockReleaseClaim).not.toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(200);
     });
 
-    it('does NOT mark event processed when handleStripeEvent throws', async () => {
+    it('releases the claim and returns 500 when handleStripeEvent throws', async () => {
       const event = buildStripeEvent('payment_intent.succeeded');
       mockCreateWebhook.mockReturnValue(event);
-      mockHasBeenProcessed.mockResolvedValue(false);
+      mockClaim.mockResolvedValue(true);
       // Simulate an unexpected failure in business logic
-      mockHandleStripeEvent.mockRejectedValue(new Error('Firestore write failed'));
+      mockHandleStripeEvent.mockRejectedValue(
+        new Error('Firestore write failed'),
+      );
+      mockReleaseClaim.mockResolvedValue(undefined);
 
       const req: any = {
         headers: { 'stripe-signature': 'valid_sig' },
@@ -176,8 +207,57 @@ describe('stripeWebhook controller', () => {
 
       // Must return 500 so Stripe retries
       expect(res.status).toHaveBeenCalledWith(500);
-      // Must NOT persist the event ID — the event must be retryable
+      // Must NOT mark processed — the event must be retryable
       expect(mockMarkAsProcessed).not.toHaveBeenCalled();
+      // Must release the claim so the Stripe retry can re-acquire it
+      expect(mockReleaseClaim).toHaveBeenCalledWith(event.id);
+    });
+
+    it('returns 500 even if claim release fails after a handler error', async () => {
+      // Defensive: a release failure must not mask the original 500 response.
+      const event = buildStripeEvent('payment_intent.succeeded');
+      mockCreateWebhook.mockReturnValue(event);
+      mockClaim.mockResolvedValue(true);
+      mockHandleStripeEvent.mockRejectedValue(new Error('Handler exploded'));
+      mockReleaseClaim.mockRejectedValue(new Error('Release also failed'));
+
+      const req: any = {
+        headers: { 'stripe-signature': 'valid_sig' },
+        body: Buffer.from('{}'),
+      };
+      const res = createResponse();
+
+      await stripeWebhook(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(mockMarkAsProcessed).not.toHaveBeenCalled();
+      expect(mockReleaseClaim).toHaveBeenCalledWith(event.id);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // payment_intent.processing
+  // ────────────────────────────────────────────────────────────────────────────
+
+  describe('payment_intent.processing', () => {
+    it('processes a processing event and returns 200', async () => {
+      const event = buildStripeEvent('payment_intent.processing');
+      mockCreateWebhook.mockReturnValue(event);
+      mockClaim.mockResolvedValue(true);
+      mockHandleStripeEvent.mockResolvedValue(undefined);
+      mockMarkAsProcessed.mockResolvedValue(undefined);
+
+      const req: any = {
+        headers: { 'stripe-signature': 'valid_sig' },
+        body: Buffer.from('{}'),
+      };
+      const res = createResponse();
+
+      await stripeWebhook(req, res);
+
+      expect(mockHandleStripeEvent).toHaveBeenCalledWith(event);
+      expect(mockMarkAsProcessed).toHaveBeenCalledWith(event.id, event.type);
+      expect(res.status).toHaveBeenCalledWith(200);
     });
   });
 
@@ -189,7 +269,7 @@ describe('stripeWebhook controller', () => {
     it('processes a payment_failed event and returns 200', async () => {
       const event = buildStripeEvent('payment_intent.payment_failed');
       mockCreateWebhook.mockReturnValue(event);
-      mockHasBeenProcessed.mockResolvedValue(false);
+      mockClaim.mockResolvedValue(true);
       mockHandleStripeEvent.mockResolvedValue(undefined);
       mockMarkAsProcessed.mockResolvedValue(undefined);
 
@@ -215,7 +295,7 @@ describe('stripeWebhook controller', () => {
     it('processes a canceled event and returns 200', async () => {
       const event = buildStripeEvent('payment_intent.canceled');
       mockCreateWebhook.mockReturnValue(event);
-      mockHasBeenProcessed.mockResolvedValue(false);
+      mockClaim.mockResolvedValue(true);
       mockHandleStripeEvent.mockResolvedValue(undefined);
       mockMarkAsProcessed.mockResolvedValue(undefined);
 
@@ -243,7 +323,7 @@ describe('stripeWebhook controller', () => {
       // The controller should not error out — Stripe must receive 200.
       const event = buildStripeEvent('customer.subscription.created');
       mockCreateWebhook.mockReturnValue(event);
-      mockHasBeenProcessed.mockResolvedValue(false);
+      mockClaim.mockResolvedValue(true);
       // The real WebhookService would just log and return void for unknown types.
       mockHandleStripeEvent.mockResolvedValue(undefined);
       mockMarkAsProcessed.mockResolvedValue(undefined);

@@ -55,24 +55,30 @@ import { WebhookEventRepository } from '../WebhookEventRepository';
  *       500:
  *         description: Internal server error
  */
-export const createPaymentIntent = async (req: Request, res: Response): Promise<void> => {
+export const createPaymentIntent = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const user = (req as any).user;
     const firebaseUid = user.uid;
-  
+
     // Extract amount (currency is fixed to GBP)
     const { amount } = req.body;
-  
+
     // Use service to handle Stripe logic and reuse existing customers when possible
     const paymentService = new PaymentService();
-    const responseData = await paymentService.createPaymentIntentForUserByUid(firebaseUid, amount);
+    const responseData = await paymentService.createPaymentIntentForUserByUid(
+      firebaseUid,
+      amount,
+    );
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
     ResponseHandler.internalServerError(
       res,
       'Failed to create PaymentIntent',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
 };
@@ -100,7 +106,10 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
  *   - 200: valid event processed (or safely skipped as duplicate/unsupported)
  *   - 500: unexpected internal error (Stripe will retry; event NOT marked processed)
  */
-export const stripeWebhook = async (req: Request, res: Response): Promise<void> => {
+export const stripeWebhook = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   // ── Step 1: Verify the Stripe signature ──────────────────────────────────────
   const sig = req.headers['stripe-signature'] as string | undefined;
 
@@ -118,43 +127,51 @@ export const stripeWebhook = async (req: Request, res: Response): Promise<void> 
     // constructEvent throws when the signature is invalid or the payload is
     // malformed. This is not a server error — return 400 so Stripe stops retrying.
     console.warn(
-      `[Webhook] Rejected: invalid signature. Error: ${err instanceof Error ? err.message : String(err)}`
+      `[Webhook] Rejected: invalid signature. Error: ${err instanceof Error ? err.message : String(err)}`,
     );
     ResponseHandler.badRequest(
       res,
       'Invalid webhook signature',
-      err instanceof Error ? err.message : 'Signature verification failed'
+      err instanceof Error ? err.message : 'Signature verification failed',
     );
     return;
   }
 
   console.log(`[Webhook] Received event: ${event.type} (id: ${event.id})`);
 
-  // ── Step 2: Idempotency check ─────────────────────────────────────────────────
+  // ── Step 2: Atomically claim the event for processing ────────────────────────
+  // We use a single atomic Firestore create() to claim the event. This is the
+  // only race-safe way to dedupe under concurrent Stripe deliveries — a
+  // check-then-set would allow two simultaneous requests to both pass the check
+  // and double-process. If the claim fails because another delivery already
+  // holds it (processing OR already processed), this delivery is a duplicate.
   const webhookEventRepo = new WebhookEventRepository();
 
+  let claimed: boolean;
   try {
-    const alreadyProcessed = await webhookEventRepo.hasBeenProcessed(event.id);
-    if (alreadyProcessed) {
-      console.log(
-        `[Webhook] Duplicate event ignored: ${event.type} (id: ${event.id})`
-      );
-      // Return 200 so Stripe knows we received the event and stops retrying.
-      ResponseHandler.success(res, { received: true }, 'Duplicate event ignored');
-      return;
-    }
+    claimed = await webhookEventRepo.claim(event.id, event.type);
   } catch (err) {
-    // Firestore read failure. Return 500 so Stripe retries — we would rather
-    // retry than risk processing a duplicate without the idempotency guard.
+    // Firestore write failure (not an "already exists" — that returns false).
+    // Return 500 so Stripe retries — we would rather retry than risk processing
+    // a duplicate without the idempotency guard.
     console.error(
-      `[Webhook] Failed to check idempotency for event ${event.id}:`,
-      err
+      `[Webhook] Failed to claim event ${event.id} for processing:`,
+      err,
     );
     ResponseHandler.internalServerError(
       res,
       'Webhook idempotency check failed',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
+    return;
+  }
+
+  if (!claimed) {
+    console.log(
+      `[Webhook] Duplicate event ignored: ${event.type} (id: ${event.id})`,
+    );
+    // Return 200 so Stripe knows we received the event and stops retrying.
+    ResponseHandler.success(res, { received: true }, 'Duplicate event ignored');
     return;
   }
 
@@ -164,23 +181,37 @@ export const stripeWebhook = async (req: Request, res: Response): Promise<void> 
     await webhookService.handleStripeEvent(event);
 
     // Mark as processed ONLY after successful side effects. If handleStripeEvent
-    // throws, we intentionally skip this call so Stripe will retry.
+    // throws we release the claim below so Stripe's retry can re-acquire it.
     await webhookEventRepo.markAsProcessed(event.id, event.type);
 
-    console.log(`[Webhook] Successfully processed event: ${event.type} (id: ${event.id})`);
+    console.log(
+      `[Webhook] Successfully processed event: ${event.type} (id: ${event.id})`,
+    );
     ResponseHandler.success(res, { received: true }, 'Webhook processed');
   } catch (err) {
-    // An unexpected error in business logic or the Firestore write.
-    // Do NOT mark the event as processed — Stripe will retry and we will attempt
-    // to process it again.
+    // Business logic or the final Firestore write failed. Release the claim so
+    // the next Stripe retry can re-claim and re-process. WebhookService handlers
+    // are individually idempotent (no-op when the target state is already set),
+    // so partial side effects from this attempt remain safe under retry.
     console.error(
       `[Webhook] Unexpected error processing event ${event.type} (id: ${event.id}):`,
-      err
+      err,
     );
+    try {
+      await webhookEventRepo.releaseClaim(event.id);
+    } catch (releaseErr) {
+      // If we cannot release the claim, the event will be blocked from
+      // reprocessing until the claim row is removed manually. Log loudly so
+      // operators can intervene; do not mask the original error.
+      console.error(
+        `[Webhook] Failed to release claim for event ${event.id} after processing error. Manual cleanup of stripe_webhook_events/${event.id} may be required:`,
+        releaseErr,
+      );
+    }
     ResponseHandler.internalServerError(
       res,
       'Failed to process webhook event',
-      err instanceof Error ? err.message : 'Unknown error'
+      err instanceof Error ? err.message : 'Unknown error',
     );
   }
-};
+};

@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { OrderRepository } from '../order/repositories/OrderRepository';
+import { OrderRepository } from '../../order/repositories/OrderRepository';
 
 /**
  * Implements idempotent, safe business logic for each subscribed Stripe payment
@@ -49,7 +49,7 @@ export class WebhookService {
         // ignored. Returning normally ensures Stripe receives 200 and does not
         // retry. New event types should be added here when subscribed in Stripe.
         console.log(
-          `[WebhookService] Unsupported event type received and safely ignored: ${event.type} (id: ${event.id})`
+          `[WebhookService] Unsupported event type received and safely ignored: ${event.type} (id: ${event.id})`,
         );
         break;
     }
@@ -68,26 +68,30 @@ export class WebhookService {
    *     bypassed or the event is reprocessed for any reason).
    *   - Does NOT create or delete any order.
    */
-  private async handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  private async handlePaymentSucceeded(
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<void> {
     console.log(
-      `[WebhookService] payment_intent.succeeded — paymentIntentId: ${paymentIntent.id}`
+      `[WebhookService] payment_intent.succeeded — paymentIntentId: ${paymentIntent.id}`,
     );
 
-    const order = await this.orderRepo.getOrderByPaymentIntentId(paymentIntent.id);
+    const order = await this.orderRepo.getOrderByPaymentIntentId(
+      paymentIntent.id,
+    );
 
     if (!order) {
       // This is expected when the webhook fires before the client creates the order.
       // The order controller already verifies payment status before creating the order,
       // so this is safe to ignore.
       console.log(
-        `[WebhookService] payment_intent.succeeded — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`
+        `[WebhookService] payment_intent.succeeded — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`,
       );
       return;
     }
 
     if (order.paymentStatus === 'succeeded') {
       console.log(
-        `[WebhookService] payment_intent.succeeded — order ${order.id} already marked succeeded. No action taken.`
+        `[WebhookService] payment_intent.succeeded — order ${order.id} already marked succeeded. No action taken.`,
       );
       return;
     }
@@ -98,7 +102,7 @@ export class WebhookService {
     });
 
     console.log(
-      `[WebhookService] payment_intent.succeeded — order ${order.id} updated to paymentStatus: succeeded.`
+      `[WebhookService] payment_intent.succeeded — order ${order.id} updated to paymentStatus: succeeded.`,
     );
   }
 
@@ -114,16 +118,20 @@ export class WebhookService {
    *     'pending' — prevents rolling back a 'succeeded' or 'failed' order.
    *   - Does NOT create or fulfil any order.
    */
-  private async handlePaymentProcessing(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  private async handlePaymentProcessing(
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<void> {
     console.log(
-      `[WebhookService] payment_intent.processing — paymentIntentId: ${paymentIntent.id}`
+      `[WebhookService] payment_intent.processing — paymentIntentId: ${paymentIntent.id}`,
     );
 
-    const order = await this.orderRepo.getOrderByPaymentIntentId(paymentIntent.id);
+    const order = await this.orderRepo.getOrderByPaymentIntentId(
+      paymentIntent.id,
+    );
 
     if (!order) {
       console.log(
-        `[WebhookService] payment_intent.processing — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`
+        `[WebhookService] payment_intent.processing — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`,
       );
       return;
     }
@@ -131,7 +139,7 @@ export class WebhookService {
     if (order.paymentStatus !== 'pending') {
       // Do not overwrite a terminal or already-advanced state with 'processing'.
       console.log(
-        `[WebhookService] payment_intent.processing — order ${order.id} has paymentStatus '${order.paymentStatus}', not overwriting with 'processing'.`
+        `[WebhookService] payment_intent.processing — order ${order.id} has paymentStatus '${order.paymentStatus}', not overwriting with 'processing'.`,
       );
       return;
     }
@@ -141,7 +149,7 @@ export class WebhookService {
     });
 
     console.log(
-      `[WebhookService] payment_intent.processing — order ${order.id} updated to paymentStatus: processing.`
+      `[WebhookService] payment_intent.processing — order ${order.id} updated to paymentStatus: processing.`,
     );
   }
 
@@ -157,16 +165,20 @@ export class WebhookService {
    *     order is not already in a terminal succeeded state.
    *   - Does NOT delete, refund, or create any record.
    */
-  private async handlePaymentFailed(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  private async handlePaymentFailed(
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<void> {
     console.log(
-      `[WebhookService] payment_intent.payment_failed — paymentIntentId: ${paymentIntent.id}`
+      `[WebhookService] payment_intent.payment_failed — paymentIntentId: ${paymentIntent.id}`,
     );
 
-    const order = await this.orderRepo.getOrderByPaymentIntentId(paymentIntent.id);
+    const order = await this.orderRepo.getOrderByPaymentIntentId(
+      paymentIntent.id,
+    );
 
     if (!order) {
       console.log(
-        `[WebhookService] payment_intent.payment_failed — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`
+        `[WebhookService] payment_intent.payment_failed — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`,
       );
       return;
     }
@@ -176,7 +188,7 @@ export class WebhookService {
       // This should not occur in normal Stripe flows but prevents data corruption
       // if events arrive severely out-of-order.
       console.warn(
-        `[WebhookService] payment_intent.payment_failed — order ${order.id} is already succeeded. Not overwriting. Manual review recommended.`
+        `[WebhookService] payment_intent.payment_failed — order ${order.id} is already succeeded. Not overwriting. Manual review recommended.`,
       );
       return;
     }
@@ -187,7 +199,7 @@ export class WebhookService {
     });
 
     console.log(
-      `[WebhookService] payment_intent.payment_failed — order ${order.id} updated to paymentStatus: failed.`
+      `[WebhookService] payment_intent.payment_failed — order ${order.id} updated to paymentStatus: failed.`,
     );
   }
 
@@ -203,16 +215,20 @@ export class WebhookService {
    *     order has not already succeeded.
    *   - Does NOT delete, refund, or create any record.
    */
-  private async handlePaymentCanceled(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  private async handlePaymentCanceled(
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<void> {
     console.log(
-      `[WebhookService] payment_intent.canceled — paymentIntentId: ${paymentIntent.id}`
+      `[WebhookService] payment_intent.canceled — paymentIntentId: ${paymentIntent.id}`,
     );
 
-    const order = await this.orderRepo.getOrderByPaymentIntentId(paymentIntent.id);
+    const order = await this.orderRepo.getOrderByPaymentIntentId(
+      paymentIntent.id,
+    );
 
     if (!order) {
       console.log(
-        `[WebhookService] payment_intent.canceled — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`
+        `[WebhookService] payment_intent.canceled — no order found for paymentIntentId: ${paymentIntent.id}. No action taken.`,
       );
       return;
     }
@@ -220,7 +236,7 @@ export class WebhookService {
     if (order.paymentStatus === 'succeeded') {
       // Defensive guard: a cancellation after capture would need manual review.
       console.warn(
-        `[WebhookService] payment_intent.canceled — order ${order.id} is already succeeded. Not overwriting. Manual review recommended.`
+        `[WebhookService] payment_intent.canceled — order ${order.id} is already succeeded. Not overwriting. Manual review recommended.`,
       );
       return;
     }
@@ -231,7 +247,7 @@ export class WebhookService {
     });
 
     console.log(
-      `[WebhookService] payment_intent.canceled — order ${order.id} updated to paymentStatus: failed.`
+      `[WebhookService] payment_intent.canceled — order ${order.id} updated to paymentStatus: failed.`,
     );
   }
 }
