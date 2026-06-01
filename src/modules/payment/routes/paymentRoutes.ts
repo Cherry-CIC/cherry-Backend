@@ -52,15 +52,22 @@ const router = Router();
  *                       type: string
  *                     paymentIntent:
  *                       type: string
- *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
+ *                       description: Backwards-compatible alias for clientSecret
  *                     clientSecret:
  *                       type: string
+ *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
  *                     ephemeralKey:
  *                       type: string
  *                     customer:
  *                       type: string
  *                     publishableKey:
  *                       type: string
+ *                     amount:
+ *                       type: integer
+ *                       description: PaymentIntent amount in pence
+ *                     currency:
+ *                       type: string
+ *                       example: gbp
  *       400:
  *         description: Bad request
  *       500:

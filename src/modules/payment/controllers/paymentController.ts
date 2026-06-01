@@ -3,6 +3,10 @@ import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { PaymentService } from '../services/PaymentService';
+import {
+  INVALID_PAYMENT_AMOUNT_MESSAGE,
+  parsePositivePenceAmount,
+} from '../utils/paymentAmount';
 
 /**
  * @swagger
@@ -43,15 +47,22 @@ import { PaymentService } from '../services/PaymentService';
  *                       type: string
  *                     paymentIntent:
  *                       type: string
- *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
+ *                       description: Backwards-compatible alias for clientSecret
  *                     clientSecret:
  *                       type: string
+ *                       description: Stripe PaymentIntent client secret used by the Flutter Stripe SDK
  *                     ephemeralKey:
  *                       type: string
  *                     customer:
  *                       type: string
  *                     publishableKey:
  *                       type: string
+ *                     amount:
+ *                       type: integer
+ *                       description: PaymentIntent amount in pence
+ *                     currency:
+ *                       type: string
+ *                       example: gbp
  *       400:
  *         description: Bad request
  *       500:
@@ -64,16 +75,20 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
   
     // Extract amount (currency is fixed to GBP)
     const { amount } = req.body;
+    const totalAmountPence = parsePositivePenceAmount(amount);
   
     // Use service to handle Stripe logic and reuse existing customers when possible
     const paymentService = new PaymentService();
-    const responseData = await paymentService.createPaymentIntentForUserByUid(firebaseUid, amount);
+    const responseData = await paymentService.createPaymentIntentForUserByUid(
+      firebaseUid,
+      totalAmountPence
+    );
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
     if (
       err instanceof Error &&
-      err.message === 'Amount must be a positive integer in the smallest currency unit'
+      err.message === INVALID_PAYMENT_AMOUNT_MESSAGE
     ) {
       ResponseHandler.badRequest(res, 'Invalid amount', err.message);
       return;

@@ -1,3 +1,8 @@
+import {
+  parsePositivePenceAmount,
+  PAYMENT_CURRENCY,
+} from './utils/paymentAmount';
+
 const StripeService = require('../../shared/config/stripeConfig');
 
 export class PaymentRepository {
@@ -12,8 +17,11 @@ export class PaymentRepository {
    */
   async createPaymentIntentForUser(
     email: string,
-    amount: number
+    amount: unknown
   ) {
+    const totalAmountPence = parsePositivePenceAmount(amount);
+    const currency = PAYMENT_CURRENCY;
+
     // Attempt to find an existing customer by email
     let customer: any;
     try {
@@ -38,14 +46,9 @@ export class PaymentRepository {
 
     // Create the PaymentIntent using GBP as default currency. The app sends
     // minor units, so do not add fees or convert pounds again here.
-    const totalAmount = Number(amount);
-    if (!Number.isInteger(totalAmount) || totalAmount <= 0) {
-      throw new Error('Amount must be a positive integer in the smallest currency unit');
-    }
-
     const paymentIntent = await StripeService.createPaymentIntent(
-      totalAmount,
-      'gbp',
+      totalAmountPence,
+      currency,
       customer.id
     );
 
@@ -56,6 +59,8 @@ export class PaymentRepository {
       ephemeralKey: ephemeralKey.secret,
       customer: customer.id,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+      amount: totalAmountPence,
+      currency,
     };
   }
 }

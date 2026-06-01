@@ -50,6 +50,8 @@ describe('PaymentRepository', () => {
       ephemeralKey: 'ek_test_123',
       customer: 'cus_existing',
       publishableKey: 'pk_test_123',
+      amount: 2599,
+      currency: 'gbp',
     });
   });
 
