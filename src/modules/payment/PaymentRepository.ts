@@ -1,3 +1,8 @@
+import {
+  parsePositivePenceAmount,
+  PAYMENT_CURRENCY,
+} from './utils/paymentAmount';
+
 const StripeService = require('../../shared/config/stripeConfig');
 
 export class PaymentRepository {
@@ -7,14 +12,16 @@ export class PaymentRepository {
    * If found, reuses that customer; otherwise creates a new one.
    *
    * @param email - Customer email address.
-   * @param amount - Amount in pounds (e.g., 30 = £30).
-   * @param currency - Currency code (e.g., usd).
-   * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
+   * @param amount - Amount in the smallest currency unit, pence for GBP.
+   * @returns An object containing the client secret, amount, currency, ephemeral key, customer ID, and publishable key.
    */
   async createPaymentIntentForUser(
     email: string,
-    amount: number
+    amount: unknown
   ) {
+    const totalAmountPence = parsePositivePenceAmount(amount);
+    const currency = PAYMENT_CURRENCY;
+
     // Attempt to find an existing customer by email
     let customer: any;
     try {
@@ -37,20 +44,23 @@ export class PaymentRepository {
     // Create an Ephemeral Key (useful for mobile SDKs)
     const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
 
-    // Create the PaymentIntent using GBP as default currency
-    const totalAmount = Math.round((amount + 20) * 100);
+    // Create the PaymentIntent using GBP as default currency. The app sends
+    // minor units, so do not add fees or convert pounds again here.
     const paymentIntent = await StripeService.createPaymentIntent(
-      totalAmount,
-      'gbp',
+      totalAmountPence,
+      currency,
       customer.id
     );
 
     return {
       paymentIntentId: paymentIntent.id,
+      paymentIntent: paymentIntent.client_secret,
       clientSecret: paymentIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
       customer: customer.id,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+      amount: totalAmountPence,
+      currency,
     };
   }
 }
