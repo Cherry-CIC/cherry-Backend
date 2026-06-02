@@ -1,5 +1,18 @@
 const StripeService = require('../../shared/config/stripeConfig');
 
+const DEFAULT_SECURITY_FEE_GBP = 2.0;
+
+const getSecurityFeePence = (): number => {
+  const rawValue = process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP;
+  const feeGbp = rawValue ? Number(rawValue) : DEFAULT_SECURITY_FEE_GBP;
+
+  if (!Number.isFinite(feeGbp) || feeGbp < 0) {
+    return Math.round(DEFAULT_SECURITY_FEE_GBP * 100);
+  }
+
+  return Math.round(feeGbp * 100);
+};
+
 export class PaymentRepository {
   /**
    * Creates a Stripe PaymentIntent for the given user.
@@ -37,8 +50,10 @@ export class PaymentRepository {
     // Create an Ephemeral Key (useful for mobile SDKs)
     const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
 
-    // Create the PaymentIntent using GBP as default currency
-    const totalAmount = Math.round((amount + 20) * 100);
+    // Stripe expects amount in the smallest currency unit (pence for GBP).
+    const baseAmountPence = Math.round(amount * 100);
+    const securityFeePence = getSecurityFeePence();
+    const totalAmount = baseAmountPence + securityFeePence;
     const paymentIntent = await StripeService.createPaymentIntent(
       totalAmount,
       'gbp',
