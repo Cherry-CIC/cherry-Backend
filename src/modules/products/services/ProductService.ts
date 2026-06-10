@@ -194,6 +194,7 @@ export interface CreateProductData {
     charityId: string;
     quality: string;
     size: string;
+    postage_size?: string;
     product_images: string[];
     donation: number;
     price: number;
@@ -208,6 +209,7 @@ export interface UpdateProductData {
     charityId?: string;
     quality?: string;
     size?: string;
+    postage_size?: string;
     product_images?: string[];
     donation?: number;
     price?: number;

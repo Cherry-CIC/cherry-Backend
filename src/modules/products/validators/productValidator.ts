@@ -42,6 +42,13 @@ export const productSchema = Joi.object({
             'any.required': `"size" is required`,
         }),
 
+    postage_size: Joi.string().trim().valid('small', 'medium', 'large').optional()
+        .messages({
+            'string.base': `"postage_size" should be a type of 'text'`,
+            'string.empty': `"postage_size" cannot be empty`,
+            'any.only': `"postage_size" must be one of small, medium or large`,
+        }),
+
     product_images: Joi.array().items(Joi.string().uri()).min(1).required()
         .messages({
             'array.base': `"product_images" should be an array`,
