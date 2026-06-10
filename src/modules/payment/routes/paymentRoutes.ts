@@ -31,8 +31,8 @@ const router = Router();
  *               - amount
  *             properties:
  *               amount:
- *                 type: integer
- *                 description: Amount in the smallest currency unit, pence for GBP
+ *                 type: number
+ *                 description: Amount in GBP before the configured security fee
  *     responses:
  *       200:
  *         description: PaymentIntent created successfully

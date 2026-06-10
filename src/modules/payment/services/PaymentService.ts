@@ -14,7 +14,7 @@ export class PaymentService {
   /**
    * Creates a Stripe PaymentIntent for a user identified by Firebase UID.
    * @param firebaseUid - Firebase UID of the authenticated user.
-   * @param amount - Amount in the smallest currency unit, pence for GBP.
+   * @param amount - Amount in GBP before the configured security fee.
    * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
    */
   async createPaymentIntentForUserByUid(

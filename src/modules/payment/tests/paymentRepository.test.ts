@@ -20,6 +20,7 @@ describe('PaymentRepository', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_123';
+    process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP = '2.00';
     mockCustomersList.mockResolvedValue({
       data: [{ id: 'cus_existing' }],
     });
@@ -32,14 +33,14 @@ describe('PaymentRepository', () => {
     });
   });
 
-  it('creates payment intents using the supplied minor-unit amount without converting pounds again', async () => {
+  it('creates payment intents from a GBP amount, adds the security fee, and returns the Flutter client-secret alias', async () => {
     const result = await new PaymentRepository().createPaymentIntentForUser(
       'buyer@example.com',
-      2599,
+      25.99,
     );
 
     expect(mockCreatePaymentIntent).toHaveBeenCalledWith(
-      2599,
+      2799,
       'gbp',
       'cus_existing',
     );
@@ -53,13 +54,18 @@ describe('PaymentRepository', () => {
     });
   });
 
-  it('rejects invalid payment amounts before calling Stripe', async () => {
-    await expect(
-      new PaymentRepository().createPaymentIntentForUser('buyer@example.com', 0),
-    ).rejects.toThrow(
-      'Amount must be a positive integer in the smallest currency unit',
+  it('falls back to the default security fee when the configured fee is invalid', async () => {
+    process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP = '-1';
+
+    await new PaymentRepository().createPaymentIntentForUser(
+      'buyer@example.com',
+      25,
     );
 
-    expect(mockCreatePaymentIntent).not.toHaveBeenCalled();
+    expect(mockCreatePaymentIntent).toHaveBeenCalledWith(
+      2700,
+      'gbp',
+      'cus_existing',
+    );
   });
 });

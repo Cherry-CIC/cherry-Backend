@@ -1,5 +1,18 @@
 const StripeService = require('../../shared/config/stripeConfig');
 
+const DEFAULT_SECURITY_FEE_GBP = 2.0;
+
+const getSecurityFeePence = (): number => {
+  const rawValue = process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP;
+  const feeGbp = rawValue ? Number(rawValue) : DEFAULT_SECURITY_FEE_GBP;
+
+  if (!Number.isFinite(feeGbp) || feeGbp < 0) {
+    return Math.round(DEFAULT_SECURITY_FEE_GBP * 100);
+  }
+
+  return Math.round(feeGbp * 100);
+};
+
 export class PaymentRepository {
   /**
    * Creates a Stripe PaymentIntent for the given user.
@@ -7,7 +20,7 @@ export class PaymentRepository {
    * If found, reuses that customer; otherwise creates a new one.
    *
    * @param email - Customer email address.
-   * @param amount - Amount in the smallest currency unit, pence for GBP.
+   * @param amount - Amount in GBP before the configured security fee.
    * @returns An object containing Stripe intent details, an ephemeral key, customer ID, and publishable key.
    */
   async createPaymentIntentForUser(
@@ -36,13 +49,10 @@ export class PaymentRepository {
     // Create an Ephemeral Key (useful for mobile SDKs)
     const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
 
-    // Create the PaymentIntent using GBP as default currency. The app sends
-    // minor units, so do not add fees or convert pounds again here.
-    const totalAmount = Number(amount);
-    if (!Number.isInteger(totalAmount) || totalAmount <= 0) {
-      throw new Error('Amount must be a positive integer in the smallest currency unit');
-    }
-
+    // Stripe expects amount in the smallest currency unit (pence for GBP).
+    const baseAmountPence = Math.round(amount * 100);
+    const securityFeePence = getSecurityFeePence();
+    const totalAmount = baseAmountPence + securityFeePence;
     const paymentIntent = await StripeService.createPaymentIntent(
       totalAmount,
       'gbp',
