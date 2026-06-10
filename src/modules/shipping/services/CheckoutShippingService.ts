@@ -133,9 +133,10 @@ export class CheckoutShippingService {
     const addressParts = [street, houseNumber].filter(Boolean);
     const carrier =
       point?.carrier?.code ||
-      point?.carrier_code ||
-      point?.carrier ||
       point?.carrierName ||
+      point?.carrier?.name ||
+      point?.carrier_code ||
+      (typeof point?.carrier === 'string' ? point.carrier : null) ||
       null;
 
     return {

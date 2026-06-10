@@ -4,6 +4,7 @@ import { createWebhook } from '../../../shared/config/stripeConfig';
 import { PaymentService } from '../services/PaymentService';
 import { WebhookService } from '../services/WebhookService';
 import { WebhookEventRepository } from '../WebhookEventRepository';
+import { INVALID_PAYMENT_AMOUNT_ERROR } from '../PaymentRepository';
 
 /**
  * @swagger
@@ -78,6 +79,14 @@ export const createPaymentIntent = async (
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message === INVALID_PAYMENT_AMOUNT_ERROR
+    ) {
+      ResponseHandler.badRequest(res, 'Invalid amount', err.message);
+      return;
+    }
+
     ResponseHandler.internalServerError(
       res,
       'Failed to create PaymentIntent',

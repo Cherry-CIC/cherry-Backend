@@ -54,8 +54,64 @@ describe('PaymentRepository', () => {
     });
   });
 
-  it('falls back to the default security fee when the configured fee is invalid', async () => {
-    process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP = '-1';
+  it.each([
+    ['negative', -10],
+    ['zero', 0],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+  ])('rejects an invalid %s amount before calling Stripe', async (_, amount) => {
+    await expect(
+      new PaymentRepository().createPaymentIntentForUser(
+        'buyer@example.com',
+        amount,
+      ),
+    ).rejects.toThrow('Amount must be a positive finite number');
+
+    expect(mockCustomersList).not.toHaveBeenCalled();
+    expect(mockCreatePaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('creates a new customer when no existing Stripe customer is found', async () => {
+    mockCustomersList.mockResolvedValue({ data: [] });
+    mockAddNewCustomer.mockResolvedValue({ id: 'cus_new' });
+
+    await new PaymentRepository().createPaymentIntentForUser(
+      'new@example.com',
+      30,
+    );
+
+    expect(mockAddNewCustomer).toHaveBeenCalledWith('new@example.com');
+    expect(mockCreatePaymentIntent).toHaveBeenCalledWith(
+      3200,
+      'gbp',
+      'cus_new',
+    );
+  });
+
+  it('creates a new customer when the customer lookup fails', async () => {
+    mockCustomersList.mockRejectedValue(new Error('Stripe unavailable'));
+    mockAddNewCustomer.mockResolvedValue({ id: 'cus_fallback' });
+
+    await new PaymentRepository().createPaymentIntentForUser(
+      'fallback@example.com',
+      20,
+    );
+
+    expect(mockAddNewCustomer).toHaveBeenCalledWith('fallback@example.com');
+    expect(mockCreatePaymentIntent).toHaveBeenCalledWith(
+      2200,
+      'gbp',
+      'cus_fallback',
+    );
+  });
+
+  it.each([
+    ['non-numeric string', 'invalid'],
+    ['Infinity', 'Infinity'],
+    ['NaN string', 'NaN'],
+    ['negative value', '-1'],
+  ])('falls back to the default security fee when config is %s', async (_, invalidValue) => {
+    process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP = invalidValue;
 
     await new PaymentRepository().createPaymentIntentForUser(
       'buyer@example.com',

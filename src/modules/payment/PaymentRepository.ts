@@ -1,6 +1,8 @@
 const StripeService = require('../../shared/config/stripeConfig');
 
 const DEFAULT_SECURITY_FEE_GBP = 2.0;
+export const INVALID_PAYMENT_AMOUNT_ERROR =
+  'Amount must be a positive finite number';
 
 const getSecurityFeePence = (): number => {
   const rawValue = process.env.STRIPE_PURCHASE_SECURITY_FEE_GBP;
@@ -27,6 +29,11 @@ export class PaymentRepository {
     email: string,
     amount: number
   ) {
+    const amountGbp = Number(amount);
+    if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
+      throw new Error(INVALID_PAYMENT_AMOUNT_ERROR);
+    }
+
     // Attempt to find an existing customer by email
     let customer: any;
     try {
@@ -50,7 +57,7 @@ export class PaymentRepository {
     const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
 
     // Stripe expects amount in the smallest currency unit (pence for GBP).
-    const baseAmountPence = Math.round(amount * 100);
+    const baseAmountPence = Math.round(amountGbp * 100);
     const securityFeePence = getSecurityFeePence();
     const totalAmount = baseAmountPence + securityFeePence;
     const paymentIntent = await StripeService.createPaymentIntent(

@@ -77,4 +77,30 @@ describe('CheckoutShippingService', () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('123');
   });
+
+  it('normalises carrier objects with name when code is absent', async () => {
+    const sendcloudService: any = {
+      getServicePoints: jest.fn().mockResolvedValue([
+        {
+          id: 123,
+          name: 'Pickup Point One',
+          street: 'Test Street',
+          city: 'London',
+          postal_code: 'SW1A 1AA',
+          country: 'GB',
+          carrier: {
+            name: 'InPost',
+          },
+        },
+      ]),
+    };
+    const service = new CheckoutShippingService(sendcloudService);
+
+    const result = await service.getPickupPoints({
+      country: 'GB',
+      address: 'SW1A 1AA',
+    });
+
+    expect(result[0].carrier).toBe('inpost');
+  });
 });
