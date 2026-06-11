@@ -49,6 +49,8 @@ export const productSchema = Joi.object({
             'any.required': `"product_images" is required`,
         }),
 
+    postage_size: Joi.string().valid('small', 'medium', 'large').optional(),
+
     donation: Joi.number().positive().required()
         .messages({
             'number.base': `"donation" should be a number`,

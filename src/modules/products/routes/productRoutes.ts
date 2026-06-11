@@ -343,6 +343,11 @@ router.get('/:id/with-details', authMiddleware, validateProductId, getProductWit
  *                 items:
  *                   type: string
  *                 example: ["https://example.com/smartphone1.jpg", "https://example.com/smartphone2.jpg"]
+ *               postage_size:
+ *                 type: string
+ *                 enum: [small, medium, large]
+ *                 description: Selected parcel/postage size for the listed product. Accepted values: small, medium, large.
+ *                 example: "small"
  *               donation:
  *                 type: number
  *                 example: 50.0
