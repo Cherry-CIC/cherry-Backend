@@ -23,7 +23,7 @@ const stripe = new Proxy({} as Stripe, {
       stripeInstance = new Stripe(key);
     }
     return Reflect.get(stripeInstance, prop, receiver);
-  }
+  },
 });
 
 const getCustomerByID = async (id: string): Promise<Stripe.Customer> => {
@@ -80,16 +80,27 @@ const createPaymentIntent = async (
  * webhook endpoint — NOT the Stripe API secret key. Throws if the signature is
  * invalid or the payload is malformed; callers must catch and return HTTP 400.
  */
+class WebhookConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WebhookConfigError';
+    Object.setPrototypeOf(this, WebhookConfigError.prototype);
+  }
+}
+
 const createWebhook = (rawBody: Buffer | string, sig: string): Stripe.Event => {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
-    throw new Error('STRIPE_WEBHOOK_SECRET is not defined in the environment.');
+    throw new WebhookConfigError(
+      'STRIPE_WEBHOOK_SECRET is not defined in the environment.',
+    );
   }
-  const event = stripe.webhooks.constructEvent(
-    rawBody,
-    sig,
-    secret,
-  );
+  // Construct a temporary Stripe instance with a placeholder if the secret key is missing.
+  // This bypasses the lazy Proxy which throws on access when STRIPE_SECRET_KEY is absent.
+  // Webhook signature verification only performs local cryptographic validation.
+  const verifier =
+    stripeInstance || new Stripe(process.env.STRIPE_SECRET_KEY || 'dummy_key');
+  const event = verifier.webhooks.constructEvent(rawBody, sig, secret);
   return event;
 };
 
@@ -100,4 +111,5 @@ export {
   createEphemeralKey,
   createPaymentIntent,
   createWebhook,
+  WebhookConfigError,
 };

@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
-import { createWebhook } from '../../../shared/config/stripeConfig';
+import {
+  createWebhook,
+  WebhookConfigError,
+} from '../../../shared/config/stripeConfig';
 import { PaymentService } from '../services/PaymentService';
 import { WebhookService } from '../services/WebhookService';
 import { WebhookEventRepository } from '../WebhookEventRepository';
@@ -124,6 +127,17 @@ export const stripeWebhook = async (
     // req.body is the raw Buffer provided by express.raw() in paymentRoutes.ts.
     event = createWebhook(req.body as Buffer, sig);
   } catch (err) {
+    if (err instanceof WebhookConfigError) {
+      console.error(
+        `[Webhook] Rejected: server config error. Error: ${err.message}`,
+      );
+      ResponseHandler.internalServerError(
+        res,
+        'Webhook configuration error',
+        err.message,
+      );
+      return;
+    }
     // constructEvent throws when the signature is invalid or the payload is
     // malformed. This is not a server error — return 400 so Stripe stops retrying.
     console.warn(
@@ -175,12 +189,11 @@ export const stripeWebhook = async (
 
   if (claimResult === 'in_progress') {
     console.log(
-      `[Webhook] Duplicate event ignored (claim in progress): ${event.type} (id: ${event.id})`,
+      `[Webhook] Duplicate delivery received while another worker is processing: ${event.type} (id: ${event.id})`,
     );
-    // Another delivery holds a live lease. Return 200 so Stripe does not
-    // immediately retry; Stripe's own retry schedule will re-deliver if the
-    // current holder crashes and the lease goes stale.
-    ResponseHandler.success(res, { received: true }, 'Event already in progress');
+    // Return a non-2xx so Stripe retries later. This prevents a crash-after-claim
+    // scenario from being treated as a successful delivery.
+    ResponseHandler.conflict(res, 'Webhook event is currently being processed');
     return;
   }
 

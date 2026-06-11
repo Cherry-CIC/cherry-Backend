@@ -2,9 +2,17 @@
 // Each mock is scoped to exactly what the webhook pipeline uses.
 
 // ── Stripe config ──────────────────────────────────────────────────────────────
+class MockWebhookConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WebhookConfigError';
+  }
+}
+
 const mockCreateWebhook = jest.fn();
 jest.mock('../../../shared/config/stripeConfig', () => ({
   createWebhook: mockCreateWebhook,
+  WebhookConfigError: MockWebhookConfigError,
 }));
 
 // ── WebhookEventRepository ─────────────────────────────────────────────────────
@@ -108,6 +116,34 @@ describe('stripeWebhook controller', () => {
       expect(mockMarkAsProcessed).not.toHaveBeenCalled();
       expect(mockHandleStripeEvent).not.toHaveBeenCalled();
     });
+
+    it('returns 500 when WebhookConfigError is thrown (missing STRIPE_WEBHOOK_SECRET)', async () => {
+      mockCreateWebhook.mockImplementation(() => {
+        throw new MockWebhookConfigError(
+          'STRIPE_WEBHOOK_SECRET is not defined in the environment.',
+        );
+      });
+
+      const req: any = {
+        headers: { 'stripe-signature': 'valid_sig' },
+        body: Buffer.from('{"type":"payment_intent.succeeded"}'),
+      };
+      const res = createResponse();
+
+      await stripeWebhook(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: 'Webhook configuration error',
+          error: 'STRIPE_WEBHOOK_SECRET is not defined in the environment.',
+        }),
+      );
+      expect(mockClaim).not.toHaveBeenCalled();
+      expect(mockMarkAsProcessed).not.toHaveBeenCalled();
+      expect(mockHandleStripeEvent).not.toHaveBeenCalled();
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -137,7 +173,7 @@ describe('stripeWebhook controller', () => {
       expect(mockReleaseClaim).not.toHaveBeenCalled();
     });
 
-    it('returns 200 without processing when another delivery holds a live lease', async () => {
+    it('returns 409 without processing when another delivery holds a live lease', async () => {
       const event = buildStripeEvent('payment_intent.succeeded');
       mockCreateWebhook.mockReturnValue(event);
       // Another delivery is currently processing the event.
@@ -152,7 +188,7 @@ describe('stripeWebhook controller', () => {
       await stripeWebhook(req, res);
 
       expect(mockClaim).toHaveBeenCalledWith(event.id, event.type);
-      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.status).toHaveBeenCalledWith(409);
       expect(mockHandleStripeEvent).not.toHaveBeenCalled();
       expect(mockMarkAsProcessed).not.toHaveBeenCalled();
       expect(mockReleaseClaim).not.toHaveBeenCalled();

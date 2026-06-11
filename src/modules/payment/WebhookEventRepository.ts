@@ -8,8 +8,8 @@ const COLLECTION = 'stripe_webhook_events';
  * so 5 minutes gives healthy processing time while still recovering from
  * crashed workers. Override via WEBHOOK_CLAIM_TTL_MS env var.
  */
-const CLAIM_TTL_MS =
-  Number(process.env.WEBHOOK_CLAIM_TTL_MS) || 5 * 60 * 1_000; // 5 min
+const ttlFromEnv = Number(process.env.WEBHOOK_CLAIM_TTL_MS);
+const CLAIM_TTL_MS = Number.isFinite(ttlFromEnv) ? ttlFromEnv : 5 * 60 * 1_000; // 5 min
 
 export type WebhookEventStatus = 'processing' | 'processed';
 

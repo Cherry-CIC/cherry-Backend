@@ -147,7 +147,9 @@ export class OrderRepository {
    * payment_intent.processing). Callers must handle null gracefully and must NOT
    * create an order from this lookup; order creation is the client's responsibility.
    */
-  async getOrderByPaymentIntentId(paymentIntentId: string): Promise<Order | null> {
+  async getOrderByPaymentIntentId(
+    paymentIntentId: string,
+  ): Promise<Order | null> {
     const snapshot = await firestore
       .collection('orders')
       .where('paymentIntentId', '==', paymentIntentId)
@@ -159,8 +161,37 @@ export class OrderRepository {
     }
 
     const doc = snapshot.docs[0];
-    const data = doc.data() as Omit<Order, 'id'>;
-    return { id: doc.id, ...data };
+    const data = doc.data();
+    let createdAt = data.createdAt;
+    if (createdAt && typeof createdAt.toDate === 'function') {
+      createdAt = createdAt.toDate();
+    } else if (createdAt) {
+      createdAt = new Date(createdAt);
+    }
+
+    return {
+      id: doc.id,
+      userId: data.userId || '',
+      email: data.email || '',
+      amount: data.amount || 0,
+      productId: data.productId,
+      productName: data.productName,
+      shipping: data.shipping,
+      deliveryType: data.deliveryType || 'home',
+      shippingOptionId: data.shippingOptionId || '',
+      shippingOptionName: data.shippingOptionName,
+      shippingOptionPrice: data.shippingOptionPrice,
+      shippingCarrier: data.shippingCarrier,
+      shippingWeight: data.shippingWeight || 0,
+      pickupPoint: data.pickupPoint,
+      paymentIntentId: data.paymentIntentId,
+      // BACKWARDS COMPATIBILITY: fall back to 'pending' for legacy documents that
+      // predate the PaymentStatus union expansion. See Order.ts for full note.
+      paymentStatus: data.paymentStatus || 'pending',
+      shipmentStatus: data.shipmentStatus || 'not_created',
+      status: data.status || 'completed',
+      shipmentId: data.shipmentId,
+      createdAt,
+    } as Order;
   }
 }
-
