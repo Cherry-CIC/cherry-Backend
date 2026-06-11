@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+data/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+!package-lock.json
