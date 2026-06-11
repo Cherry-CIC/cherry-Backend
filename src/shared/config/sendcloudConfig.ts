@@ -12,5 +12,5 @@ export const sendcloudConfig = {
 
 // Validate configuration
 if (!sendcloudConfig.publicKey || !sendcloudConfig.secretKey) {
-  console.warn('⚠️  Sendcloud credentials are not configured. Please set SENDCLOUD_PUBLIC_KEY and SENDCLOUD_SECRET_KEY in your .env file.');
+  console.warn('Sendcloud credentials are not configured. Please set SENDCLOUD_PUBLIC_KEY and SENDCLOUD_SECRET_KEY in your .env file.');
 }

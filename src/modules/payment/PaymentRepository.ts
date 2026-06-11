@@ -60,6 +60,10 @@ export class PaymentRepository {
       customer.id
     );
 
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      throw new Error('STRIPE_PUBLISHABLE_KEY is not defined in the environment.');
+    }
+
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
