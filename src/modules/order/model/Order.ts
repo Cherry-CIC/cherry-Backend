@@ -1,16 +1,5 @@
 export type DeliveryType = 'home' | 'pickup_point';
-// BACKWARDS COMPATIBILITY NOTE (added 2026-05-21):
-// 'processing' was added to PaymentStatus alongside the Stripe webhook hardening.
-// Existing Firestore order documents written before this change will only contain
-// 'pending' | 'succeeded' | 'failed'. The fallback in OrderRepository.getOrdersByDateRange
-// (currently `data.paymentStatus || 'pending'`) safely handles any legacy document
-// that predates this change.
-//
-// TODO (future engineer): Once you are confident no documents with unrecognised
-// paymentStatus values exist in Firestore (e.g. after a data migration or sufficient
-// run-time), you may narrow this type back and remove the || 'pending' fallback.
-export type PaymentStatus = 'pending' | 'processing' | 'succeeded' | 'failed';
-
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed';
 export type ShipmentStatus =
   | 'not_created'
   | 'pending'
