@@ -7,48 +7,65 @@ import {
 } from './CheckoutShippingService';
 
 export class SendcloudService {
-  private client: any;
-  private servicePointsClient: any;
+  private _client: any;
+  private _servicePointsClient: any;
 
-  constructor() {
-    const {
-      publicKey,
-      secretKey,
-      apiUrl,
-      servicePointsApiUrl,
-    } = sendcloudConfig;
-
+  private get client(): any {
+    const { publicKey, secretKey, apiUrl } = sendcloudConfig;
     if (!publicKey || !secretKey) {
       throw new Error(
         'Sendcloud credentials are not configured. Please set SENDCLOUD_PUBLIC_KEY and SENDCLOUD_SECRET_KEY in your .env file.',
       );
     }
-
-    this.client = axios.create({
-      baseURL: apiUrl,
-      auth: {
-        username: publicKey,
-        password: secretKey,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    this.servicePointsClient = axios.create({
-      baseURL: servicePointsApiUrl,
-      auth: {
-        username: publicKey,
-        password: secretKey,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-      timeout: 30000,
-    });
+    if (!this._client) {
+      this._client = axios.create({
+        baseURL: apiUrl,
+        auth: {
+          username: publicKey,
+          password: secretKey,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      });
+    }
+    return this._client;
   }
+
+  private set client(value: any) {
+    this._client = value;
+  }
+
+  private get servicePointsClient(): any {
+    const { publicKey, secretKey, servicePointsApiUrl } = sendcloudConfig;
+    if (!publicKey || !secretKey) {
+      throw new Error(
+        'Sendcloud credentials are not configured. Please set SENDCLOUD_PUBLIC_KEY and SENDCLOUD_SECRET_KEY in your .env file.',
+      );
+    }
+    if (!this._servicePointsClient) {
+      this._servicePointsClient = axios.create({
+        baseURL: servicePointsApiUrl,
+        auth: {
+          username: publicKey,
+          password: secretKey,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        timeout: 30000,
+      });
+    }
+    return this._servicePointsClient;
+  }
+
+  private set servicePointsClient(value: any) {
+    this._servicePointsClient = value;
+  }
+
+  constructor() {}
 
   async createParcel(parcelData: any): Promise<SendcloudParcel> {
     try {

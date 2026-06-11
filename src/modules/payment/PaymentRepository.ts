@@ -24,10 +24,13 @@ export class PaymentRepository {
    * @param currency - Currency code (e.g., usd).
    * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
    */
-  async createPaymentIntentForUser(
-    email: string,
-    amount: number
-  ) {
+  async createPaymentIntentForUser(email: string, amount: number) {
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      throw new Error(
+        'STRIPE_PUBLISHABLE_KEY is not defined in the environment.',
+      );
+    }
+
     // Attempt to find an existing customer by email
     let customer: any;
     try {
@@ -57,7 +60,7 @@ export class PaymentRepository {
     const paymentIntent = await StripeService.createPaymentIntent(
       totalAmount,
       'gbp',
-      customer.id
+      customer.id,
     );
 
     return {

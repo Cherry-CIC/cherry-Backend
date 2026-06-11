@@ -47,5 +47,19 @@ if (process.env.NODE_ENV === 'production') {
 
 // Export commonly used Firebase objects
 export const firestore = getFirestore();
-export const clientAuth = getAuth(clientApp);
+
+let clientAuthInstance: any = null;
+export const clientAuth = new Proxy({} as any, {
+  get(target, prop, receiver) {
+    if (!clientAuthInstance) {
+      const apiKey = process.env.FIREBASE_API_KEY;
+      if (!apiKey) {
+        throw new Error('FIREBASE_API_KEY is not defined in the environment.');
+      }
+      clientAuthInstance = getAuth(clientApp);
+    }
+    return Reflect.get(clientAuthInstance, prop, receiver);
+  }
+});
+
 export { admin };

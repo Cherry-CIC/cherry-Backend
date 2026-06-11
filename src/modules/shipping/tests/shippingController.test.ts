@@ -28,6 +28,14 @@ jest.mock('../../order/repositories/OrderRepository', () => ({
   })),
 }));
 
+// SendcloudService throws when its methods are invoked if SENDCLOUD_PUBLIC_KEY /
+// SENDCLOUD_SECRET_KEY are missing. The test environment doesn't set them, so we
+// mock the class to avoid accidental runtime config access triggered by
+// ShipmentService/SendcloudService initialization paths.
+jest.mock('../services/SendcloudService', () => ({
+  SendcloudService: jest.fn().mockImplementation(() => ({})),
+}));
+
 import {
   getCheckoutShippingOptions,
   getPickupPoints,
@@ -84,7 +92,7 @@ describe('shippingController', () => {
             }),
           ],
         },
-      })
+      }),
     );
   });
 
