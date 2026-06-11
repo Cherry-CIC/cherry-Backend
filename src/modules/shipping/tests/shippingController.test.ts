@@ -28,15 +28,6 @@ jest.mock('../../order/repositories/OrderRepository', () => ({
   })),
 }));
 
-// SendcloudService's constructor throws if SENDCLOUD_PUBLIC_KEY / SENDCLOUD_SECRET_KEY
-// are not set. The test environment never sets them, so we mock the class to
-// avoid the boot-time throw triggered by the controller's module-level
-// `new ShipmentService()` (which itself instantiates SendcloudService). This
-// matches the dependency-mocking pattern used elsewhere in this file.
-jest.mock('../services/SendcloudService', () => ({
-  SendcloudService: jest.fn().mockImplementation(() => ({})),
-}));
-
 import {
   getCheckoutShippingOptions,
   getPickupPoints,
@@ -93,7 +84,7 @@ describe('shippingController', () => {
             }),
           ],
         },
-      }),
+      })
     );
   });
 
