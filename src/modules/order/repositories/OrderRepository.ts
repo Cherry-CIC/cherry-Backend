@@ -128,6 +128,8 @@ export class OrderRepository {
         shippingWeight: data.shippingWeight || 0,
         pickupPoint: data.pickupPoint,
         paymentIntentId: data.paymentIntentId,
+        // BACKWARDS COMPATIBILITY: fall back to 'pending' for legacy documents that
+        // predate the PaymentStatus union expansion. See Order.ts for full note.
         paymentStatus: data.paymentStatus || 'pending',
         shipmentStatus: data.shipmentStatus || 'not_created',
         status: data.status || 'completed',
@@ -136,4 +138,29 @@ export class OrderRepository {
       } as Order;
     });
   }
+
+  /**
+   * Looks up an order by its Stripe PaymentIntent ID.
+   *
+   * Returns null if no matching order is found — this is the expected case when a
+   * webhook fires before the client has called POST /api/order/create (e.g. during
+   * payment_intent.processing). Callers must handle null gracefully and must NOT
+   * create an order from this lookup; order creation is the client's responsibility.
+   */
+  async getOrderByPaymentIntentId(paymentIntentId: string): Promise<Order | null> {
+    const snapshot = await firestore
+      .collection('orders')
+      .where('paymentIntentId', '==', paymentIntentId)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    const data = doc.data() as Omit<Order, 'id'>;
+    return { id: doc.id, ...data };
+  }
 }
+
