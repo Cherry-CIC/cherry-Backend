@@ -6,6 +6,7 @@ import {
   getCheckoutShippingOptions,
   getPickupPoints,
   handleSendcloudWebhook,
+  saveAddress,
   validatePostcode,
 } from '../controllers/shippingController';
 import {
@@ -13,9 +14,68 @@ import {
   createTestParcelValidator,
   postcodeValidationQueryValidator,
   pickupPointsQueryValidator,
+  saveAddressValidator,
 } from '../validators/shippingValidator';
 
 const router = Router();
+
+/**
+ * @swagger
+ * /api/shipping/address:
+ *   put:
+ *     summary: Save or update user delivery address
+ *     tags: [Shipping]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - country
+ *               - addressLine1
+ *               - postcode
+ *               - city
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               addressLine1:
+ *                 type: string
+ *               addressLine2:
+ *                 type: string
+ *                 nullable: true
+ *               postcode:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *             example:
+ *               fullName: "Jimoh Yusuph"
+ *               country: "United Kingdom"
+ *               addressLine1: "71 Gol Street"
+ *               addressLine2: "Flat 2"
+ *               postcode: "SE18 5AB"
+ *               city: "London"
+ *     responses:
+ *       200:
+ *         description: Address saved successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User profile not found
+ */
+router.put(
+  '/address',
+  authMiddleware,
+  validateRequest(saveAddressValidator),
+  saveAddress,
+);
 
 /**
  * @swagger

@@ -10,10 +10,52 @@ import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 import { PostcodeLookupService } from '../services/postcode/PostcodeLookupService';
 import { ProductRepository } from '../../products/repositories/ProductRepository';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
+import { UserRepository } from '../../auth/repositories/UserRepository';
 
 const checkoutShippingService = new CheckoutShippingService();
 const postcodeLookupService = new PostcodeLookupService();
+const userRepo = new UserRepository();
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
+
+export const saveAddress = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const { fullName, country, addressLine1, addressLine2, postcode, city } =
+      req.body;
+
+    const userProfile = await userRepo.getById(user.uid);
+    if (!userProfile) {
+      ResponseHandler.notFound(
+        res,
+        'User profile not found',
+        'User exists in Firebase Auth but not in database',
+      );
+      return;
+    }
+
+    const updatedProfile = await userRepo.update(userProfile.id!, {
+      address: {
+        fullName,
+        country,
+        addressLine1,
+        addressLine2: addressLine2 || '',
+        postcode,
+        city,
+      },
+    });
+
+    ResponseHandler.success(res, updatedProfile, 'Address saved successfully');
+  } catch (err) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to save address',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
 
 export const createTestParcel = async (
   req: Request,

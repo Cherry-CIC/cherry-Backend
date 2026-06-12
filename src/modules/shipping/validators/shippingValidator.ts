@@ -1,5 +1,30 @@
 import Joi from 'joi';
 
+export const saveAddressValidator = Joi.object({
+  fullName: Joi.string().trim().min(2).max(100).required().messages({
+    'string.empty': '"fullName" cannot be empty',
+    'string.min': '"fullName" should have at least {#limit} characters',
+    'any.required': '"fullName" is required',
+  }),
+  country: Joi.string().trim().min(2).max(100).required().messages({
+    'string.empty': '"country" cannot be empty',
+    'any.required': '"country" is required',
+  }),
+  addressLine1: Joi.string().trim().min(3).max(200).required().messages({
+    'string.empty': '"addressLine1" cannot be empty',
+    'any.required': '"addressLine1" is required',
+  }),
+  addressLine2: Joi.string().trim().max(200).allow('').optional(),
+  postcode: Joi.string().trim().min(2).max(20).required().messages({
+    'string.empty': '"postcode" cannot be empty',
+    'any.required': '"postcode" is required',
+  }),
+  city: Joi.string().trim().min(2).max(100).required().messages({
+    'string.empty': '"city" cannot be empty',
+    'any.required': '"city" is required',
+  }),
+});
+
 export const createTestParcelValidator = Joi.object({
   parcel: Joi.object({
     name: Joi.string().required(),
