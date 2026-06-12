@@ -40,12 +40,14 @@ const createEphemeralKey = async (customerId: string): Promise<Stripe.EphemeralK
 const createPaymentIntent = async (
   amount: number,
   currency: string,
-  customerId: string
+  customerId: string,
+  metadata: Stripe.MetadataParam,
 ): Promise<Stripe.PaymentIntent> => {
   const paymentIntent = await stripe.paymentIntents.create({
-    amount: amount,
-    currency: currency,
+    amount,
+    currency,
     customer: customerId,
+    metadata,
     automatic_payment_methods: {
       enabled: true,
     },
@@ -61,7 +63,7 @@ const createWebhook = (
   const event = stripe.webhooks.constructEvent(
     rawBody,
     sig,
-    process.env.STRIPE_SECRET_KEY!
+    process.env.STRIPE_WEBHOOK_SECRET!
   )
   return event
 }

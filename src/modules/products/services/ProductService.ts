@@ -4,12 +4,15 @@ import { Charity } from '../../charities/model/Charity';
 import { ProductRepository } from '../repositories/ProductRepository';
 import { CategoryRepository } from '../../categories/repositories/CategoryRepository';
 import { CharityRepository } from '../../charities/repositories/CharityRepository';
+import { PostageSize } from '../../postage-sizes/model/PostageSize';
+import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 
 export class ProductService {
     constructor(
         private productRepo: ProductRepository,
         private categoryRepo: CategoryRepository,
-        private charityRepo: CharityRepository
+        private charityRepo: CharityRepository,
+        private postageSizeRepo: PostageSizeRepository
     ) {}
 
     async getAllProducts(): Promise<Product[]> {
@@ -26,7 +29,11 @@ export class ProductService {
 
     async createProduct(data: CreateProductData & { userId: string }): Promise<Product> {
         // Validate that category and charity exist
-        await this.validateReferences(data.categoryId, data.charityId);
+        await this.validateReferences(
+            data.categoryId,
+            data.charityId,
+            data.postageSize,
+        );
         
         const product: Product = {
             ...data,
@@ -53,15 +60,19 @@ export class ProductService {
             ? this.charityRepo.getById(product.charityId)
             : Promise.resolve(null);
 
-        const [category, charity] = await Promise.all([
+        const [category, charity, postageSizeDetails] = await Promise.all([
             categoryPromise,
-            charityPromise
+            charityPromise,
+            product.postageSize
+                ? this.postageSizeRepo.getById(product.postageSize)
+                : Promise.resolve(null),
         ]);
 
         return {
             ...product,
             category: category || undefined,
-            charity: charity || undefined
+            charity: charity || undefined,
+            postageSizeDetails: postageSizeDetails || undefined,
         };
     }
 
@@ -83,15 +94,21 @@ export class ProductService {
                         ? this.charityRepo.getById(product.charityId).catch(() => null)
                         : Promise.resolve(null);
 
-                    const [category, charity] = await Promise.all([
+                    const postageSizePromise = product.postageSize
+                        ? this.postageSizeRepo.getById(product.postageSize).catch(() => null)
+                        : Promise.resolve(null);
+
+                    const [category, charity, postageSizeDetails] = await Promise.all([
                         categoryPromise,
-                        charityPromise
+                        charityPromise,
+                        postageSizePromise,
                     ]);
 
                     return {
                         ...product,
                         category: category || undefined,
-                        charity: charity || undefined
+                        charity: charity || undefined,
+                        postageSizeDetails: postageSizeDetails || undefined,
                     };
                 } catch (error) {
                     // If there's an error fetching details, return product without details
@@ -99,7 +116,8 @@ export class ProductService {
                     return {
                         ...product,
                         category: undefined,
-                        charity: undefined
+                        charity: undefined,
+                        postageSizeDetails: undefined,
                     };
                 }
             })
@@ -141,8 +159,12 @@ export class ProductService {
             const charityId = data.charityId || existingProduct.charityId;
             
             if (categoryId && charityId) {
-                await this.validateReferences(categoryId, charityId);
+                await this.validateCategoryAndCharity(categoryId, charityId);
             }
+        }
+
+        if (data.postageSize) {
+            await this.validatePostageSize(data.postageSize);
         }
 
         return this.productRepo.update(id, data);
@@ -166,7 +188,18 @@ export class ProductService {
       return this.productRepo.adjustLikes(id, delta);
     }
   
-    private async validateReferences(categoryId: string, charityId: string): Promise<void> {
+    private async validateReferences(
+        categoryId: string,
+        charityId: string,
+        postageSize: string,
+    ): Promise<void> {
+        await Promise.all([
+            this.validateCategoryAndCharity(categoryId, charityId),
+            this.validatePostageSize(postageSize),
+        ]);
+    }
+
+    private async validateCategoryAndCharity(categoryId: string, charityId: string): Promise<void> {
         const [category, charity] = await Promise.all([
             this.categoryRepo.getById(categoryId),
             this.charityRepo.getById(charityId)
@@ -180,11 +213,20 @@ export class ProductService {
             throw new Error('Charity not found');
         }
     }
+
+    private async validatePostageSize(postageSizeId: string): Promise<void> {
+        const postageSize = await this.postageSizeRepo.getById(postageSizeId);
+        if (!postageSize) {
+            throw new Error('Postage size not found');
+        }
+    }
+
 }
 
 export interface ProductWithDetails extends Product {
     category?: Category;
     charity?: Charity;
+    postageSizeDetails?: PostageSize;
 }
 
 export interface CreateProductData {
@@ -192,6 +234,7 @@ export interface CreateProductData {
     description?: string;
     categoryId: string;
     charityId: string;
+    postageSize: string;
     quality: string;
     size: string;
     product_images: string[];
@@ -206,6 +249,7 @@ export interface UpdateProductData {
     description?: string;
     categoryId?: string;
     charityId?: string;
+    postageSize?: string;
     quality?: string;
     size?: string;
     product_images?: string[];

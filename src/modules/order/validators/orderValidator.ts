@@ -4,13 +4,12 @@ import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
-
 const addressSchema = Joi.object({
   line1: Joi.string().required(),
-  line2: Joi.string().optional(),
-  house_number: Joi.string().required(),
+  line2: Joi.string().allow('').optional(),
+  house_number: Joi.string().allow('').optional(),
   city: Joi.string().required(),
-  state: Joi.string().optional(),
+  state: Joi.string().allow('').optional(),
   postal_code: Joi.string().required(),
   country: Joi.string().length(2).uppercase().required(),
 });
@@ -29,21 +28,8 @@ const pickupPointSchema = Joi.object({
 });
 
 export const orderSchema = Joi.object({
-  amount: Joi.number().integer().positive().required().messages({
-    'number.base': `"amount" should be a number`,
-    'number.integer': `"amount" should be an integer`,
-    'number.positive': `"amount" must be greater than 0`,
-    'any.required': `"amount" is required`,
-  }),
-  productId: Joi.string().optional(),
-  productName: Joi.string().optional(),
+  productId: Joi.string().trim().required(),
   paymentIntentId: Joi.string().required(),
-  shippingMethodId: Joi.string().required(),
-  shippingCarrier: Joi.string().trim().lowercase().valid(ENFORCED_CARRIER).required().messages({
-    'any.only': `"shippingCarrier" must be "${ENFORCED_CARRIER}"`,
-    'any.required': `"shippingCarrier" is required`,
-  }),
-  shippingWeight: Joi.number().integer().min(1).max(100000).required(),
   shipping: Joi.object({
     address: addressSchema.required(),
     name: Joi.string().required(),

@@ -6,12 +6,22 @@ dotenv.config({ path: '.env' });
 
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpecs } from './shared/config/swaggerConfig';
+import { stripeWebhook } from './modules/payment/controllers/paymentController';
 
 // Initialize Firebase
 import './shared/config/firebaseConfig';
 
 const app = express();
-app.use(express.json());
+app.post(
+    '/api/payment/webhook',
+    express.raw({ type: 'application/json' }),
+    stripeWebhook,
+);
+app.use(express.json({
+    verify: (req, res, buffer) => {
+        (req as any).rawBody = Buffer.from(buffer);
+    },
+}));
 
 import productRoutes from './modules/products/routes/productRoutes';
 import categoryRoutes from './modules/categories/routes/categoryRoutes';
@@ -21,6 +31,7 @@ import paymentRoutes from './modules/payment/routes/paymentRoutes';
 import orderRoutes from './modules/order/routes/orderRoutes';
 import adminRoutes from './modules/order/routes/adminRoutes';
 import shippingRoutes from './modules/shipping/routes/shippingRoutes';
+import postageSizeRoutes from './modules/postage-sizes/routes/postageSizeRoutes';
 
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -30,6 +41,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/shipping', shippingRoutes);
+app.use('/api/postage-sizes', postageSizeRoutes);
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 

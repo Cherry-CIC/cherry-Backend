@@ -1,23 +1,5 @@
 import Joi from 'joi';
 
-/**
- * Validator for creating a shipment
- */
-export const createShipmentValidator = Joi.object({
-  orderId: Joi.string().required().messages({
-    'string.empty': 'Order ID is required',
-    'any.required': 'Order ID is required',
-  }),
-  weight: Joi.number().integer().min(1).max(100000).optional().messages({
-    'number.base': 'Weight must be a number',
-    'number.min': 'Weight must be at least 1 gram',
-    'number.max': 'Weight must not exceed 100kg (100000 grams)',
-  }),
-  shippingMethodId: Joi.number().integer().optional().messages({
-    'number.base': 'Shipping method ID must be a number',
-  }),
-});
-
 export const createTestParcelValidator = Joi.object({
   parcel: Joi.object({
     name: Joi.string().required(),
@@ -38,29 +20,11 @@ export const createTestParcelValidator = Joi.object({
   }).required(),
 });
 
-/**
- * Validator for order ID parameter
- */
-export const orderIdParamValidator = Joi.object({
-  orderId: Joi.string().required().messages({
-    'string.empty': 'Order ID is required',
-    'any.required': 'Order ID is required',
-  }),
-});
-
-/**
- * Validator for shipment status query
- */
-export const shipmentStatusQueryValidator = Joi.object({
-  status: Joi.string()
-    .valid('pending', 'announced', 'en_route', 'out_for_delivery', 'delivered', 'exception', 'cancelled')
-    .optional()
-    .messages({
-      'any.only': 'Invalid status value',
-    }),
-});
-
 export const checkoutShippingOptionsQueryValidator = Joi.object({
+  productId: Joi.string().trim().required().messages({
+    'string.empty': 'Product ID is required',
+    'any.required': 'Product ID is required',
+  }),
   servicePointId: Joi.string().trim().pattern(/^\d+$/).required().messages({
     'string.pattern.base': 'Service point ID must be numeric',
     'any.required': 'Service point ID is required',

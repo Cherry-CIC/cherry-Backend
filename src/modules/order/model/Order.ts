@@ -1,7 +1,5 @@
 export type DeliveryType = 'home' | 'pickup_point';
-export type PaymentStatus = 'pending' | 'succeeded' | 'failed';
 export type ShipmentStatus =
-  | 'not_created'
   | 'pending'
   | 'announced'
   | 'en_route'
@@ -33,25 +31,35 @@ export interface PickupPointSelection {
 export interface Order {
   id: string;
   userId: string;
-  email?: string;
-  amount: number;
-  productId?: string;
-  productName?: string;
+  email: string;
+  productAmount: number;
+  shippingFee: number;
+  securityFee: number;
+  totalAmount: number;
+  currency: 'GBP';
+  productId: string;
+  productName: string;
   deliveryType: DeliveryType;
   shippingOptionId: string;
-  shippingOptionName?: string;
-  shippingOptionPrice?: string;
-  shippingCarrier?: string;
+  shippingOptionName: string;
+  shippingCarrier: string;
   shippingWeight: number;
   shipping: {
     address: ShippingAddress;
     name: string;
-    telephone?: string;
+    telephone: string;
   };
-  pickupPoint?: PickupPointSelection;
-  paymentIntentId?: string;
-  paymentStatus: PaymentStatus;
-  status?: 'completed' | 'pending' | 'failed';
+  pickupPoint: PickupPointSelection;
+  paymentIntentId: string;
+  paymentStatus: 'succeeded';
+  status:
+    | 'paid'
+    | 'shipment_pending'
+    | 'shipment_created'
+    | 'shipped'
+    | 'delivered'
+    | 'cancelled'
+    | 'failed';
   shipmentStatus: ShipmentStatus;
   shipmentId?: string;
   createdAt: Date;

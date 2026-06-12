@@ -1,38 +1,110 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
+import { gbpToPence } from '../../../shared/utils/money';
 import { Order } from '../model/Order';
+
+const removeUndefinedValues = <T extends Record<string, unknown>>(value: T): T =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as T;
 
 export interface CreateOrderInput {
   userId: string;
   email: string;
-  amount: number;
-  productId?: string;
-  productName?: string;
+  productAmount: number;
+  shippingFee: number;
+  securityFee: number;
+  totalAmount: number;
+  currency: 'GBP';
+  productId: string;
+  productName: string;
   deliveryType: Order['deliveryType'];
   shippingOptionId: string;
-  shippingOptionName?: string;
-  shippingOptionPrice?: string;
-  shippingCarrier?: string;
+  shippingOptionName: string;
+  shippingCarrier: string;
   shippingWeight: number;
   shipping: Order['shipping'];
-  pickupPoint?: Order['pickupPoint'];
-  paymentIntentId?: string;
+  pickupPoint: Order['pickupPoint'];
+  paymentIntentId: string;
   paymentStatus: Order['paymentStatus'];
   shipmentStatus: Order['shipmentStatus'];
-  status?: Order['status'];
+  status: Order['status'];
   shipmentId?: string;
 }
 
 export class OrderRepository {
-  async createOrder(input: CreateOrderInput): Promise<Order> {
-    const orderData: Partial<Order> = {
+  async createPaidOrderAndDecrementInventory(
+    input: CreateOrderInput,
+  ): Promise<Order> {
+    const orderRef = firestore.collection('orders').doc();
+    const paymentLockRef = firestore
+      .collection('order_payment_intents')
+      .doc(input.paymentIntentId);
+    const productRef = firestore.collection('products').doc(input.productId);
+
+    return firestore.runTransaction(async (transaction) => {
+      const [paymentLock, productDoc] = await Promise.all([
+        transaction.get(paymentLockRef),
+        transaction.get(productRef),
+      ]);
+
+      if (paymentLock.exists) {
+        throw new Error('PaymentIntent has already been used');
+      }
+
+      if (!productDoc.exists) {
+        throw new Error('Product not found');
+      }
+
+      const productData = productDoc.data()!;
+      const quantity =
+        typeof productData.number === 'number' ? productData.number : 0;
+      if (quantity <= 0) {
+        throw new Error('Product is out of stock');
+      }
+
+      if (
+        typeof productData.price !== 'number' ||
+        gbpToPence(productData.price) !== input.productAmount
+      ) {
+        throw new Error('Product price changed');
+      }
+
+      const orderData = this.buildOrderData(input);
+      transaction.set(orderRef, {
+        ...orderData,
+        email: input.email,
+      });
+      transaction.update(productRef, {
+        number: quantity - 1,
+        updatedAt: new Date(),
+      });
+      transaction.set(paymentLockRef, {
+        orderId: orderRef.id,
+        userId: input.userId,
+        createdAt: new Date(),
+      });
+
+      return {
+        id: orderRef.id,
+        email: input.email,
+        ...orderData,
+      } as Order;
+    });
+  }
+
+  private buildOrderData(input: CreateOrderInput): Omit<Order, 'id' | 'email'> {
+    return removeUndefinedValues({
       userId: input.userId,
-      amount: input.amount,
+      productAmount: input.productAmount,
+      shippingFee: input.shippingFee,
+      securityFee: input.securityFee,
+      totalAmount: input.totalAmount,
+      currency: input.currency,
       productId: input.productId,
       productName: input.productName,
       deliveryType: input.deliveryType,
       shippingOptionId: input.shippingOptionId,
       shippingOptionName: input.shippingOptionName,
-      shippingOptionPrice: input.shippingOptionPrice,
       shippingCarrier: input.shippingCarrier,
       shippingWeight: input.shippingWeight,
       shipping: input.shipping,
@@ -40,38 +112,10 @@ export class OrderRepository {
       paymentIntentId: input.paymentIntentId,
       paymentStatus: input.paymentStatus,
       shipmentStatus: input.shipmentStatus,
-      status: input.status ?? 'completed',
+      status: input.status,
       shipmentId: input.shipmentId,
       createdAt: new Date(),
-    };
-
-    const docRef = await firestore.collection('orders').add({
-      ...orderData,
-      email: input.email,
-    });
-
-    return {
-      id: docRef.id,
-      userId: input.userId,
-      email: input.email,
-      amount: input.amount,
-      productId: input.productId,
-      productName: input.productName,
-      deliveryType: input.deliveryType,
-      shippingOptionId: input.shippingOptionId,
-      shippingOptionName: input.shippingOptionName,
-      shippingOptionPrice: input.shippingOptionPrice,
-      shippingCarrier: input.shippingCarrier,
-      shippingWeight: input.shippingWeight,
-      shipping: input.shipping,
-      pickupPoint: input.pickupPoint,
-      paymentIntentId: input.paymentIntentId,
-      paymentStatus: input.paymentStatus,
-      shipmentStatus: input.shipmentStatus,
-      status: input.status ?? 'completed',
-      shipmentId: input.shipmentId,
-      createdAt: orderData.createdAt!,
-    };
+    }) as Omit<Order, 'id' | 'email'>;
   }
 
   async getOrderById(id: string): Promise<Order | null> {
@@ -79,19 +123,35 @@ export class OrderRepository {
     if (!doc.exists) {
       return null;
     }
-    const data = doc.data() as Omit<Order, 'id'>;
-    return { id: doc.id, ...data };
+    return this.mapToOrder(doc.id, doc.data()!);
   }
 
   async updateOrder(id: string, updates: Partial<Order>): Promise<void> {
-    await firestore.collection('orders').doc(id).update(updates);
+    await firestore
+      .collection('orders')
+      .doc(id)
+      .update(removeUndefinedValues(updates as Record<string, unknown>));
   }
 
   async getAllOrders(): Promise<Order[]> {
     const snapshot = await firestore.collection('orders').get();
-    return snapshot.docs.map((doc) => {
-      const data = doc.data() as Omit<Order, 'id'>;
-      return { id: doc.id, ...data };
+    return snapshot.docs.map((doc) => this.mapToOrder(doc.id, doc.data()));
+  }
+
+  async getOrdersByUserId(userId: string): Promise<Order[]> {
+    const snapshot = await firestore
+      .collection('orders')
+      .where('userId', '==', userId)
+      .get();
+
+    const orders = snapshot.docs.map((doc) =>
+      this.mapToOrder(doc.id, doc.data()),
+    );
+
+    return orders.sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime();
+      const bTime = new Date(b.createdAt).getTime();
+      return bTime - aTime;
     });
   }
 
@@ -103,37 +163,19 @@ export class OrderRepository {
       .orderBy('createdAt', 'desc')
       .get();
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      let createdAt = data.createdAt;
-      if (createdAt && typeof createdAt.toDate === 'function') {
-        createdAt = createdAt.toDate();
-      } else if (createdAt) {
-        createdAt = new Date(createdAt);
-      }
+    return snapshot.docs.map((doc) => this.mapToOrder(doc.id, doc.data()));
+  }
 
-      return {
-        id: doc.id,
-        userId: data.userId || '',
-        email: data.email || '',
-        amount: data.amount || 0,
-        productId: data.productId,
-        productName: data.productName,
-        shipping: data.shipping,
-        deliveryType: data.deliveryType || 'home',
-        shippingOptionId: data.shippingOptionId || '',
-        shippingOptionName: data.shippingOptionName,
-        shippingOptionPrice: data.shippingOptionPrice,
-        shippingCarrier: data.shippingCarrier,
-        shippingWeight: data.shippingWeight || 0,
-        pickupPoint: data.pickupPoint,
-        paymentIntentId: data.paymentIntentId,
-        paymentStatus: data.paymentStatus || 'pending',
-        shipmentStatus: data.shipmentStatus || 'not_created',
-        status: data.status || 'completed',
-        shipmentId: data.shipmentId,
-        createdAt,
-      } as Order;
-    });
+  private mapToOrder(id: string, data: FirebaseFirestore.DocumentData): Order {
+    const createdAt =
+      data.createdAt && typeof data.createdAt.toDate === 'function'
+        ? data.createdAt.toDate()
+        : new Date(data.createdAt);
+
+    return {
+      id,
+      ...data,
+      createdAt,
+    } as Order;
   }
 }

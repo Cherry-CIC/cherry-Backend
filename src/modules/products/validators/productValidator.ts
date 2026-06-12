@@ -28,6 +28,13 @@ export const productSchema = Joi.object({
             'any.required': `"charityId" is required`,
         }),
 
+    postageSize: Joi.string().required()
+        .messages({
+            'string.base': `"postageSize" should be a type of 'text'`,
+            'string.empty': `"postageSize" cannot be empty`,
+            'any.required': `"postageSize" is required`,
+        }),
+
     quality: Joi.string().required()
         .messages({
             'string.base': `"quality" should be a type of 'text'`,
@@ -74,6 +81,24 @@ export const productSchema = Joi.object({
         })
 });
 
+export const productUpdateSchema = Joi.object({
+    name: Joi.string().min(3).max(100).optional(),
+    description: Joi.string().max(500).allow('').optional(),
+    categoryId: Joi.string().optional(),
+    charityId: Joi.string().optional(),
+    postageSize: Joi.string().optional(),
+    quality: Joi.string().optional(),
+    size: Joi.string().optional(),
+    product_images: Joi.array().items(Joi.string().uri()).min(1).optional(),
+    donation: Joi.number().positive().optional(),
+    price: Joi.number().positive().optional(),
+    number: Joi.number().integer().min(0).optional(),
+})
+    .min(1)
+    .messages({
+        'object.min': 'At least one product field must be provided',
+    });
+
 export function validateProduct(
     req: Request,
     res: Response,
@@ -84,5 +109,22 @@ export function validateProduct(
         ResponseHandler.badRequest(res, 'Validation failed', error.details[0].message);
         return;
     }
+    next();
+}
+
+export function validateProductUpdate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+): void {
+    const { error, value } = productUpdateSchema.validate(req.body, {
+        abortEarly: true,
+        stripUnknown: true,
+    });
+    if (error) {
+        ResponseHandler.badRequest(res, 'Validation failed', error.details[0].message);
+        return;
+    }
+    req.body = value;
     next();
 }

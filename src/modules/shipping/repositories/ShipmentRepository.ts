@@ -166,7 +166,7 @@ export class ShipmentRepository {
       trackingNumber: data.trackingNumber,
       trackingUrl: data.trackingUrl,
       carrier: data.carrier,
-      status: data.status || 'pending',
+      status: data.status,
       labelUrl: data.labelUrl,
       parcel: data.parcel,
       createdAt,

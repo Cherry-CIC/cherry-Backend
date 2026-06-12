@@ -27,6 +27,12 @@ const router = Router();
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: productId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Product used to derive the parcel weight
+ *       - in: query
  *         name: servicePointId
  *         required: true
  *         schema:
@@ -84,13 +90,16 @@ const router = Router();
  *                             enum: [pickup_point]
  *                           deliveryMethodType:
  *                             type: string
- *                           price:
- *                             type: string
+ *                           pricePence:
+ *                             type: integer
  *                             nullable: true
  *                           currency:
  *                             type: string
+ *                             example: "GBP"
+ *                           carrierCode:
+ *                             type: string
  *                             nullable: true
- *                           carrier:
+ *                           carrierName:
  *                             type: string
  *                             nullable: true
  *                           checkoutIdentifier:

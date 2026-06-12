@@ -68,7 +68,6 @@ Important vars for local work:
 - `SENDCLOUD_MODE`
 - `SENDCLOUD_PUBLIC_KEY`
 - `SENDCLOUD_SECRET_KEY`
-- `SENDCLOUD_WEBHOOK_SECRET`
 - `FIREBASE_PROJECT_ID`
 
 Recommended defaults:

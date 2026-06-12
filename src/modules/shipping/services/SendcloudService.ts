@@ -18,7 +18,10 @@ export class SendcloudService {
       servicePointsApiUrl,
     } = sendcloudConfig;
 
-    if (!publicKey || !secretKey) {
+    if (
+      sendcloudConfig.mode !== 'mock' &&
+      (!publicKey || !secretKey)
+    ) {
       throw new Error(
         'Sendcloud credentials are not configured. Please set SENDCLOUD_PUBLIC_KEY and SENDCLOUD_SECRET_KEY in your .env file.',
       );
@@ -51,6 +54,16 @@ export class SendcloudService {
   }
 
   async createParcel(parcelData: any): Promise<SendcloudParcel> {
+    if (sendcloudConfig.mode === 'mock') {
+      return {
+        id: Date.now(),
+        tracking_number: `MOCK-${parcelData.order_number}`,
+        tracking_url: `https://example.test/tracking/${parcelData.order_number}`,
+        status: { id: 1, message: 'Announced' },
+        carrier: { name: sendcloudConfig.enforcedCarrier },
+      };
+    }
+
     try {
       const response = await this.client.post('/parcels', {
         parcel: parcelData,
@@ -66,6 +79,16 @@ export class SendcloudService {
   }
 
   async getParcel(parcelId: number): Promise<SendcloudParcel> {
+    if (sendcloudConfig.mode === 'mock') {
+      return {
+        id: parcelId,
+        tracking_number: `MOCK-${parcelId}`,
+        tracking_url: `https://example.test/tracking/${parcelId}`,
+        status: { id: 1, message: 'Announced' },
+        carrier: { name: sendcloudConfig.enforcedCarrier },
+      };
+    }
+
     try {
       const response = await this.client.get(`/parcels/${parcelId}`);
       return response.data.parcel;
@@ -94,6 +117,20 @@ export class SendcloudService {
   async getCheckoutDeliveryOptions(
     query: CheckoutShippingOptionsQuery,
   ): Promise<any[]> {
+    if (sendcloudConfig.mode === 'mock') {
+      return [
+        {
+          id: 3747,
+          name: 'Mock InPost locker delivery',
+          carrier: sendcloudConfig.enforcedCarrier,
+          service_point_input: 'required',
+          min_weight: 0,
+          max_weight: 15,
+          price: { amount: '3.99', currency: 'GBP' },
+        },
+      ];
+    }
+
     try {
       const response = await this.client.get(
         '/shipping_methods',
@@ -114,8 +151,15 @@ export class SendcloudService {
 
       const targetCarrier = query.carrier.toLowerCase();
       return methods.filter(
-        (method: any) =>
-          String(method?.carrier || '').toLowerCase() === targetCarrier,
+        (method: any) => {
+          const carrier =
+            method?.carrier?.code ??
+            method?.carrier?.name ??
+            method?.carrier ??
+            method?.carrier_code ??
+            '';
+          return String(carrier).toLowerCase() === targetCarrier;
+        },
       );
     } catch (error: any) {
       const errorMessage =
@@ -129,6 +173,26 @@ export class SendcloudService {
   }
 
   async getServicePoints(query: PickupPointsQuery): Promise<any[]> {
+    if (sendcloudConfig.mode === 'mock') {
+      return [
+        {
+          id: 13127548,
+          name: 'Mock InPost Locker',
+          street: '123 High Street',
+          house_number: '',
+          city: 'London',
+          postal_code: query.address,
+          country: query.country,
+          carrier: sendcloudConfig.enforcedCarrier,
+          distance: 250,
+          latitude: '51.5074',
+          longitude: '-0.1278',
+          open_tomorrow: true,
+          open_upcoming_week: true,
+        },
+      ];
+    }
+
     try {
       const response = await this.servicePointsClient.get('/service-points', {
         params: {

@@ -25,5 +25,13 @@ export const mapSendcloudStatusToShipmentStatus = (
     return 'announced';
   }
 
-  return 'en_route';
+  if (
+    normalized.includes('transit') ||
+    normalized.includes('sorting') ||
+    normalized.includes('transport')
+  ) {
+    return 'en_route';
+  }
+
+  return 'pending';
 };

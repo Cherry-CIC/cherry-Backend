@@ -9,7 +9,7 @@ import {
   deleteProduct,
   likeProduct
 } from '../controllers/productController';
-import { validateProduct } from '../validators/productValidator';
+import { validateProduct, validateProductUpdate } from '../validators/productValidator';
 import { validateProductId } from '../validators/productIdValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
@@ -25,6 +25,7 @@ const router = Router();
  *         - name
  *         - categoryId
  *         - charityId
+ *         - postageSize
  *         - quality
  *         - size
  *         - product_images
@@ -51,6 +52,10 @@ const router = Router();
  *           type: string
  *           description: Reference to Charity ID
  *           example: "z1fLMUjUWlmkJn8y8UhU"
+ *         postageSize:
+ *           type: string
+ *           description: Reference to a postage_sizes document
+ *           example: "4bVq7OrLNbLvCvuQ128h"
  *         quality:
  *           type: string
  *           description: Product quality rating
@@ -71,8 +76,13 @@ const router = Router();
  *           example: 50.0
  *         price:
  *           type: number
- *           description: Product price
+ *           description: Product price in GBP
  *           example: 599.99
+ *         securityFee:
+ *           type: number
+ *           description: 10% purchase security fee in GBP
+ *           description: Flat security fee added for display purposes
+ *           example: 2
  *         likes:
  *           type: number
  *           description: Number of likes
@@ -149,6 +159,8 @@ router.get('/', authMiddleware, getAllProducts);
  *                             $ref: '#/components/schemas/Category'
  *                           charity:
  *                             $ref: '#/components/schemas/Charity'
+ *                           postageSizeDetails:
+ *                             $ref: '#/components/schemas/PostageSize'
  *                 timestamp:
  *                   type: string
  *                   format: date-time
@@ -285,6 +297,8 @@ router.get('/:id', authMiddleware, validateProductId, getProductById);
  *                           $ref: '#/components/schemas/Category'
  *                         charity:
  *                           $ref: '#/components/schemas/Charity'
+ *                         postageSizeDetails:
+ *                           $ref: '#/components/schemas/PostageSize'
  *                 timestamp:
  *                   type: string
  *                   format: date-time
@@ -313,6 +327,7 @@ router.get('/:id/with-details', authMiddleware, validateProductId, getProductWit
  *               - name
  *               - categoryId
  *               - charityId
+ *               - postageSize
  *               - quality
  *               - size
  *               - product_images
@@ -332,6 +347,9 @@ router.get('/:id/with-details', authMiddleware, validateProductId, getProductWit
  *               charityId:
  *                 type: string
  *                 example: "z1fLMUjUWlmkJn8y8UhU"
+ *               postageSize:
+ *                 type: string
+ *                 example: "4bVq7OrLNbLvCvuQ128h"
  *               quality:
  *                 type: string
  *                 example: "Premium"
@@ -348,6 +366,7 @@ router.get('/:id/with-details', authMiddleware, validateProductId, getProductWit
  *                 example: 50.0
  *               price:
  *                 type: number
+ *                 description: Product price in GBP
  *                 example: 599.99
  *               likes:
  *                 type: number
@@ -411,6 +430,10 @@ router.post('/', authMiddleware, validateProduct, createProduct);
  *               charityId:
  *                 type: string
  *                 example: "z1fLMUjUWlmkJn8y8UhU"
+ *               postageSize:
+ *                 type: string
+ *                 description: Postage size to assign to the product
+ *                 example: "4bVq7OrLNbLvCvuQ128h"
  *               quality:
  *                 type: string
  *                 example: "Premium"
@@ -488,7 +511,7 @@ router.post('/', authMiddleware, validateProduct, createProduct);
  *       500:
  *         description: Server error
  */
-router.put('/:id', authMiddleware, validateProductId, validateProduct, updateProduct);
+router.put('/:id', authMiddleware, validateProductId, validateProductUpdate, updateProduct);
 
 /**
  * @swagger
@@ -650,4 +673,3 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
 router.post('/:id/like', authMiddleware, likeProduct);
 
 export default router;
-

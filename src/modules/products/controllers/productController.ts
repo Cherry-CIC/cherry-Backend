@@ -2,12 +2,23 @@ import { Request, Response, NextFunction } from 'express';
 import { ServiceFactory } from '../services/ServiceFactory';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
+import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
+import { gbpToPence } from '../../../shared/utils/money';
+
+const withSecurityFee = <T extends { price: number }>(product: T) => ({
+    ...product,
+    securityFee: calculateSecurityFeePence(gbpToPence(product.price)) / 100,
+});
 
 export const getAllProducts = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProducts();
-        ResponseHandler.success(res, products, 'Products fetched successfully');
+        ResponseHandler.success(
+            res,
+            products.map((product) => withSecurityFee(product)),
+            'Products fetched successfully',
+        );
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch products', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -25,7 +36,11 @@ export const createProduct = async (
         const product = await productService.createProduct(productData);
         ResponseHandler.created(res, product, 'Product created successfully');
     } catch (err) {
-        if (err instanceof Error && (err.message === 'Category not found' || err.message === 'Charity not found')) {
+        if (err instanceof Error && (
+            err.message === 'Category not found'
+            || err.message === 'Charity not found'
+            || err.message === 'Postage size not found'
+        )) {
             ResponseHandler.badRequest(res, err.message);
             return;
         }
@@ -48,7 +63,11 @@ export const getProductById = async (req: Request, res: Response): Promise<void>
             return;
         }
         
-        ResponseHandler.success(res, product, 'Product fetched successfully');
+        ResponseHandler.success(
+            res,
+            withSecurityFee(product),
+            'Product fetched successfully',
+        );
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch product', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -69,7 +88,11 @@ export const getProductWithDetails = async (req: Request, res: Response): Promis
             return;
         }
         
-        ResponseHandler.success(res, product, 'Product with details fetched successfully');
+        ResponseHandler.success(
+            res,
+            withSecurityFee(product),
+            'Product with details fetched successfully',
+        );
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch product details', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -79,7 +102,11 @@ export const getAllProductsWithDetails = async (req: Request, res: Response): Pr
     try {
         const productService = ServiceFactory.getProductService();
         const products = await productService.getAllProductsWithDetails();
-        ResponseHandler.success(res, products, 'Products with details fetched successfully');
+        ResponseHandler.success(
+            res,
+            products.map((product) => withSecurityFee(product)),
+            'Products with details fetched successfully',
+        );
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to fetch products with details', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -111,7 +138,11 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
         const product = await productService.updateProduct(id, updateData);
         ResponseHandler.success(res, product, 'Product updated successfully');
     } catch (err) {
-        if (err instanceof Error && (err.message === 'Category not found' || err.message === 'Charity not found')) {
+        if (err instanceof Error && (
+            err.message === 'Category not found'
+            || err.message === 'Charity not found'
+            || err.message === 'Postage size not found'
+        )) {
             ResponseHandler.badRequest(res, err.message);
             return;
         }

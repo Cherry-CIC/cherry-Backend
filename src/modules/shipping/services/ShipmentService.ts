@@ -18,25 +18,34 @@ export class ShipmentService {
     }
 
     const parcelData: any = {
-      name: order.shipping.name || 'Customer',
+      name: order.shipping.name,
       address: order.shipping.address.line1,
       house_number: order.shipping.address.house_number || '',
       city: order.shipping.address.city,
       postal_code: order.shipping.address.postal_code,
-      country: order.shipping.address.country || 'GB',
+      country: order.shipping.address.country,
       email: order.email,
-      telephone: order.shipping.telephone || '',
+      telephone: order.shipping.telephone,
       order_number: order.id,
       weight: (order.shippingWeight / 1000).toFixed(3),
-      request_label: true,
+      request_label: false,
       shipment: {
         id: Number(order.shippingOptionId),
       },
     };
 
-    if (order.deliveryType === 'pickup_point' && order.pickupPoint) {
-      parcelData.to_service_point = Number(order.pickupPoint.id);
-    }
+    const derivedDescription = order.productName.trim().slice(0, 50);
+
+    parcelData.parcel_items = [
+      {
+        description: derivedDescription,
+        quantity: 1,
+        value: (order.productAmount / 100).toFixed(2),
+        weight: (order.shippingWeight / 1000).toFixed(3),
+      },
+    ];
+
+    parcelData.to_service_point = Number(order.pickupPoint.id);
 
     const sendcloudParcel = await this.sendcloudService.createParcel(parcelData);
 

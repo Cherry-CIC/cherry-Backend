@@ -6,6 +6,7 @@ import {
 describe('shipping validators', () => {
   it('accepts a valid checkout shipping options query', () => {
     const { error, value } = checkoutShippingOptionsQueryValidator.validate({
+      productId: 'product-1',
       servicePointId: '12345678',
       country: 'GB',
       postalCode: 'SW1A 1AA',

@@ -132,8 +132,7 @@ export const exportOrdersCsv = async (req: Request, res: Response): Promise<void
       console.log(`No orders found for date range ${startDateStr} to ${endDateStr}`);
     } else {
       for (const order of orders) {
-        // Convert amount from pence to pounds
-        const amountInPounds = (order.amount / 100).toFixed(2);
+        const amountInPounds = (order.productAmount / 100).toFixed(2);
 
         // Format date
         const orderDate = order.createdAt
@@ -151,7 +150,7 @@ export const exportOrdersCsv = async (req: Request, res: Response): Promise<void
           items,
           amountInPounds,
           orderDate,
-          order.status || 'completed',
+          order.status,
         ]);
       }
     }

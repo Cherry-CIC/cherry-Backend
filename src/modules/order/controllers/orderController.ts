@@ -5,10 +5,10 @@ import { OrderRepository } from '../repositories/OrderRepository';
 import { ShipmentService } from '../../shipping/services/ShipmentService';
 import { PaymentService } from '../../payment/services/PaymentService';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
-import { CheckoutShippingService } from '../../shipping/services/CheckoutShippingService';
+import { ProductRepository } from '../../products/repositories/ProductRepository';
+import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
-const checkoutShippingService = new CheckoutShippingService();
 
 export const createOrder = async (
   req: Request,
@@ -40,75 +40,16 @@ export const createOrder = async (
     }
 
     const email = dbUser.email;
-    const {
-      amount,
-      productId,
-      productName,
-      paymentIntentId,
-      shippingMethodId,
-      shippingCarrier,
-      shippingWeight,
-      shipping,
-      pickupPoint,
-    } = req.body;
-
-    if (!amount) {
-      ResponseHandler.badRequest(res, 'Invalid request', 'Amount is required');
-      return;
-    }
-
-    let resolvedShippingMethodName: string | undefined;
-    let resolvedShippingMethodPrice: string | undefined;
-    try {
-      const shippingMethods = await checkoutShippingService.getDeliveryOptions({
-        servicePointId: pickupPoint.id,
-        country: shipping.address.country,
-        postalCode: shipping.address.postal_code,
-        carrier: ENFORCED_CARRIER,
-      });
-
-      const selectedShippingMethod = shippingMethods.find(
-        (method) => method.id === String(shippingMethodId),
-      );
-
-      if (!selectedShippingMethod) {
-        ResponseHandler.badRequest(
-          res,
-          'Invalid shipping method',
-          'Selected shipping method is not valid for this pickup point',
-        );
-        return;
-      }
-
-      resolvedShippingMethodName = selectedShippingMethod.name;
-      resolvedShippingMethodPrice = selectedShippingMethod.price ?? undefined;
-    } catch (err) {
-      ResponseHandler.internalServerError(
-        res,
-        'Failed to resolve shipping method',
-        err instanceof Error ? err.message : 'Unknown error',
-      );
-      return;
-    }
-
-    const normalizedCarrier = String(shippingCarrier || '').toLowerCase();
-    const normalizedPickupCarrier = String(pickupPoint?.carrier || '').toLowerCase();
-    if (normalizedCarrier !== ENFORCED_CARRIER || normalizedPickupCarrier !== ENFORCED_CARRIER) {
-      ResponseHandler.badRequest(
-        res,
-        'Invalid carrier',
-        `Only ${ENFORCED_CARRIER} carrier is supported`,
-      );
-      return;
-    }
+    const { productId, paymentIntentId, shipping, pickupPoint } = req.body;
 
     const paymentService = new PaymentService();
+    let verifiedPayment;
     try {
-      await paymentService.verifySucceededPaymentIntentForUser(
-        firebaseUid,
-        paymentIntentId,
-        amount,
-      );
+      verifiedPayment =
+        await paymentService.verifySucceededPaymentIntentForUser(
+          firebaseUid,
+          paymentIntentId,
+        );
     } catch (err) {
       ResponseHandler.badRequest(
         res,
@@ -118,26 +59,138 @@ export const createOrder = async (
       return;
     }
 
+    if (productId !== verifiedPayment.productId) {
+      ResponseHandler.badRequest(
+        res,
+        'Product does not match payment',
+        'The product differs from the paid checkout',
+      );
+      return;
+    }
+
+    if (pickupPoint.id !== verifiedPayment.pickupPointId) {
+      ResponseHandler.badRequest(
+        res,
+        'Pickup point does not match payment',
+        'The selected pickup point differs from the paid checkout',
+      );
+      return;
+    }
+
+    if (
+      shipping.address.country !== verifiedPayment.destinationCountry ||
+      shipping.address.postal_code.replace(/\s/g, '').toUpperCase() !==
+        verifiedPayment.destinationPostalCode.replace(/\s/g, '').toUpperCase()
+    ) {
+      ResponseHandler.badRequest(
+        res,
+        'Shipping destination does not match payment',
+        'The shipping country or postcode differs from the paid checkout',
+      );
+      return;
+    }
+
+    const productRepo = new ProductRepository();
+    const product = await productRepo.getById(productId);
+
+    if (!product) {
+      ResponseHandler.notFound(
+        res,
+        'Product not found',
+        `Product with ID ${productId} does not exist`,
+      );
+      return;
+    }
+
+    if (!product.postageSize) {
+      ResponseHandler.badRequest(
+        res,
+        'Product postage size is missing',
+        'The product must have a postage size before an order can be created',
+      );
+      return;
+    }
+
+    const postageSizeRepo = new PostageSizeRepository();
+    const postageSize = await postageSizeRepo.getById(product.postageSize);
+
+    if (!postageSize) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid product postage size',
+        `Postage size ${product.postageSize} does not exist`,
+      );
+      return;
+    }
+
+    if (postageSize.weight !== verifiedPayment.shippingWeight) {
+      ResponseHandler.badRequest(
+        res,
+        'Product postage size changed',
+        'The product postage weight differs from the paid checkout',
+      );
+      return;
+    }
+
+    const normalizedPickupCarrier = String(pickupPoint?.carrier || '').toLowerCase();
+    if (
+      verifiedPayment.shippingCarrier !== ENFORCED_CARRIER ||
+      normalizedPickupCarrier !== ENFORCED_CARRIER
+    ) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid carrier',
+        `Only ${ENFORCED_CARRIER} carrier is supported`,
+      );
+      return;
+    }
+
     const orderRepo = new OrderRepository();
-    const savedOrder = await orderRepo.createOrder({
-      userId: firebaseUid,
-      email,
-      amount,
-      productId,
-      productName,
-      deliveryType: 'pickup_point',
-      shippingOptionId: shippingMethodId,
-      shippingOptionName: resolvedShippingMethodName,
-      shippingOptionPrice: resolvedShippingMethodPrice,
-      shippingCarrier,
-      shippingWeight,
-      shipping,
-      pickupPoint,
-      paymentIntentId,
-      paymentStatus: 'succeeded',
-      shipmentStatus: 'pending',
-      status: 'completed',
-    });
+    let savedOrder;
+    try {
+      savedOrder = await orderRepo.createPaidOrderAndDecrementInventory({
+        userId: firebaseUid,
+        email,
+        productAmount: verifiedPayment.productAmount,
+        shippingFee: verifiedPayment.shippingFee,
+        securityFee: verifiedPayment.securityFee,
+        totalAmount: verifiedPayment.totalAmount,
+        currency: verifiedPayment.currency,
+        productId: verifiedPayment.productId,
+        productName: product.name,
+        deliveryType: 'pickup_point',
+        shippingOptionId: verifiedPayment.shippingMethodId,
+        shippingOptionName: verifiedPayment.shippingMethodName,
+        shippingCarrier: verifiedPayment.shippingCarrier,
+        shippingWeight: verifiedPayment.shippingWeight,
+        shipping,
+        pickupPoint,
+        paymentIntentId,
+        paymentStatus: 'succeeded',
+        shipmentStatus: 'pending',
+        status: 'paid',
+      });
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message === 'PaymentIntent has already been used'
+      ) {
+        ResponseHandler.conflict(res, 'Order already exists', err.message);
+        return;
+      }
+      if (
+        err instanceof Error &&
+        ['Product price changed', 'Product is out of stock'].includes(err.message)
+      ) {
+        ResponseHandler.conflict(
+          res,
+          'Checkout is no longer valid',
+          err.message,
+        );
+        return;
+      }
+      throw err;
+    }
 
     const shipmentService = new ShipmentService();
 
@@ -148,6 +201,7 @@ export const createOrder = async (
       await orderRepo.updateOrder(savedOrder.id, {
         shipmentId: shipment.id,
         shipmentStatus: shipment.status,
+        status: 'shipment_created',
       });
 
       ResponseHandler.success(
@@ -163,6 +217,7 @@ export const createOrder = async (
     } catch (err) {
       await orderRepo.updateOrder(savedOrder.id, {
         shipmentStatus: 'pending',
+        status: 'shipment_pending',
       });
 
       ResponseHandler.custom(
@@ -183,6 +238,41 @@ export const createOrder = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to create order',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const getMyOrders = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const firebaseUid = user?.uid;
+
+    if (!firebaseUid) {
+      ResponseHandler.unauthorized(
+        res,
+        'User not authenticated',
+        'Authentication required',
+      );
+      return;
+    }
+
+    const orderRepo = new OrderRepository();
+    const orders = await orderRepo.getOrdersByUserId(firebaseUid);
+
+    ResponseHandler.success(
+      res,
+      { orders, count: orders.length },
+      'Orders fetched successfully',
+    );
+  } catch (err) {
+    console.error('Error fetching user orders:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch orders',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }

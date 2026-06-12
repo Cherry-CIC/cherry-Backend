@@ -4,6 +4,7 @@ export interface Product {
     description?: string;
     categoryId: string;
     charityId: string;
+    postageSize?: string;
     userId: string;
     quality: string;
     size: string;

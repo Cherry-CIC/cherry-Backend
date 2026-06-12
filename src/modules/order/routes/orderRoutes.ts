@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createOrder } from '../controllers/orderController';
+import { createOrder, getMyOrders } from '../controllers/orderController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateOrder } from '../validators/orderValidator';
 
@@ -9,8 +9,44 @@ const router = Router();
  * @swagger
  * tags:
  *   name: Order
- *   description: Order handling (Stripe Checkout Sessions)
+ *   description: Paid order and shipment handling
  */
+
+/**
+ * @swagger
+ * /api/order/my-orders:
+ *   get:
+ *     summary: Get orders for the authenticated user
+ *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Orders fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/my-orders', authMiddleware, getMyOrders);
 
 /**
  * @swagger
@@ -27,50 +63,29 @@ const router = Router();
  *           schema:
  *             type: object
  *             required:
- *               - amount
+ *               - productId
  *               - paymentIntentId
- *               - shippingMethodId
- *               - shippingCarrier
- *               - shippingWeight
  *               - shipping
  *               - pickupPoint
  *             properties:
- *               amount:
- *                 type: integer
- *                 description: Amount in the smallest currency unit (e.g., pence)
- *                 example: 50
- *               paymentIntentId:
- *                 type: string
- *                 description: Stripe payment intent id that must already be in succeeded state
- *                 example: "pi_REPLACE_WITH_REAL_ID_ONLY"
  *               productId:
  *                 type: string
  *                 example: "product-001"
- *               productName:
+ *               paymentIntentId:
  *                 type: string
- *                 example: "Denim Jacket"
- *               shippingMethodId:
- *                 type: string
- *                 description: Sendcloud shipping method id selected during checkout
- *                 example: "3747"
- *               shippingCarrier:
- *                 type: string
- *                 enum: [inpost_gb]
- *               shippingWeight:
- *                 type: integer
- *                 description: Parcel weight in grams
- *                 example: 2500
+ *                 description: Paid Stripe PaymentIntent containing trusted checkout metadata
+ *                 example: "pi_REPLACE_WITH_REAL_ID_ONLY"
  *               shipping:
  *                 type: object
  *                 required:
  *                   - address
  *                   - name
+ *                   - telephone
  *                 properties:
  *                   address:
  *                     type: object
  *                     required:
  *                       - line1
- *                       - house_number
  *                       - city
  *                       - postal_code
  *                       - country
@@ -144,6 +159,8 @@ const router = Router();
  *         description: Bad request
  *       401:
  *         description: Unauthorized
+ *       409:
+ *         description: Payment already used or checkout data is no longer valid
  *       500:
  *         description: Internal server error
  */

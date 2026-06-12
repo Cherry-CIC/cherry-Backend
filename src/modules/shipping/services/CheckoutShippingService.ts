@@ -1,9 +1,11 @@
 import { SendcloudService } from './SendcloudService';
+import { decimalPriceToPence } from '../../../shared/utils/money';
 
 export interface CheckoutShippingOptionsQuery {
   servicePointId: string;
   country: string;
   postalCode: string;
+  weightGrams?: number;
   isReturn?: boolean;
   carrier?: string;
 }
@@ -21,8 +23,8 @@ export interface NormalizedShippingOption {
   description?: string;
   deliveryType: 'home' | 'pickup_point';
   deliveryMethodType: string;
-  price: string | null;
-  currency: string | null;
+  pricePence: number | null;
+  currency: string;
   carrierCode: string | null;
   carrierName: string | null;
   checkoutIdentifier: string | null;
@@ -49,6 +51,7 @@ export class CheckoutShippingService {
   async getDeliveryOptions(query: CheckoutShippingOptionsQuery): Promise<NormalizedShippingOption[]> {
     const deliveryOptions = await this.sendcloudService.getCheckoutDeliveryOptions(query);
     return deliveryOptions
+      .filter((option: any) => this.supportsWeight(option, query.weightGrams))
       .map((option: any) => this.normalizeDeliveryOption(option, query.country))
       .filter((option) => option.deliveryType === 'pickup_point');
   }
@@ -84,7 +87,7 @@ export class CheckoutShippingService {
       option?.price?.currency ??
       option?.total_price?.currency ??
       option?.currency ??
-      null;
+      'GBP';
 
     const requiresServicePoint =
       String(option?.service_point_input || '').toLowerCase() === 'required';
@@ -101,14 +104,34 @@ export class CheckoutShippingService {
       description: option?.description || undefined,
       deliveryType,
       deliveryMethodType,
-      price: priceAmount !== null && priceAmount !== undefined ? String(priceAmount) : null,
-      currency,
+      pricePence: decimalPriceToPence(priceAmount),
+      currency: String(currency).toUpperCase(),
       carrierCode: option?.carrier?.code || option?.carrier_code || null,
       carrierName: option?.carrier?.name || option?.carrier_name || null,
       checkoutIdentifier: option?.checkout_identifier?.value
         ? String(option.checkout_identifier.value)
         : String(option?.id ?? ''),
     };
+  }
+
+  private supportsWeight(option: any, weightGrams?: number): boolean {
+    if (!weightGrams) {
+      return true;
+    }
+
+    const weightKg = weightGrams / 1000;
+    const minWeight = Number(option?.min_weight);
+    const maxWeight = Number(option?.max_weight);
+
+    if (Number.isFinite(minWeight) && weightKg < minWeight) {
+      return false;
+    }
+
+    if (Number.isFinite(maxWeight) && weightKg > maxWeight) {
+      return false;
+    }
+
+    return true;
   }
 
   private normalizePickupPoint(point: any): NormalizedPickupPoint {

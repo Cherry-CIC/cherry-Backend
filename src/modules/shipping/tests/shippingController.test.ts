@@ -3,6 +3,8 @@ const mockGetPickupPoints = jest.fn();
 const mockGetShipmentBySendcloudId = jest.fn();
 const mockUpdateShipment = jest.fn();
 const mockUpdateOrder = jest.fn();
+const mockGetProductById = jest.fn();
+const mockGetPostageSizeById = jest.fn();
 
 jest.mock('../services/CheckoutShippingService', () => ({
   CheckoutShippingService: jest.fn().mockImplementation(() => ({
@@ -28,6 +30,18 @@ jest.mock('../../order/repositories/OrderRepository', () => ({
   })),
 }));
 
+jest.mock('../../products/repositories/ProductRepository', () => ({
+  ProductRepository: jest.fn().mockImplementation(() => ({
+    getById: mockGetProductById,
+  })),
+}));
+
+jest.mock('../../postage-sizes/repositories/PostageSizeRepository', () => ({
+  PostageSizeRepository: jest.fn().mockImplementation(() => ({
+    getById: mockGetPostageSizeById,
+  })),
+}));
+
 import {
   getCheckoutShippingOptions,
   getPickupPoints,
@@ -44,6 +58,14 @@ const createResponse = () => {
 describe('shippingController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetProductById.mockResolvedValue({
+      id: 'product-1',
+      postageSize: 'postage-size-1',
+    });
+    mockGetPostageSizeById.mockResolvedValue({
+      id: 'postage-size-1',
+      weight: 2000,
+    });
   });
 
   it('returns checkout shipping options', async () => {
@@ -57,6 +79,7 @@ describe('shippingController', () => {
 
     const req: any = {
       query: {
+        productId: 'product-1',
         servicePointId: '12345678',
         country: 'GB',
         postalCode: 'SW1A 1AA',
@@ -70,6 +93,7 @@ describe('shippingController', () => {
       servicePointId: '12345678',
       country: 'GB',
       postalCode: 'SW1A 1AA',
+      weightGrams: 2000,
       isReturn: undefined,
       carrier: 'inpost_gb',
     });
@@ -148,6 +172,7 @@ describe('shippingController', () => {
     expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
       shipmentStatus: 'delivered',
       shipmentId: 'shipment-1',
+      status: 'delivered',
     });
     expect(res.status).toHaveBeenCalledWith(200);
   });

@@ -169,18 +169,18 @@ describe('CSV Export Orders - /api/admin/export/orders', () => {
           id: 'order-1',
           userId: 'user-1',
           email: 'user1@example.com',
-          amount: 5000, // £50.00
+          productAmount: 5000, // £50.00
           productName: 'Winter Coat',
-          status: 'completed',
+          status: 'delivered',
           createdAt: new Date('2024-06-15'),
         },
         {
           id: 'order-2',
           userId: 'user-2',
           email: 'user2@example.com',
-          amount: 2500, // £25.00
+          productAmount: 2500, // £25.00
           productName: 'School Supplies',
-          status: 'pending',
+          status: 'shipment_pending',
           createdAt: new Date('2024-07-20'),
         },
       ];
@@ -206,7 +206,7 @@ describe('CSV Export Orders - /api/admin/export/orders', () => {
           id: 'order-failed',
           userId: 'user-3',
           email: 'user3@example.com',
-          amount: 1000,
+          productAmount: 1000,
           productName: 'Donation',
           status: 'failed',
           createdAt: new Date('2024-08-01'),
