@@ -13,6 +13,7 @@ export interface Product {
     price: number;
     likes: number;
     number: number;
+    visibilityStatus?: 'active' | 'inactive';
     createdAt?: Date;
     updatedAt?: Date;
 }

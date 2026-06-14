@@ -148,7 +148,7 @@ export class ProductService {
 
     async updateProduct(id: string, data: UpdateProductData): Promise<Product | null> {
         // Check if product exists
-        const existingProduct = await this.productRepo.getById(id);
+        const existingProduct = await this.productRepo.getById(id, true);
         if (!existingProduct) {
             return null;
         }
@@ -180,7 +180,7 @@ export class ProductService {
      */
     async changePoints(id: string, delta: number): Promise<Product | null> {
       // Ensure the product exists
-      const product = await this.productRepo.getById(id);
+      const product = await this.productRepo.getById(id, true);
       if (!product) {
         return null;
       }

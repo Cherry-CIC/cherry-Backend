@@ -40,6 +40,14 @@ export const createOrder = async (
     }
 
     const email = dbUser.email;
+    if (!email) {
+      ResponseHandler.badRequest(
+        res,
+        'User email is required',
+        'User email is missing or user has been anonymized.',
+      );
+      return;
+    }
     const { productId, paymentIntentId, shipping, pickupPoint } = req.body;
 
     const paymentService = new PaymentService();

@@ -78,3 +78,27 @@ export function validateLogin(
     }
     next();
 }
+
+export const forgotPasswordSchema = Joi.object({
+    email: Joi.string().email().required()
+        .messages({
+            'string.base': `"email" should be a type of 'text'`,
+            'string.empty': `"email" cannot be empty`,
+            'string.email': `"email" must be a valid email`,
+            'any.required': `"email" is required`,
+        })
+});
+
+export function validateForgotPassword(
+    req: Request,
+    res: Response,
+    next: NextFunction
+): void {
+    const { error } = forgotPasswordSchema.validate(req.body);
+    if (error) {
+        ResponseHandler.badRequest(res, 'Validation failed', error.details[0].message);
+        return;
+    }
+    next();
+}
+

@@ -7,7 +7,9 @@ export class ProductRepository {
     private collectionName = 'products';
 
     async getAll(): Promise<Product[]> {
-        const snapshot = await this.db.collection(this.collectionName).get();
+        const snapshot = await this.db.collection(this.collectionName)
+            .where('visibilityStatus', '!=', 'inactive')
+            .get();
         return snapshot.docs.map(doc => {
             const data = doc.data();
             return {
@@ -19,12 +21,15 @@ export class ProductRepository {
         });
     }
 
-    async getById(id: string): Promise<Product | null> {
+    async getById(id: string, includeInactive: boolean = false): Promise<Product | null> {
         const doc = await this.db.collection(this.collectionName).doc(id).get();
         if (!doc.exists) {
             return null;
         }
         const data = doc.data()!;
+        if (!includeInactive && data.visibilityStatus === 'inactive') {
+            return null;
+        }
         return {
             id: doc.id,
             ...data,
@@ -34,15 +39,18 @@ export class ProductRepository {
     }
 
     async create(product: Product): Promise<Product> {
+        const visibilityStatus = product.visibilityStatus || 'active';
         const docRef = await this.db.collection(this.collectionName).add({
             ...product,
+            visibilityStatus,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
         });
-        
+
         return {
             id: docRef.id,
             ...product,
+            visibilityStatus,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -51,7 +59,7 @@ export class ProductRepository {
     async update(id: string, product: Partial<Omit<Product, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Product | null> {
         const docRef = this.db.collection(this.collectionName).doc(id);
         const doc = await docRef.get();
-        
+
         if (!doc.exists) {
             return null;
         }
@@ -67,7 +75,7 @@ export class ProductRepository {
     async delete(id: string): Promise<boolean> {
         const docRef = this.db.collection(this.collectionName).doc(id);
         const doc = await docRef.get();
-        
+
         if (!doc.exists) {
             return false;
         }
@@ -76,12 +84,35 @@ export class ProductRepository {
         return true;
     }
 
+    async deactivateProductsByUserId(userId: string): Promise<void> {
+        const snapshot = await this.db
+            .collection(this.collectionName)
+            .where('userId', '==', userId)
+            .get();
+
+        const docs = snapshot.docs;
+        const batchLimit = 500;
+        
+        for (let i = 0; i < docs.length; i += batchLimit) {
+            const batch = this.db.batch();
+            const chunk = docs.slice(i, i + batchLimit);
+            chunk.forEach(doc => {
+                batch.update(doc.ref, {
+                    visibilityStatus: 'inactive',
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+            });
+            await batch.commit();
+        }
+    }
+
     async getProductsByCategory(categoryId: string): Promise<Product[]> {
         const snapshot = await this.db
             .collection(this.collectionName)
             .where('categoryId', '==', categoryId)
+            .where('visibilityStatus', '==', 'active')
             .get();
-        
+
         return snapshot.docs.map(doc => {
             const data = doc.data();
             return {
@@ -98,7 +129,7 @@ export class ProductRepository {
             .collection(this.collectionName)
             .where('userId', '==', userId)
             .get();
-        
+
         return snapshot.docs.map(doc => {
             const data = doc.data();
             return {
@@ -114,8 +145,9 @@ export class ProductRepository {
         const snapshot = await this.db
             .collection(this.collectionName)
             .where('charityId', '==', charityId)
+            .where('visibilityStatus', '==', 'active')
             .get();
-        
+
         return snapshot.docs.map(doc => {
             const data = doc.data();
             return {
@@ -126,27 +158,27 @@ export class ProductRepository {
             } as Product;
         });
     }
-  /**
-   * Adjust the likes count by a signed delta.
-   * Guarantees the likes never go below zero.
-   */
-  async adjustLikes(id: string, delta: number): Promise<Product | null> {
-    const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
+    /**
+     * Adjust the likes count by a signed delta.
+     * Guarantees the likes never go below zero.
+     */
+    async adjustLikes(id: string, delta: number): Promise<Product | null> {
+        const docRef = this.db.collection(this.collectionName).doc(id);
+        const doc = await docRef.get();
 
-    if (!doc.exists) {
-      return null;
+        if (!doc.exists) {
+            return null;
+        }
+
+        const data = doc.data() as Product;
+        const currentLikes = typeof data.likes === 'number' ? data.likes : 0;
+        const newLikes = Math.max(0, currentLikes + delta);
+
+        await docRef.update({
+            likes: newLikes,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return this.getById(id);
     }
-
-    const data = doc.data() as Product;
-    const currentLikes = typeof data.likes === 'number' ? data.likes : 0;
-    const newLikes = Math.max(0, currentLikes + delta);
-
-    await docRef.update({
-      likes: newLikes,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-
-    return this.getById(id);
-  }
 }

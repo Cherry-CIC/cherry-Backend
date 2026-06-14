@@ -4,10 +4,12 @@ import {
     login,
     getProfile,
     updateProfile,
+    forgotPassword,
 } from '../controllers/authController';
 import {
     validateRegister,
     validateLogin,
+    validateForgotPassword,
 } from '../validators/authValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
@@ -183,6 +185,36 @@ router.post('/register', validateRegister, register);
  *         description: User not found
  */
 router.post('/login', validateLogin, login);
+
+/**
+ * @swagger
+ * /api/auth/forgot-password:
+ *   post:
+ *     summary: Request password reset email
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
+ *                 example: "user@example.com"
+ *     responses:
+ *       200:
+ *         description: Password reset email sent successfully
+ *       400:
+ *         description: Validation error
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/forgot-password', validateForgotPassword, forgotPassword);
 
 /**
  * @swagger

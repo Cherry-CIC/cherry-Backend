@@ -155,3 +155,7 @@ Dockerfile.dev
 # Package manager lock files (uncomment if you want to ignore them)
 package-lock.json
 yarn.lock
+
+# Firebase Admin SDK credentials
+quiz-app-*-firebase-adminsdk-*.json
+*-adminsdk-*.json
