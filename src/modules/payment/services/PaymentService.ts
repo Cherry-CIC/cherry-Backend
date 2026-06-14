@@ -49,6 +49,9 @@ export class PaymentService {
     if (!user) {
       throw new Error('User not found');
     }
+    if (!user.email) {
+      throw new Error('User email is required for payment');
+    }
 
     const product = await this.productRepo.getById(selection.productId);
     if (!product) {

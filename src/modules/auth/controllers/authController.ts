@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { admin, clientAuth } from '../../../shared/config/firebaseConfig';
 import { UserRepository } from '../repositories/UserRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 const userRepo = new UserRepository();
 
@@ -148,5 +148,26 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         ResponseHandler.success(res, updatedProfile, 'User profile updated successfully');
     } catch (err) {
         ResponseHandler.internalServerError(res, 'Failed to update user profile', err instanceof Error ? err.message : 'Unknown error');
+    }
+};
+
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { email } = req.body;
+
+        // Check if user exists in Firestore
+        const user = await userRepo.getByEmail(email);
+        if (user) {
+            // Trigger password reset email via Firebase Client SDK
+            await sendPasswordResetEmail(clientAuth, email);
+        }
+
+        ResponseHandler.success(res, null, 'Password reset email sent successfully');
+    } catch (err) {
+        ResponseHandler.internalServerError(
+            res,
+            'Failed to send password reset email',
+            err instanceof Error ? err.message : 'Unknown error'
+        );
     }
 };

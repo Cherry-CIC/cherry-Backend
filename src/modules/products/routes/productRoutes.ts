@@ -81,7 +81,6 @@ const router = Router();
  *         securityFee:
  *           type: number
  *           description: 10% purchase security fee in GBP
- *           description: Flat security fee added for display purposes
  *           example: 2
  *         likes:
  *           type: number
