@@ -9,6 +9,7 @@ The cherry backend is a Node.js and TypeScript API built with Express and Fireba
 - Order creation and CSV export
 - Stripe payment intent creation and webhook handling
 - Sendcloud shipping, pickup-point lookup, and webhook handling
+- User product management, liked items, and order tracking APIs
 - Swagger docs for local API exploration
 
 ## MVP boundary
@@ -95,6 +96,36 @@ These files are the main entry points for the checkout path:
 - Payments: `src/shared/config/stripeConfig.ts`, `src/modules/payment/`
 - Shipping: `src/shared/config/sendcloudConfig.ts`, `src/modules/shipping/`
 - App wiring: `src/app.ts`
+
+## User-Facing Account APIs
+
+The backend now exposes authenticated user-facing listing, likes, and order-tracking routes:
+
+- `DELETE /api/auth/account`
+  Deletes the authenticated account, removes profile and likes, deletes unsold listings, and anonymises retained commerce history.
+- `GET /api/products/my-products`
+  Returns the current user's listings with cursor pagination, search, and filters.
+- `GET /api/products/my-liked-items`
+  Returns the current user's liked products with cursor pagination, search, and filters.
+- `POST /api/products/:id/like`
+  Likes or unlikes a product for the current user and updates the product like count.
+- `GET /api/order/my-orders`
+  Returns the current user's orders enriched with shipment, tracking, and derived delivery-state fields.
+- `GET /api/order/:id`
+  Returns a single owned order with the same shipment and delivery-state fields.
+
+Important order-tracking fields returned by the order APIs:
+
+- `paymentState`
+- `deliveryState`
+- `deliveryLabel`
+- `canTrack`
+- `trackingNumber`
+- `trackingUrl`
+- `carrier`
+- `shipment`
+
+Account deletion and retention behaviour is documented in `docs/account-deletion-policy.md`.
 
 ## Contributing
 

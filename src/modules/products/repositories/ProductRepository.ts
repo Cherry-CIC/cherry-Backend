@@ -1,6 +1,26 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Product } from "../model/Product";
-import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, Timestamp, FieldValue } from 'firebase-admin/firestore';
+
+export interface ProductListFilters {
+    userId?: string;
+    categoryId?: string;
+    charityId?: string;
+    size?: string;
+    quality?: string;
+    minPrice?: number;
+    maxPrice?: number;
+}
+
+export interface ProductQueryCursor {
+    createdAt: Date;
+    id: string;
+}
+
+export interface ProductQueryPage {
+    items: Product[];
+    hasMore: boolean;
+}
 
 export class ProductRepository {
     private db = firestore;
@@ -125,6 +145,66 @@ export class ProductRepository {
                 updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
             } as Product;
         });
+    }
+
+    async getPageByFilters(
+        filters: ProductListFilters = {},
+        limit: number,
+        cursor?: ProductQueryCursor,
+    ): Promise<ProductQueryPage> {
+        let query: FirebaseFirestore.Query = this.db.collection(this.collectionName);
+
+        if (filters.userId) {
+            query = query.where('userId', '==', filters.userId);
+        }
+
+        if (filters.categoryId) {
+            query = query.where('categoryId', '==', filters.categoryId);
+        }
+
+        if (filters.charityId) {
+            query = query.where('charityId', '==', filters.charityId);
+        }
+
+        if (filters.size) {
+            query = query.where('size', '==', filters.size);
+        }
+
+        if (filters.quality) {
+            query = query.where('quality', '==', filters.quality);
+        }
+
+        if (typeof filters.minPrice === 'number') {
+            query = query.where('price', '>=', filters.minPrice);
+        }
+
+        if (typeof filters.maxPrice === 'number') {
+            query = query.where('price', '<=', filters.maxPrice);
+        }
+
+        query = query
+            .orderBy('createdAt', 'desc')
+            .orderBy(FieldPath.documentId(), 'desc');
+
+        if (cursor) {
+            query = query.startAfter(cursor.createdAt, cursor.id);
+        }
+
+        const snapshot = await query.limit(limit + 1).get();
+        const docs = snapshot.docs.slice(0, limit);
+
+        return {
+            items: docs.map((doc) => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    ...data,
+                    createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
+                    updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
+                } as Product;
+            }),
+            hasMore: snapshot.docs.length > limit,
+        };
     }
   /**
    * Adjust the likes count by a signed delta.

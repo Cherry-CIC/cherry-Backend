@@ -99,6 +99,30 @@ export const productUpdateSchema = Joi.object({
         'object.min': 'At least one product field must be provided',
     });
 
+export const productListQuerySchema = Joi.object({
+    limit: Joi.number().integer().min(1).max(50).default(20),
+    cursor: Joi.string().base64().optional(),
+    search: Joi.string().trim().max(100).optional(),
+    categoryId: Joi.string().trim().optional(),
+    charityId: Joi.string().trim().optional(),
+    size: Joi.string().trim().optional(),
+    quality: Joi.string().trim().optional(),
+    minPrice: Joi.number().min(0).optional(),
+    maxPrice: Joi.number().min(0).optional(),
+}).custom((value, helpers) => {
+    if (
+        value.minPrice !== undefined &&
+        value.maxPrice !== undefined &&
+        value.minPrice > value.maxPrice
+    ) {
+        return helpers.error('any.invalid');
+    }
+
+    return value;
+}).messages({
+    'any.invalid': '"minPrice" cannot be greater than "maxPrice"',
+});
+
 export function validateProduct(
     req: Request,
     res: Response,

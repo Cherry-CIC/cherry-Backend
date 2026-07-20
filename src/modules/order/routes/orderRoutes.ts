@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createOrder, getMyOrders } from '../controllers/orderController';
+import { createOrder, getMyOrderById, getMyOrders } from '../controllers/orderController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateOrder } from '../validators/orderValidator';
 
@@ -14,6 +14,100 @@ const router = Router();
 
 /**
  * @swagger
+ * components:
+ *   schemas:
+ *     ShipmentSummary:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         provider:
+ *           type: string
+ *           nullable: true
+ *           example: "sendcloud"
+ *         carrier:
+ *           type: string
+ *           nullable: true
+ *           example: "inpost_gb"
+ *         status:
+ *           type: string
+ *           example: "en_route"
+ *         trackingNumber:
+ *           type: string
+ *           nullable: true
+ *         trackingUrl:
+ *           type: string
+ *           nullable: true
+ *         labelUrl:
+ *           type: string
+ *           nullable: true
+ *         pickupPoint:
+ *           type: object
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *     ClientOrder:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         productId:
+ *           type: string
+ *         productName:
+ *           type: string
+ *         totalAmount:
+ *           type: integer
+ *           example: 2599
+ *         currency:
+ *           type: string
+ *           example: "GBP"
+ *         paymentStatus:
+ *           type: string
+ *           example: "succeeded"
+ *         paymentState:
+ *           type: string
+ *           example: "paid"
+ *         status:
+ *           type: string
+ *           example: "shipped"
+ *         shipmentStatus:
+ *           type: string
+ *           example: "en_route"
+ *         deliveryState:
+ *           type: string
+ *           example: "shipped"
+ *         deliveryLabel:
+ *           type: string
+ *           example: "On the way"
+ *         canTrack:
+ *           type: boolean
+ *           example: true
+ *         trackingNumber:
+ *           type: string
+ *           nullable: true
+ *         trackingUrl:
+ *           type: string
+ *           nullable: true
+ *         carrier:
+ *           type: string
+ *           nullable: true
+ *         deliveryAddressSummary:
+ *           type: string
+ *           example: "10 High Street, London, SW1A 1AA, GB"
+ *         pickupPoint:
+ *           type: object
+ *         shipment:
+ *           allOf:
+ *             - $ref: '#/components/schemas/ShipmentSummary'
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *
  * /api/order/my-orders:
  *   get:
  *     summary: Get orders for the authenticated user
@@ -38,7 +132,7 @@ const router = Router();
  *                     orders:
  *                       type: array
  *                       items:
- *                         type: object
+ *                         $ref: '#/components/schemas/ClientOrder'
  *                     count:
  *                       type: integer
  *       401:
@@ -47,6 +141,49 @@ const router = Router();
  *         description: Internal server error
  */
 router.get('/my-orders', authMiddleware, getMyOrders);
+
+/**
+ * @swagger
+ * /api/order/my-orders:
+ * /api/order/{id}:
+ *   get:
+ *     summary: Get a single order for the authenticated user
+ *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Order fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     order:
+ *                       $ref: '#/components/schemas/ClientOrder'
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/create', authMiddleware, validateOrder, createOrder);
 
 /**
  * @swagger
@@ -164,6 +301,47 @@ router.get('/my-orders', authMiddleware, getMyOrders);
  *       500:
  *         description: Internal server error
  */
-router.post('/create', authMiddleware, validateOrder, createOrder);
+
+/**
+ * @swagger
+ * /api/order/{id}:
+ *   get:
+ *     summary: Get a single order for the authenticated user
+ *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Order fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     order:
+ *                       $ref: '#/components/schemas/ClientOrder'
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/:id', authMiddleware, getMyOrderById);
 
 export default router;

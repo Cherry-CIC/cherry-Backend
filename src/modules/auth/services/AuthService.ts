@@ -3,9 +3,11 @@ import { UserRepository } from '../repositories/UserRepository';
 
 export type DeleteAccountResult = {
   deletedUserProfiles: number;
-  deletedProducts: number;
-  deletedOrders: number;
-  deletedShipments: number;
+  deletedUnsoldProducts: number;
+  anonymisedProducts: number;
+  anonymisedOrders: number;
+  anonymisedShipments: number;
+  deletedLikes: number;
 };
 
 export interface IAuthService {
@@ -32,24 +34,21 @@ export class AuthService implements IAuthService {
       }
     }
 
-    // Try to delete the Firebase Auth user. If the user doesn't exist in Auth,
-    // continue to attempt cleaning up Firestore data. This prevents returning
-    // a 404 when the client has a valid ID token but the Firestore profile
-    // is missing (e.g., created in Auth via other flow).
+    // Perform Firestore cleanup before deleting the auth user so a cleanup
+    // failure does not leave the user locked out while their data remains.
+    const deletedCounts = await this.userRepo.deleteAccountData(firebaseUid);
+
+    // Delete the Firebase Auth user after cleanup. If the auth user is already
+    // gone, continue returning the cleanup summary.
     try {
       await admin.auth().deleteUser(firebaseUid);
     } catch (err: any) {
-      // If the Firebase Auth user doesn't exist, log and continue.
-      // Only rethrow for unexpected errors.
       const code = err && err.code ? err.code : null;
       if (code && code !== 'auth/user-not-found') {
         throw err;
       }
     }
 
-    // Delete associated Firestore documents (if any). This will return counts
-    // even when no documents are found.
-    const deletedCounts = await this.userRepo.deleteAccountData(firebaseUid);
     return deletedCounts;
   }
 }

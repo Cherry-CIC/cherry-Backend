@@ -3,7 +3,10 @@ const mockVerifySucceededPaymentIntentForUser = jest.fn();
 const mockGetDeliveryOptions = jest.fn();
 const mockCreatePaidOrderAndDecrementInventory = jest.fn();
 const mockUpdateOrder = jest.fn();
+const mockGetOrdersByUserId = jest.fn();
+const mockGetOrderById = jest.fn();
 const mockCreateShipmentForPaidOrder = jest.fn();
+const mockGetShipmentByOrderId = jest.fn();
 const mockGetProductById = jest.fn();
 const mockGetPostageSizeById = jest.fn();
 
@@ -17,6 +20,8 @@ jest.mock('../repositories/OrderRepository', () => ({
   OrderRepository: jest.fn().mockImplementation(() => ({
     createPaidOrderAndDecrementInventory: mockCreatePaidOrderAndDecrementInventory,
     updateOrder: mockUpdateOrder,
+    getOrdersByUserId: mockGetOrdersByUserId,
+    getOrderById: mockGetOrderById,
   })),
 }));
 
@@ -38,6 +43,12 @@ jest.mock('../../shipping/services/ShipmentService', () => ({
   })),
 }));
 
+jest.mock('../../shipping/repositories/ShipmentRepository', () => ({
+  ShipmentRepository: jest.fn().mockImplementation(() => ({
+    getShipmentByOrderId: mockGetShipmentByOrderId,
+  })),
+}));
+
 jest.mock('../../products/repositories/ProductRepository', () => ({
   ProductRepository: jest.fn().mockImplementation(() => ({
     getById: mockGetProductById,
@@ -50,7 +61,7 @@ jest.mock('../../postage-sizes/repositories/PostageSizeRepository', () => ({
   })),
 }));
 
-import { createOrder } from '../controllers/orderController';
+import { createOrder, getMyOrderById, getMyOrders } from '../controllers/orderController';
 
 const createResponse = () => {
   const res: any = {};
@@ -290,5 +301,219 @@ describe('orderController.createOrder', () => {
 
     expect(mockCreatePaidOrderAndDecrementInventory).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('orderController order retrieval', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('returns enriched my-orders data with shipment details', async () => {
+    mockGetOrdersByUserId.mockResolvedValue([
+      {
+        id: 'order-1',
+        userId: 'user-1',
+        email: 'user@example.com',
+        productAmount: 2000,
+        shippingFee: 399,
+        securityFee: 200,
+        totalAmount: 2599,
+        currency: 'GBP',
+        productId: 'product-1',
+        productName: 'Winter Coat',
+        deliveryType: 'pickup_point',
+        shippingOptionId: '12345',
+        shippingOptionName: 'InPost locker',
+        shippingCarrier: 'inpost_gb',
+        shippingWeight: 2000,
+        shipping: {
+          name: 'Jane Doe',
+          telephone: '+447700900000',
+          address: {
+            line1: '10 High Street',
+            city: 'London',
+            postal_code: 'SW1A 1AA',
+            country: 'GB',
+          },
+        },
+        pickupPoint: {
+          id: '999',
+          name: 'Locker A',
+          addressLine1: '10 High Street',
+          city: 'London',
+          postalCode: 'SW1A 1AA',
+          country: 'GB',
+          carrier: 'inpost_gb',
+        },
+        paymentIntentId: 'pi_123',
+        paymentStatus: 'succeeded',
+        status: 'shipped',
+        shipmentStatus: 'en_route',
+        shipmentId: 'shipment-1',
+        createdAt: new Date('2026-07-14T10:00:00.000Z'),
+      },
+    ]);
+    mockGetShipmentByOrderId.mockResolvedValue({
+      id: 'shipment-1',
+      orderId: 'order-1',
+      provider: 'sendcloud',
+      carrier: 'inpost_gb',
+      status: 'en_route',
+      trackingNumber: 'TRACK123',
+      trackingUrl: 'https://track.example/123',
+      labelUrl: null,
+      pickupPoint: {
+        id: '999',
+        name: 'Locker A',
+      },
+      createdAt: new Date('2026-07-14T10:05:00.000Z'),
+      updatedAt: new Date('2026-07-14T12:00:00.000Z'),
+    });
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+    };
+    const res = createResponse();
+
+    await getMyOrders(req, res);
+
+    expect(mockGetOrdersByUserId).toHaveBeenCalledWith('user-1');
+    expect(mockGetShipmentByOrderId).toHaveBeenCalledWith('order-1');
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: {
+          orders: [
+            expect.objectContaining({
+              id: 'order-1',
+              paymentState: 'paid',
+              deliveryState: 'shipped',
+              deliveryLabel: 'On the way',
+              canTrack: true,
+              trackingNumber: 'TRACK123',
+              trackingUrl: 'https://track.example/123',
+              shipment: expect.objectContaining({
+                id: 'shipment-1',
+                status: 'en_route',
+              }),
+            }),
+          ],
+          count: 1,
+        },
+      }),
+    );
+  });
+
+  it('returns a single enriched order for the owner', async () => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'user@example.com',
+      productAmount: 2000,
+      shippingFee: 399,
+      securityFee: 200,
+      totalAmount: 2599,
+      currency: 'GBP',
+      productId: 'product-1',
+      productName: 'Winter Coat',
+      deliveryType: 'pickup_point',
+      shippingOptionId: '12345',
+      shippingOptionName: 'InPost locker',
+      shippingCarrier: 'inpost_gb',
+      shippingWeight: 2000,
+      shipping: {
+        name: 'Jane Doe',
+        telephone: '+447700900000',
+        address: {
+          line1: '10 High Street',
+          city: 'London',
+          postal_code: 'SW1A 1AA',
+          country: 'GB',
+        },
+      },
+      pickupPoint: {
+        id: '999',
+        name: 'Locker A',
+        addressLine1: '10 High Street',
+        city: 'London',
+        postalCode: 'SW1A 1AA',
+        country: 'GB',
+        carrier: 'inpost_gb',
+      },
+      paymentIntentId: 'pi_123',
+      paymentStatus: 'succeeded',
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+      shipmentId: 'shipment-1',
+      createdAt: new Date('2026-07-14T10:00:00.000Z'),
+    });
+    mockGetShipmentByOrderId.mockResolvedValue({
+      id: 'shipment-1',
+      orderId: 'order-1',
+      provider: 'sendcloud',
+      carrier: 'inpost_gb',
+      status: 'delivered',
+      trackingNumber: 'TRACK123',
+      trackingUrl: 'https://track.example/123',
+      labelUrl: null,
+      pickupPoint: {
+        id: '999',
+        name: 'Locker A',
+      },
+      createdAt: new Date('2026-07-14T10:05:00.000Z'),
+      updatedAt: new Date('2026-07-14T12:00:00.000Z'),
+    });
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await getMyOrderById(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: {
+          order: expect.objectContaining({
+            id: 'order-1',
+            deliveryState: 'delivered',
+            deliveryLabel: 'Delivered',
+            canTrack: true,
+          }),
+        },
+      }),
+    );
+  });
+
+  it('forbids access to another user’s order', async () => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'other-user',
+    });
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await getMyOrderById(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
   });
 });

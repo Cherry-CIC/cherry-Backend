@@ -5,13 +5,20 @@ import {
   getProductById,
   getProductWithDetails,
   getAllProductsWithDetails,
+  getMyLikedProducts,
+  getMyProducts,
   updateProduct,
   deleteProduct,
   likeProduct
 } from '../controllers/productController';
-import { validateProduct, validateProductUpdate } from '../validators/productValidator';
+import {
+  productListQuerySchema,
+  validateProduct,
+  validateProductUpdate,
+} from '../validators/productValidator';
 import { validateProductId } from '../validators/productIdValidator';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
+import { validateRequest } from '../../../shared/middleware/validateRequest';
 
 const router = Router();
 
@@ -81,7 +88,6 @@ const router = Router();
  *         securityFee:
  *           type: number
  *           description: 10% purchase security fee in GBP
- *           description: Flat security fee added for display purposes
  *           example: 2
  *         likes:
  *           type: number
@@ -103,17 +109,79 @@ const router = Router();
  * @swagger
  * /api/products:
  *   get:
- *     summary: Get all products
+ *     summary: Get products with cursor pagination, search, and filters
  *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Cursor returned by the previous products response.
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Case-insensitive search across product name, description, size, and quality.
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: charityId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
  *     responses:
  *       200:
- *         description: List of all products
+ *         description: Paginated list of products
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Product'
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Product'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
  *       500:
  *         description: Server error
  *         content:
@@ -125,17 +193,22 @@ const router = Router();
  *                   type: string
  *                   example: "Failed to fetch products"
  */
-router.get('/', authMiddleware, getAllProducts);
+router.get(
+  '/',
+  authMiddleware,
+  validateRequest(productListQuerySchema, 'query'),
+  getAllProducts,
+);
 
 /**
  * @swagger
  * /api/products/with-details:
  *   get:
- *     summary: Get all products with category and charity details
+ *     summary: Get products with details using cursor pagination, search, and filters
  *     tags: [Products]
  *     responses:
  *       200:
- *         description: List of all products with populated category and charity details
+ *         description: Paginated list of products with populated category and charity details
  *         content:
  *           application/json:
  *             schema:
@@ -148,26 +221,55 @@ router.get('/', authMiddleware, getAllProducts);
  *                   type: string
  *                   example: "Products with details fetched successfully"
  *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     allOf:
- *                       - $ref: '#/components/schemas/Product'
- *                       - type: object
- *                         properties:
- *                           category:
- *                             $ref: '#/components/schemas/Category'
- *                           charity:
- *                             $ref: '#/components/schemas/Charity'
- *                           postageSizeDetails:
- *                             $ref: '#/components/schemas/PostageSize'
- *                 timestamp:
- *                   type: string
- *                   format: date-time
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/Product'
+ *                           - type: object
+ *                             properties:
+ *                               category:
+ *                                 $ref: '#/components/schemas/Category'
+ *                               charity:
+ *                                 $ref: '#/components/schemas/Charity'
+ *                               postageSizeDetails:
+ *                                 $ref: '#/components/schemas/PostageSize'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
  *       500:
  *         description: Server error
  */
-router.get('/with-details', authMiddleware, getAllProductsWithDetails);
+router.get(
+  '/with-details',
+  authMiddleware,
+  validateRequest(productListQuerySchema, 'query'),
+  getAllProductsWithDetails,
+);
+
+router.get(
+  '/my-products',
+  authMiddleware,
+  validateRequest(productListQuerySchema, 'query'),
+  getMyProducts,
+);
+
+router.get(
+  '/my-liked-items',
+  authMiddleware,
+  validateRequest(productListQuerySchema, 'query'),
+  getMyLikedProducts,
+);
 
 /**
  * @swagger
@@ -589,6 +691,46 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: charityId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
  *     responses:
  *       200:
  *         description: User's products fetched successfully
@@ -604,12 +746,104 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *                   type: string
  *                   example: "User products fetched successfully"
  *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/Product'
- *                 timestamp:
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Product'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+/**
+ * @swagger
+ * /api/products/my-liked-items:
+ *   get:
+ *     summary: Get current user's liked products
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: charityId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *     responses:
+ *       200:
+ *         description: Liked products fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
  *                   type: string
- *                   format: date-time
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Product'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
  *       401:
  *         description: Unauthorized
  *       500:
@@ -659,10 +893,14 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *                   type: string
  *                   example: "Product liked successfully"
  *                 data:
- *                   $ref: '#/components/schemas/Product'
- *                 timestamp:
- *                   type: string
- *                   format: date-time
+ *                   type: object
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/Product'
+ *                     - type: object
+ *                       properties:
+ *                         liked:
+ *                           type: boolean
+ *                           example: true
  *       400:
  *         description: Bad request (e.g., missing like flag)
  *       404:

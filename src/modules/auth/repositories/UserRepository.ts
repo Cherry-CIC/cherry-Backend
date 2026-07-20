@@ -2,6 +2,19 @@ import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
 
+const DELETED_USER_MARKER = 'deleted_user';
+const DELETED_EMAIL_MARKER = 'deleted@anonymous.invalid';
+const REDACTED_VALUE = 'REDACTED';
+const FIRESTORE_BATCH_LIMIT = 450;
+
+const chunk = <T>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
 export class UserRepository {
   private db = firestore;
   private collectionName = 'users';
@@ -162,9 +175,11 @@ export class UserRepository {
 
   async deleteAccountData(firebaseUid: string): Promise<{
     deletedUserProfiles: number;
-    deletedProducts: number;
-    deletedOrders: number;
-    deletedShipments: number;
+    deletedUnsoldProducts: number;
+    anonymisedProducts: number;
+    anonymisedOrders: number;
+    anonymisedShipments: number;
+    deletedLikes: number;
   }> {
     const userProfilesSnapshot = await this.db
       .collection(this.collectionName)
@@ -181,7 +196,28 @@ export class UserRepository {
       .where('userId', '==', firebaseUid)
       .get();
 
+    const likesSnapshot = await this.db
+      .collection('user_likes')
+      .where('userId', '==', firebaseUid)
+      .get();
+
     const orderIds = ordersSnapshot.docs.map((doc) => doc.id);
+    const soldProductDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    const unsoldProductDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+
+    for (const productDoc of productsSnapshot.docs) {
+      const relatedOrders = await this.db
+        .collection('orders')
+        .where('productId', '==', productDoc.id)
+        .limit(1)
+        .get();
+
+      if (relatedOrders.empty) {
+        unsoldProductDocs.push(productDoc);
+      } else {
+        soldProductDocs.push(productDoc);
+      }
+    }
 
     const shipmentSnapshots = await Promise.all(
       orderIds.map((orderId) =>
@@ -195,30 +231,110 @@ export class UserRepository {
       new Map(shipmentDocs.map((doc) => [doc.id, doc])).values(),
     );
 
-    const docsToDelete = [
-      ...userProfilesSnapshot.docs,
-      ...productsSnapshot.docs,
-      ...ordersSnapshot.docs,
-      ...uniqueShipmentDocs,
+    const likeProductAdjustments = new Map<string, number>();
+    likesSnapshot.docs.forEach((doc) => {
+      const productId = doc.data().productId;
+      if (typeof productId === 'string' && productId.length > 0) {
+        likeProductAdjustments.set(
+          productId,
+          (likeProductAdjustments.get(productId) || 0) + 1,
+        );
+      }
+    });
+
+    const deleteDocRefs = [
+      ...userProfilesSnapshot.docs.map((doc) => doc.ref),
+      ...unsoldProductDocs.map((doc) => doc.ref),
+      ...likesSnapshot.docs.map((doc) => doc.ref),
     ];
 
-    if (docsToDelete.length > 450) {
-      throw new Error(
-        'Account cleanup exceeds the Firestore atomic batch limit.',
-      );
+    for (const refs of chunk(deleteDocRefs, FIRESTORE_BATCH_LIMIT)) {
+      const batch: WriteBatch = this.db.batch();
+      refs.forEach((ref) => {
+        batch.delete(ref);
+      });
+      await batch.commit();
     }
 
-    const batch: WriteBatch = this.db.batch();
-    docsToDelete.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    await batch.commit();
+    for (const [productId, decrementBy] of likeProductAdjustments.entries()) {
+      const productRef = this.db.collection('products').doc(productId);
+      await this.db.runTransaction(async (transaction) => {
+        const productDoc = await transaction.get(productRef);
+        if (!productDoc.exists) {
+          return;
+        }
+
+        const data = productDoc.data() || {};
+        const currentLikes =
+          typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0;
+        transaction.update(productRef, {
+          likes: Math.max(0, currentLikes - decrementBy),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+    }
+
+    for (const doc of soldProductDocs) {
+      await doc.ref.update({
+        userId: DELETED_USER_MARKER,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    for (const doc of ordersSnapshot.docs) {
+      const data = doc.data();
+      const shipping = data.shipping || {};
+      const address = shipping.address || {};
+
+      await doc.ref.update({
+        userId: DELETED_USER_MARKER,
+        email: DELETED_EMAIL_MARKER,
+        shipping: {
+          ...shipping,
+          name: REDACTED_VALUE,
+          telephone: null,
+          address: {
+            ...address,
+            line1: REDACTED_VALUE,
+            line2: null,
+            house_number: null,
+            city: REDACTED_VALUE,
+            state: null,
+            postal_code: REDACTED_VALUE,
+            country:
+              typeof address.country === 'string' && address.country.length > 0
+                ? address.country
+                : 'GB',
+          },
+        },
+      });
+    }
+
+    for (const doc of uniqueShipmentDocs) {
+      const data = doc.data();
+      const parcel = data.parcel || {};
+
+      await doc.ref.update({
+        parcel: {
+          ...parcel,
+          name: REDACTED_VALUE,
+          address: REDACTED_VALUE,
+          address_2: null,
+          city: REDACTED_VALUE,
+          email: null,
+          telephone: null,
+        },
+        updatedAt: new Date(),
+      });
+    }
 
     return {
       deletedUserProfiles: userProfilesSnapshot.size,
-      deletedProducts: productsSnapshot.size,
-      deletedOrders: ordersSnapshot.size,
-      deletedShipments: uniqueShipmentDocs.length,
+      deletedUnsoldProducts: unsoldProductDocs.length,
+      anonymisedProducts: soldProductDocs.length,
+      anonymisedOrders: ordersSnapshot.size,
+      anonymisedShipments: uniqueShipmentDocs.length,
+      deletedLikes: likesSnapshot.size,
     };
   }
 }

@@ -4,22 +4,54 @@ import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
 import { gbpToPence } from '../../../shared/utils/money';
+import { ProductListQuery } from '../services/ProductService';
 
 const withSecurityFee = <T extends { price: number }>(product: T) => ({
     ...product,
     securityFee: calculateSecurityFeePence(gbpToPence(product.price)) / 100,
 });
 
+const sendPaginatedProductsResponse = <T extends { price: number }>(
+    res: Response,
+    items: T[],
+    limit: number,
+    nextCursor: string | null,
+    hasMore: boolean,
+    message: string,
+) => {
+    res.status(200).json({
+        success: true,
+        message,
+        data: {
+            products: items.map((product) => withSecurityFee(product)),
+        },
+        meta: {
+            limit,
+            nextCursor,
+            hasMore,
+        },
+        timestamp: new Date().toISOString(),
+    });
+};
+
 export const getAllProducts = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const products = await productService.getAllProducts();
-        ResponseHandler.success(
+        const query = req.query as unknown as ProductListQuery;
+        const result = await productService.getPaginatedProducts(query);
+        sendPaginatedProductsResponse(
             res,
-            products.map((product) => withSecurityFee(product)),
+            result.items,
+            result.limit,
+            result.nextCursor,
+            result.hasMore,
             'Products fetched successfully',
         );
     } catch (err) {
+        if (err instanceof Error && err.message === 'Invalid cursor') {
+            ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
+            return;
+        }
         ResponseHandler.internalServerError(res, 'Failed to fetch products', err instanceof Error ? err.message : 'Unknown error');
     }
 };
@@ -101,14 +133,84 @@ export const getProductWithDetails = async (req: Request, res: Response): Promis
 export const getAllProductsWithDetails = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const products = await productService.getAllProductsWithDetails();
-        ResponseHandler.success(
+        const query = req.query as unknown as ProductListQuery;
+        const result = await productService.getPaginatedProductsWithDetails(query);
+        sendPaginatedProductsResponse(
             res,
-            products.map((product) => withSecurityFee(product)),
+            result.items,
+            result.limit,
+            result.nextCursor,
+            result.hasMore,
             'Products with details fetched successfully',
         );
     } catch (err) {
+        if (err instanceof Error && err.message === 'Invalid cursor') {
+            ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
+            return;
+        }
         ResponseHandler.internalServerError(res, 'Failed to fetch products with details', err instanceof Error ? err.message : 'Unknown error');
+    }
+};
+
+export const getMyProducts = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const productService = ServiceFactory.getProductService();
+        const user = (req as any).user;
+        const query = req.query as unknown as ProductListQuery;
+        const result = await productService.getPaginatedProductsByUserId(
+            user.uid,
+            query,
+        );
+
+        sendPaginatedProductsResponse(
+            res,
+            result.items,
+            result.limit,
+            result.nextCursor,
+            result.hasMore,
+            'User products fetched successfully',
+        );
+    } catch (err) {
+        if (err instanceof Error && err.message === 'Invalid cursor') {
+            ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
+            return;
+        }
+        ResponseHandler.internalServerError(
+            res,
+            'Failed to fetch user products',
+            err instanceof Error ? err.message : 'Unknown error',
+        );
+    }
+};
+
+export const getMyLikedProducts = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const productService = ServiceFactory.getProductService();
+        const user = (req as any).user;
+        const query = req.query as unknown as ProductListQuery;
+        const result = await productService.getPaginatedLikedProductsByUserId(
+            user.uid,
+            query,
+        );
+
+        sendPaginatedProductsResponse(
+            res,
+            result.items,
+            result.limit,
+            result.nextCursor,
+            result.hasMore,
+            'Liked products fetched successfully',
+        );
+    } catch (err) {
+        if (err instanceof Error && err.message === 'Invalid cursor') {
+            ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
+            return;
+        }
+        ResponseHandler.internalServerError(
+            res,
+            'Failed to fetch liked products',
+            err instanceof Error ? err.message : 'Unknown error',
+        );
     }
 };
 
@@ -181,6 +283,7 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
 export const likeProduct = async (req: Request, res: Response): Promise<void> => {
   try {
     const productService = ServiceFactory.getProductService();
+    const user = (req as any).user;
     const id = requireSingleParam(req.params.id);
     if (!id) {
       ResponseHandler.badRequest(res, 'Product ID is required');
@@ -194,15 +297,25 @@ export const likeProduct = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Convert the boolean 'like' flag to a numeric delta (+1 for like, -1 for unlike)
-    const delta = like ? 1 : -1;
-    const product = await productService.changePoints(id, delta);
-    if (!product) {
-      ResponseHandler.notFound(res, 'Product not found', `Product with ID ${id} does not exist`);
+    const { product, liked } = await productService.setProductLikeStatus(
+      user.uid,
+      id,
+      like,
+    );
+
+    ResponseHandler.success(
+      res,
+      {
+        ...product,
+        liked,
+      },
+      'Product likes updated successfully'
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === 'Product not found') {
+      ResponseHandler.notFound(res, 'Product not found', `Product with ID ${req.params.id} does not exist`);
       return;
     }
-
-    ResponseHandler.success(res, product, 'Product likes updated successfully');
-  } catch (err) {
     ResponseHandler.internalServerError(
       res,
       'Failed to update product likes',

@@ -4,6 +4,7 @@ import {
     login,
     getProfile,
     updateProfile,
+    deleteAccount,
 } from '../controllers/authController';
 import {
     validateRegister,
@@ -258,5 +259,23 @@ router.get('/profile', authMiddleware, getProfile);
  *         description: User profile not found
  */
 router.put('/profile', authMiddleware, updateProfile);
+
+/**
+ * @swagger
+ * /api/auth/account:
+ *   delete:
+ *     summary: Delete the authenticated user account
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+router.delete('/account', authMiddleware, deleteAccount);
 
 export default router;

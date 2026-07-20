@@ -7,8 +7,122 @@ import { PaymentService } from '../../payment/services/PaymentService';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 import { ProductRepository } from '../../products/repositories/ProductRepository';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
+import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
+import { Shipment } from '../../shipping/models/Shipment';
+import { Order } from '../model/Order';
+import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
+
+const getDeliveryState = (
+  order: Order,
+  shipment?: Shipment | null,
+):
+  | 'pending'
+  | 'preparing'
+  | 'shipped'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'failed'
+  | 'cancelled' => {
+  if (order.status === 'delivered') {
+    return 'delivered';
+  }
+
+  if (order.status === 'cancelled') {
+    return 'cancelled';
+  }
+
+  if (order.status === 'failed' || order.shipmentStatus === 'exception') {
+    return 'failed';
+  }
+
+  if (order.shipmentStatus === 'out_for_delivery') {
+    return 'out_for_delivery';
+  }
+
+  if (['en_route'].includes(order.shipmentStatus)) {
+    return 'shipped';
+  }
+
+  if (
+    ['shipment_created', 'shipped'].includes(order.status) ||
+    ['announced'].includes(order.shipmentStatus)
+  ) {
+    return 'preparing';
+  }
+
+  return shipment ? 'preparing' : 'pending';
+};
+
+const getDeliveryLabel = (
+  deliveryState:
+    | 'pending'
+    | 'preparing'
+    | 'shipped'
+    | 'out_for_delivery'
+    | 'delivered'
+    | 'failed'
+    | 'cancelled',
+): string => {
+  switch (deliveryState) {
+    case 'pending':
+      return 'Shipment pending';
+    case 'preparing':
+      return 'Preparing shipment';
+    case 'shipped':
+      return 'On the way';
+    case 'out_for_delivery':
+      return 'Out for delivery';
+    case 'delivered':
+      return 'Delivered';
+    case 'failed':
+      return 'Delivery issue';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+};
+
+const buildDeliveryAddressSummary = (order: Order): string =>
+  [
+    order.shipping.address.line1,
+    order.shipping.address.line2,
+    order.shipping.address.city,
+    order.shipping.address.postal_code,
+    order.shipping.address.country,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
+  const deliveryState = getDeliveryState(order, shipment);
+
+  return {
+    ...order,
+    paymentState: 'paid' as const,
+    deliveryState,
+    deliveryLabel: getDeliveryLabel(deliveryState),
+    canTrack: Boolean(shipment?.trackingUrl),
+    trackingNumber: shipment?.trackingNumber ?? null,
+    trackingUrl: shipment?.trackingUrl ?? null,
+    carrier: shipment?.carrier ?? order.shippingCarrier ?? null,
+    deliveryAddressSummary: buildDeliveryAddressSummary(order),
+    shipment: shipment
+      ? {
+          id: shipment.id,
+          provider: shipment.provider ?? null,
+          carrier: shipment.carrier ?? null,
+          status: shipment.status,
+          trackingNumber: shipment.trackingNumber ?? null,
+          trackingUrl: shipment.trackingUrl ?? null,
+          labelUrl: shipment.labelUrl ?? null,
+          pickupPoint: shipment.pickupPoint ?? order.pickupPoint,
+          createdAt: shipment.createdAt,
+          updatedAt: shipment.updatedAt,
+        }
+      : null,
+  };
+};
 
 export const createOrder = async (
   req: Request,
@@ -261,11 +375,18 @@ export const getMyOrders = async (
     }
 
     const orderRepo = new OrderRepository();
+    const shipmentRepo = new ShipmentRepository();
     const orders = await orderRepo.getOrdersByUserId(firebaseUid);
+    const shipments = await Promise.all(
+      orders.map((order) => shipmentRepo.getShipmentByOrderId(order.id)),
+    );
+    const enrichedOrders = orders.map((order, index) =>
+      mapOrderForClient(order, shipments[index]),
+    );
 
     ResponseHandler.success(
       res,
-      { orders, count: orders.length },
+      { orders: enrichedOrders, count: enrichedOrders.length },
       'Orders fetched successfully',
     );
   } catch (err) {
@@ -273,6 +394,67 @@ export const getMyOrders = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch orders',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const getMyOrderById = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const firebaseUid = user?.uid;
+
+    if (!firebaseUid) {
+      ResponseHandler.unauthorized(
+        res,
+        'User not authenticated',
+        'Authentication required',
+      );
+      return;
+    }
+
+    const orderId = requireSingleParam(req.params.id);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
+    const orderRepo = new OrderRepository();
+    const shipmentRepo = new ShipmentRepository();
+    const order = await orderRepo.getOrderById(orderId);
+
+    if (!order) {
+      ResponseHandler.notFound(
+        res,
+        'Order not found',
+        `Order with ID ${orderId} does not exist`,
+      );
+      return;
+    }
+
+    if (order.userId !== firebaseUid) {
+      ResponseHandler.forbidden(
+        res,
+        'Access denied',
+        'You can only view your own orders',
+      );
+      return;
+    }
+
+    const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
+
+    ResponseHandler.success(
+      res,
+      { order: mapOrderForClient(order, shipment) },
+      'Order fetched successfully',
+    );
+  } catch (err) {
+    console.error('Error fetching user order:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch order',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }
