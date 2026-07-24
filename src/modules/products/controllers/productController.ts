@@ -37,7 +37,11 @@ const sendPaginatedProductsResponse = <T extends { price: number }>(
 export const getAllProducts = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const query = req.query as unknown as ProductListQuery;
+        const user = (req as any).user;
+        const query = {
+            ...(req.query as unknown as ProductListQuery),
+            excludeUserId: user.uid,
+        };
         const result = await productService.getPaginatedProducts(query);
         sendPaginatedProductsResponse(
             res,
@@ -133,7 +137,11 @@ export const getProductWithDetails = async (req: Request, res: Response): Promis
 export const getAllProductsWithDetails = async (req: Request, res: Response): Promise<void> => {
     try {
         const productService = ServiceFactory.getProductService();
-        const query = req.query as unknown as ProductListQuery;
+        const user = (req as any).user;
+        const query = {
+            ...(req.query as unknown as ProductListQuery),
+            excludeUserId: user.uid,
+        };
         const result = await productService.getPaginatedProductsWithDetails(query);
         sendPaginatedProductsResponse(
             res,

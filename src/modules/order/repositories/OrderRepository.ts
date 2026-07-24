@@ -1,6 +1,10 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { Order } from '../model/Order';
+import {
+  productBelongsToUser,
+  SELF_PURCHASE_ERROR,
+} from '../../products/utils/productOwnership';
 
 const removeUndefinedValues = <T extends Record<string, unknown>>(value: T): T =>
   Object.fromEntries(
@@ -56,6 +60,10 @@ export class OrderRepository {
       }
 
       const productData = productDoc.data()!;
+      if (productBelongsToUser(productData, input.userId)) {
+        throw new Error(SELF_PURCHASE_ERROR);
+      }
+
       const quantity =
         typeof productData.number === 'number' ? productData.number : 0;
       if (quantity <= 0) {
