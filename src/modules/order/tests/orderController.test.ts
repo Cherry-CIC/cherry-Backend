@@ -122,6 +122,7 @@ describe('orderController.createOrder', () => {
     });
     mockGetProductById.mockResolvedValue({
       id: 'product-1',
+      userId: 'seller-1',
       name: 'Winter Coat',
       postageSize: 'postage-size-1',
     });
@@ -301,6 +302,33 @@ describe('orderController.createOrder', () => {
 
     expect(mockCreatePaidOrderAndDecrementInventory).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('rejects an order for a product owned by the buyer', async () => {
+    mockGetProductById.mockResolvedValue({
+      id: 'product-1',
+      user_id: 'user-1',
+      name: 'Winter Coat',
+      postageSize: 'postage-size-1',
+    });
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payload,
+    };
+    const res = createResponse();
+
+    await createOrder(req, res);
+
+    expect(mockCreatePaidOrderAndDecrementInventory).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        message: 'Self-purchase is not allowed',
+      }),
+    );
   });
 });
 

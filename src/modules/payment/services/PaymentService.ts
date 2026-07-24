@@ -7,6 +7,10 @@ import { CheckoutShippingService } from '../../shipping/services/CheckoutShippin
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
+import {
+  productBelongsToUser,
+  SELF_PURCHASE_ERROR,
+} from '../../products/utils/productOwnership';
 
 export interface CreatePaymentSelection {
   productId: string;
@@ -53,6 +57,10 @@ export class PaymentService {
     const product = await this.productRepo.getById(selection.productId);
     if (!product) {
       throw new Error('Product not found');
+    }
+
+    if (productBelongsToUser(product, firebaseUid)) {
+      throw new Error(SELF_PURCHASE_ERROR);
     }
 
     if (product.number <= 0) {

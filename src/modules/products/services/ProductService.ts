@@ -14,6 +14,7 @@ import { CategoryRepository } from '../../categories/repositories/CategoryReposi
 import { CharityRepository } from '../../charities/repositories/CharityRepository';
 import { PostageSize } from '../../postage-sizes/model/PostageSize';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
+import { productBelongsToUser } from '../utils/productOwnership';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_PRODUCT_PAGE_SIZE = 50;
@@ -431,6 +432,13 @@ export class ProductService {
         query: ProductListQuery,
     ): T[] {
         return products.filter((product) => {
+            if (
+                query.excludeUserId &&
+                productBelongsToUser(product, query.excludeUserId)
+            ) {
+                return false;
+            }
+
             if (query.categoryId && product.categoryId !== query.categoryId) {
                 return false;
             }
@@ -584,6 +592,7 @@ export class ProductService {
             quality: query.quality || '',
             minPrice: query.minPrice ?? null,
             maxPrice: query.maxPrice ?? null,
+            excludeUserId: query.excludeUserId || '',
         });
     }
 
@@ -629,6 +638,7 @@ export interface ProductListQuery extends ProductListFilters {
     limit?: number;
     cursor?: string;
     search?: string;
+    excludeUserId?: string;
 }
 
 export interface PaginatedResult<T> {

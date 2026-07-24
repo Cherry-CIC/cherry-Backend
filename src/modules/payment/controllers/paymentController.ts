@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
 import { PaymentService } from '../services/PaymentService';
+import { SELF_PURCHASE_ERROR } from '../../products/utils/productOwnership';
 
 export const createPaymentIntent = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -16,6 +17,15 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
+    if (err instanceof Error && err.message === SELF_PURCHASE_ERROR) {
+      ResponseHandler.forbidden(
+        res,
+        'Self-purchase is not allowed',
+        err.message,
+      );
+      return;
+    }
+
     ResponseHandler.badRequest(
       res,
       'Failed to create PaymentIntent',

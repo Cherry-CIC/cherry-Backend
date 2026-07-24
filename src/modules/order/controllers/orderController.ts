@@ -11,6 +11,10 @@ import { ShipmentRepository } from '../../shipping/repositories/ShipmentReposito
 import { Shipment } from '../../shipping/models/Shipment';
 import { Order } from '../model/Order';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
+import {
+  productBelongsToUser,
+  SELF_PURCHASE_ERROR,
+} from '../../products/utils/productOwnership';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
 
@@ -216,6 +220,15 @@ export const createOrder = async (
       return;
     }
 
+    if (productBelongsToUser(product, firebaseUid)) {
+      ResponseHandler.forbidden(
+        res,
+        'Self-purchase is not allowed',
+        SELF_PURCHASE_ERROR,
+      );
+      return;
+    }
+
     if (!product.postageSize) {
       ResponseHandler.badRequest(
         res,
@@ -299,6 +312,17 @@ export const createOrder = async (
         ResponseHandler.conflict(
           res,
           'Checkout is no longer valid',
+          err.message,
+        );
+        return;
+      }
+      if (
+        err instanceof Error &&
+        err.message === SELF_PURCHASE_ERROR
+      ) {
+        ResponseHandler.forbidden(
+          res,
+          'Self-purchase is not allowed',
           err.message,
         );
         return;

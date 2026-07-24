@@ -65,6 +65,7 @@ describe('PaymentService', () => {
     });
     mockGetProductById.mockResolvedValue({
       id: 'product-1',
+      userId: 'seller-1',
       price: 25,
       number: 1,
       postageSize: 'postage-size-1',
@@ -122,6 +123,29 @@ describe('PaymentService', () => {
         currency: 'GBP',
       }),
     );
+  });
+
+  it('rejects self-purchase before creating a Stripe PaymentIntent', async () => {
+    mockGetProductById.mockResolvedValue({
+      id: 'product-1',
+      user_id: 'user-1',
+      price: 25,
+      number: 1,
+      postageSize: 'postage-size-1',
+    });
+    const service = new PaymentService();
+
+    await expect(
+      service.createPaymentIntentForUserByUid('user-1', {
+        productId: 'product-1',
+        shippingMethodId: '3747',
+        pickupPointId: '13127548',
+        country: 'GB',
+        postalCode: 'SE18 4QH',
+      }),
+    ).rejects.toThrow('You cannot buy your own listing');
+
+    expect(mockCreatePaymentIntentForUser).not.toHaveBeenCalled();
   });
 
   it('verifies a succeeded PaymentIntent and parses trusted metadata', async () => {

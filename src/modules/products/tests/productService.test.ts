@@ -100,6 +100,47 @@ describe('ProductService pagination', () => {
         ).rejects.toThrow('Invalid cursor');
     });
 
+    it('excludes the signed-in seller while filling the requested page', async () => {
+        const ownProduct = createProduct('own-product', '2026-07-13T10:00:00.000Z');
+        const firstOther = {
+            ...createProduct('other-1', '2026-07-13T09:00:00.000Z'),
+            userId: 'seller-2',
+        };
+        const secondOther = {
+            ...createProduct('other-2', '2026-07-13T08:00:00.000Z'),
+            userId: 'seller-3',
+        };
+        const getPageByFilters = jest
+            .fn()
+            .mockResolvedValueOnce({
+                items: [ownProduct, firstOther],
+                hasMore: true,
+            })
+            .mockResolvedValueOnce({
+                items: [secondOther],
+                hasMore: false,
+            });
+
+        const service = new ProductService(
+            { getPageByFilters } as any,
+            productLikeRepo,
+            categoryRepo,
+            charityRepo,
+            postageSizeRepo,
+        );
+
+        const result = await service.getPaginatedProducts({
+            limit: 2,
+            excludeUserId: 'user-1',
+        });
+
+        expect(result.items.map((product) => product.id)).toEqual([
+            'other-1',
+            'other-2',
+        ]);
+        expect(getPageByFilters).toHaveBeenCalledTimes(2);
+    });
+
     it('scopes my-products pagination to the authenticated user', async () => {
         const ownedProduct = createProduct('owned-product', '2026-07-13T10:00:00.000Z');
         const getPageByFilters = jest.fn().mockResolvedValueOnce({
