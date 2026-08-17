@@ -9,7 +9,7 @@ import { ProductRepository } from '../../products/repositories/ProductRepository
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 import { ShipmentRepository } from '../../shipping/repositories/ShipmentRepository';
 import { Shipment } from '../../shipping/models/Shipment';
-import { Order } from '../model/Order';
+import { Order, OrderDisputeReason } from '../model/Order';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
@@ -93,6 +93,53 @@ const buildDeliveryAddressSummary = (order: Order): string =>
   ]
     .filter(Boolean)
     .join(', ');
+
+const canBuyerConfirmReceived = (order: Order): boolean => {
+  if (order.buyerConfirmedReceived) {
+    return false;
+  }
+
+  if (['failed', 'cancelled'].includes(order.status)) {
+    return false;
+  }
+
+  return (
+    ['shipped', 'delivered'].includes(order.status) ||
+    ['en_route', 'out_for_delivery', 'delivered'].includes(order.shipmentStatus)
+  );
+};
+
+const DISPUTE_REASONS: OrderDisputeReason[] = [
+  'wrong_item',
+  'item_not_as_described',
+  'item_arrived_damaged',
+  'something_else',
+];
+
+const canBuyerSubmitDispute = (order: Order): boolean => {
+  if (order.buyerConfirmedReceived || order.buyerDisputeStatus) {
+    return false;
+  }
+
+  if (['failed', 'cancelled'].includes(order.status)) {
+    return false;
+  }
+
+  return (
+    ['shipped', 'delivered'].includes(order.status) ||
+    ['en_route', 'out_for_delivery', 'delivered'].includes(order.shipmentStatus)
+  );
+};
+
+const parseDisputeReason = (value: unknown): OrderDisputeReason | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  return DISPUTE_REASONS.includes(value as OrderDisputeReason)
+    ? (value as OrderDisputeReason)
+    : null;
+};
 
 const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
   const deliveryState = getDeliveryState(order, shipment);
@@ -246,7 +293,9 @@ export const createOrder = async (
       return;
     }
 
-    const normalizedPickupCarrier = String(pickupPoint?.carrier || '').toLowerCase();
+    const normalizedPickupCarrier = String(
+      pickupPoint?.carrier || '',
+    ).toLowerCase();
     if (
       verifiedPayment.shippingCarrier !== ENFORCED_CARRIER ||
       normalizedPickupCarrier !== ENFORCED_CARRIER
@@ -294,7 +343,11 @@ export const createOrder = async (
       }
       if (
         err instanceof Error &&
-        ['Product price changed', 'Product is out of stock'].includes(err.message)
+        [
+          'Product price changed',
+          'Product is out of stock',
+          'Product is not available',
+        ].includes(err.message)
       ) {
         ResponseHandler.conflict(
           res,
@@ -455,6 +508,197 @@ export const getMyOrderById = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch order',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const confirmOrderReceived = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const firebaseUid = user?.uid;
+
+    if (!firebaseUid) {
+      ResponseHandler.unauthorized(
+        res,
+        'User not authenticated',
+        'Authentication required',
+      );
+      return;
+    }
+
+    const orderId = requireSingleParam(req.params.id);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
+
+    const orderRepo = new OrderRepository();
+    const shipmentRepo = new ShipmentRepository();
+    const order = await orderRepo.getOrderById(orderId);
+
+    if (!order) {
+      ResponseHandler.notFound(
+        res,
+        'Order not found',
+        `Order with ID ${orderId} does not exist`,
+      );
+      return;
+    }
+
+    if (order.userId !== firebaseUid) {
+      ResponseHandler.forbidden(
+        res,
+        'Access denied',
+        'You can only confirm your own orders',
+      );
+      return;
+    }
+
+    if (!canBuyerConfirmReceived(order)) {
+      ResponseHandler.conflict(
+        res,
+        'Order cannot be confirmed received',
+        'The order is not eligible for buyer receipt confirmation',
+      );
+      return;
+    }
+
+    const buyerConfirmedReceivedAt = new Date();
+    await orderRepo.updateOrder(order.id, {
+      buyerConfirmedReceived: true,
+      buyerConfirmedReceivedAt,
+      status: 'delivered',
+    });
+
+    const updatedOrder = {
+      ...order,
+      buyerConfirmedReceived: true,
+      buyerConfirmedReceivedAt,
+      status: 'delivered' as const,
+    };
+    const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
+
+    ResponseHandler.success(
+      res,
+      { order: mapOrderForClient(updatedOrder, shipment) },
+      'Order receipt confirmed',
+    );
+  } catch (err) {
+    console.error('Error confirming order receipt:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to confirm order receipt',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+export const submitOrderDispute = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    const firebaseUid = user?.uid;
+
+    if (!firebaseUid) {
+      ResponseHandler.unauthorized(
+        res,
+        'User not authenticated',
+        'Authentication required',
+      );
+      return;
+    }
+
+    const orderId = requireSingleParam(req.params.id);
+    if (!orderId) {
+      ResponseHandler.badRequest(res, 'Order ID is required');
+      return;
+    }
+
+    const reason = parseDisputeReason(req.body?.reason);
+    if (!reason) {
+      ResponseHandler.badRequest(
+        res,
+        'Dispute reason is required',
+        `Reason must be one of: ${DISPUTE_REASONS.join(', ')}`,
+      );
+      return;
+    }
+
+    const message =
+      typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (message.length > 1000) {
+      ResponseHandler.badRequest(
+        res,
+        'Dispute message is too long',
+        'Message must be 1000 characters or fewer',
+      );
+      return;
+    }
+
+    const orderRepo = new OrderRepository();
+    const shipmentRepo = new ShipmentRepository();
+    const order = await orderRepo.getOrderById(orderId);
+
+    if (!order) {
+      ResponseHandler.notFound(
+        res,
+        'Order not found',
+        `Order with ID ${orderId} does not exist`,
+      );
+      return;
+    }
+
+    if (order.userId !== firebaseUid) {
+      ResponseHandler.forbidden(
+        res,
+        'Access denied',
+        'You can only dispute your own orders',
+      );
+      return;
+    }
+
+    if (!canBuyerSubmitDispute(order)) {
+      ResponseHandler.conflict(
+        res,
+        'Order cannot be disputed',
+        'The order is not eligible for buyer dispute submission',
+      );
+      return;
+    }
+
+    const buyerDisputedAt = new Date();
+    await orderRepo.updateOrder(order.id, {
+      buyerDisputeReason: reason,
+      buyerDisputeStatus: 'under_review',
+      buyerDisputeMessage: message || undefined,
+      buyerDisputedAt,
+    });
+
+    const updatedOrder = {
+      ...order,
+      buyerDisputeReason: reason,
+      buyerDisputeStatus: 'under_review' as const,
+      buyerDisputeMessage: message || undefined,
+      buyerDisputedAt,
+    };
+    const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
+
+    ResponseHandler.success(
+      res,
+      { order: mapOrderForClient(updatedOrder, shipment) },
+      'Order dispute submitted',
+    );
+  } catch (err) {
+    console.error('Error submitting order dispute:', err);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to submit order dispute',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }

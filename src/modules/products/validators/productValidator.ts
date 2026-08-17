@@ -3,152 +3,157 @@ import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 
 export const productSchema = Joi.object({
-    name: Joi.string().min(3).max(100).required()
-        .messages({
-            'string.base': `"name" should be a type of 'text'`,
-            'string.empty': `"name" cannot be empty`,
-            'string.min': `"name" should have at least {#limit} characters`,
-            'string.max': `"name" should have at most {#limit} characters`,
-            'any.required': `"name" is required`,
-        }),
+  name: Joi.string().min(3).max(100).required().messages({
+    'string.base': `"name" should be a type of 'text'`,
+    'string.empty': `"name" cannot be empty`,
+    'string.min': `"name" should have at least {#limit} characters`,
+    'string.max': `"name" should have at most {#limit} characters`,
+    'any.required': `"name" is required`,
+  }),
 
-    description: Joi.string().max(500).optional(),
+  description: Joi.string().max(500).optional(),
 
-    categoryId: Joi.string().required()
-        .messages({
-            'string.base': `"categoryId" should be a type of 'text'`,
-            'string.empty': `"categoryId" cannot be empty`,
-            'any.required': `"categoryId" is required`,
-        }),
+  categoryId: Joi.string().required().messages({
+    'string.base': `"categoryId" should be a type of 'text'`,
+    'string.empty': `"categoryId" cannot be empty`,
+    'any.required': `"categoryId" is required`,
+  }),
 
-    charityId: Joi.string().required()
-        .messages({
-            'string.base': `"charityId" should be a type of 'text'`,
-            'string.empty': `"charityId" cannot be empty`,
-            'any.required': `"charityId" is required`,
-        }),
+  charityId: Joi.string().required().messages({
+    'string.base': `"charityId" should be a type of 'text'`,
+    'string.empty': `"charityId" cannot be empty`,
+    'any.required': `"charityId" is required`,
+  }),
 
-    postageSize: Joi.string().required()
-        .messages({
-            'string.base': `"postageSize" should be a type of 'text'`,
-            'string.empty': `"postageSize" cannot be empty`,
-            'any.required': `"postageSize" is required`,
-        }),
+  postageSize: Joi.string().required().messages({
+    'string.base': `"postageSize" should be a type of 'text'`,
+    'string.empty': `"postageSize" cannot be empty`,
+    'any.required': `"postageSize" is required`,
+  }),
 
-    quality: Joi.string().required()
-        .messages({
-            'string.base': `"quality" should be a type of 'text'`,
-            'string.empty': `"quality" cannot be empty`,
-            'any.required': `"quality" is required`,
-        }),
+  quality: Joi.string().required().messages({
+    'string.base': `"quality" should be a type of 'text'`,
+    'string.empty': `"quality" cannot be empty`,
+    'any.required': `"quality" is required`,
+  }),
 
-    size: Joi.string().required()
-        .messages({
-            'string.base': `"size" should be a type of 'text'`,
-            'string.empty': `"size" cannot be empty`,
-            'any.required': `"size" is required`,
-        }),
+  size: Joi.string().required().messages({
+    'string.base': `"size" should be a type of 'text'`,
+    'string.empty': `"size" cannot be empty`,
+    'any.required': `"size" is required`,
+  }),
 
-    product_images: Joi.array().items(Joi.string().uri()).min(1).required()
-        .messages({
-            'array.base': `"product_images" should be an array`,
-            'array.min': `"product_images" should have at least {#limit} image`,
-            'any.required': `"product_images" is required`,
-        }),
+  product_images: Joi.array()
+    .items(Joi.string().uri())
+    .min(1)
+    .required()
+    .messages({
+      'array.base': `"product_images" should be an array`,
+      'array.min': `"product_images" should have at least {#limit} image`,
+      'any.required': `"product_images" is required`,
+    }),
 
-    donation: Joi.number().positive().required()
-        .messages({
-            'number.base': `"donation" should be a number`,
-            'number.positive': `"donation" must be greater than zero`,
-            'any.required': `"donation" is required`,
-        }),
+  donation: Joi.number().positive().required().messages({
+    'number.base': `"donation" should be a number`,
+    'number.positive': `"donation" must be greater than zero`,
+    'any.required': `"donation" is required`,
+  }),
 
-    price: Joi.number().positive().required()
-        .messages({
-            'number.base': `"price" should be a number`,
-            'number.positive': `"price" must be greater than zero`,
-            'any.required': `"price" is required`,
-        }),
+  price: Joi.number().positive().required().messages({
+    'number.base': `"price" should be a number`,
+    'number.positive': `"price" must be greater than zero`,
+    'any.required': `"price" is required`,
+  }),
 
-    likes: Joi.number().integer().min(0).default(0),
+  likes: Joi.number().integer().min(0).default(0),
 
-    number: Joi.number().integer().min(0).required()
-        .messages({
-            'number.base': `"number" should be a number`,
-            'number.integer': `"number" should be an integer`,
-            'number.min': `"number" should be at least {#limit}`,
-            'any.required': `"number" is required`,
-        })
+  number: Joi.number().integer().min(0).required().messages({
+    'number.base': `"number" should be a number`,
+    'number.integer': `"number" should be an integer`,
+    'number.min': `"number" should be at least {#limit}`,
+    'any.required': `"number" is required`,
+  }),
 });
 
 export const productUpdateSchema = Joi.object({
-    name: Joi.string().min(3).max(100).optional(),
-    description: Joi.string().max(500).allow('').optional(),
-    categoryId: Joi.string().optional(),
-    charityId: Joi.string().optional(),
-    postageSize: Joi.string().optional(),
-    quality: Joi.string().optional(),
-    size: Joi.string().optional(),
-    product_images: Joi.array().items(Joi.string().uri()).min(1).optional(),
-    donation: Joi.number().positive().optional(),
-    price: Joi.number().positive().optional(),
-    number: Joi.number().integer().min(0).optional(),
+  name: Joi.string().min(3).max(100).optional(),
+  description: Joi.string().max(500).allow('').optional(),
+  categoryId: Joi.string().optional(),
+  charityId: Joi.string().optional(),
+  postageSize: Joi.string().optional(),
+  quality: Joi.string().optional(),
+  size: Joi.string().optional(),
+  product_images: Joi.array().items(Joi.string().uri()).min(1).optional(),
+  donation: Joi.number().positive().optional(),
+  price: Joi.number().positive().optional(),
+  number: Joi.number().integer().min(0).optional(),
 })
-    .min(1)
-    .messages({
-        'object.min': 'At least one product field must be provided',
-    });
+  .min(1)
+  .messages({
+    'object.min': 'At least one product field must be provided',
+  });
 
 export const productListQuerySchema = Joi.object({
-    limit: Joi.number().integer().min(1).max(50).default(20),
-    cursor: Joi.string().base64().optional(),
-    search: Joi.string().trim().max(100).optional(),
-    categoryId: Joi.string().trim().optional(),
-    charityId: Joi.string().trim().optional(),
-    size: Joi.string().trim().optional(),
-    quality: Joi.string().trim().optional(),
-    minPrice: Joi.number().min(0).optional(),
-    maxPrice: Joi.number().min(0).optional(),
-}).custom((value, helpers) => {
+  limit: Joi.number().integer().min(1).max(50).default(20),
+  cursor: Joi.string().base64().optional(),
+  search: Joi.string().trim().max(100).optional(),
+  categoryId: Joi.string().trim().optional(),
+  charityId: Joi.string().trim().optional(),
+  size: Joi.string().trim().optional(),
+  quality: Joi.string().trim().optional(),
+  status: Joi.string().valid('active', 'unlisted', 'sold').optional(),
+  minPrice: Joi.number().min(0).optional(),
+  maxPrice: Joi.number().min(0).optional(),
+})
+  .custom((value, helpers) => {
     if (
-        value.minPrice !== undefined &&
-        value.maxPrice !== undefined &&
-        value.minPrice > value.maxPrice
+      value.minPrice !== undefined &&
+      value.maxPrice !== undefined &&
+      value.minPrice > value.maxPrice
     ) {
-        return helpers.error('any.invalid');
+      return helpers.error('any.invalid');
     }
 
     return value;
-}).messages({
+  })
+  .messages({
     'any.invalid': '"minPrice" cannot be greater than "maxPrice"',
-});
+  });
 
 export function validateProduct(
-    req: Request,
-    res: Response,
-    next: NextFunction
+  req: Request,
+  res: Response,
+  next: NextFunction,
 ): void {
-    const { error } = productSchema.validate(req.body);
-    if (error) {
-        ResponseHandler.badRequest(res, 'Validation failed', error.details[0].message);
-        return;
-    }
-    next();
+  const { error } = productSchema.validate(req.body);
+  if (error) {
+    ResponseHandler.badRequest(
+      res,
+      'Validation failed',
+      error.details[0].message,
+    );
+    return;
+  }
+  next();
 }
 
 export function validateProductUpdate(
-    req: Request,
-    res: Response,
-    next: NextFunction
+  req: Request,
+  res: Response,
+  next: NextFunction,
 ): void {
-    const { error, value } = productUpdateSchema.validate(req.body, {
-        abortEarly: true,
-        stripUnknown: true,
-    });
-    if (error) {
-        ResponseHandler.badRequest(res, 'Validation failed', error.details[0].message);
-        return;
-    }
-    req.body = value;
-    next();
+  const { error, value } = productUpdateSchema.validate(req.body, {
+    abortEarly: true,
+    stripUnknown: true,
+  });
+  if (error) {
+    ResponseHandler.badRequest(
+      res,
+      'Validation failed',
+      error.details[0].message,
+    );
+    return;
+  }
+  req.body = value;
+  next();
 }

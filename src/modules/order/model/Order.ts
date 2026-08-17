@@ -1,4 +1,10 @@
 export type DeliveryType = 'home' | 'pickup_point';
+export type OrderDisputeReason =
+  | 'wrong_item'
+  | 'item_not_as_described'
+  | 'item_arrived_damaged'
+  | 'something_else';
+export type OrderDisputeStatus = 'under_review';
 export type ShipmentStatus =
   | 'pending'
   | 'announced'
@@ -62,5 +68,11 @@ export interface Order {
     | 'failed';
   shipmentStatus: ShipmentStatus;
   shipmentId?: string;
+  buyerConfirmedReceived?: boolean;
+  buyerConfirmedReceivedAt?: Date;
+  buyerDisputeReason?: OrderDisputeReason;
+  buyerDisputeStatus?: OrderDisputeStatus;
+  buyerDisputeMessage?: string;
+  buyerDisputedAt?: Date;
   createdAt: Date;
 }

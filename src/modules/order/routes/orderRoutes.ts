@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { createOrder, getMyOrderById, getMyOrders } from '../controllers/orderController';
+import {
+  confirmOrderReceived,
+  createOrder,
+  getMyOrderById,
+  getMyOrders,
+  submitOrderDispute,
+} from '../controllers/orderController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateOrder } from '../validators/orderValidator';
 
@@ -104,6 +110,28 @@ const router = Router();
  *           allOf:
  *             - $ref: '#/components/schemas/ShipmentSummary'
  *           nullable: true
+ *         buyerConfirmedReceived:
+ *           type: boolean
+ *           example: true
+ *         buyerConfirmedReceivedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         buyerDisputeReason:
+ *           type: string
+ *           enum: [wrong_item, item_not_as_described, item_arrived_damaged, something_else]
+ *           nullable: true
+ *         buyerDisputeStatus:
+ *           type: string
+ *           enum: [under_review]
+ *           nullable: true
+ *         buyerDisputeMessage:
+ *           type: string
+ *           nullable: true
+ *         buyerDisputedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -184,6 +212,83 @@ router.get('/my-orders', authMiddleware, getMyOrders);
  *         description: Internal server error
  */
 router.post('/create', authMiddleware, validateOrder, createOrder);
+
+/**
+ * @swagger
+ * /api/order/{id}/confirm-received:
+ *   post:
+ *     summary: Confirm the authenticated buyer has received an order
+ *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Order receipt confirmed
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Order not found
+ *       409:
+ *         description: Order is not eligible for receipt confirmation
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/:id/confirm-received', authMiddleware, confirmOrderReceived);
+
+/**
+ * @swagger
+ * /api/order/{id}/dispute:
+ *   post:
+ *     summary: Submit a buyer dispute for an order
+ *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 enum: [wrong_item, item_not_as_described, item_arrived_damaged, something_else]
+ *               message:
+ *                 type: string
+ *                 maxLength: 1000
+ *     responses:
+ *       200:
+ *         description: Order dispute submitted
+ *       400:
+ *         description: Invalid dispute payload
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Order not found
+ *       409:
+ *         description: Order is not eligible for dispute submission
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/:id/dispute', authMiddleware, submitOrderDispute);
 
 /**
  * @swagger

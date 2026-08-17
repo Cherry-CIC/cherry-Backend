@@ -18,7 +18,8 @@ jest.mock('../../auth/repositories/UserRepository', () => ({
 
 jest.mock('../repositories/OrderRepository', () => ({
   OrderRepository: jest.fn().mockImplementation(() => ({
-    createPaidOrderAndDecrementInventory: mockCreatePaidOrderAndDecrementInventory,
+    createPaidOrderAndDecrementInventory:
+      mockCreatePaidOrderAndDecrementInventory,
     updateOrder: mockUpdateOrder,
     getOrdersByUserId: mockGetOrdersByUserId,
     getOrderById: mockGetOrderById,
@@ -27,7 +28,8 @@ jest.mock('../repositories/OrderRepository', () => ({
 
 jest.mock('../../payment/services/PaymentService', () => ({
   PaymentService: jest.fn().mockImplementation(() => ({
-    verifySucceededPaymentIntentForUser: mockVerifySucceededPaymentIntentForUser,
+    verifySucceededPaymentIntentForUser:
+      mockVerifySucceededPaymentIntentForUser,
   })),
 }));
 
@@ -61,7 +63,13 @@ jest.mock('../../postage-sizes/repositories/PostageSizeRepository', () => ({
   })),
 }));
 
-import { createOrder, getMyOrderById, getMyOrders } from '../controllers/orderController';
+import {
+  confirmOrderReceived,
+  createOrder,
+  getMyOrderById,
+  getMyOrders,
+  submitOrderDispute,
+} from '../controllers/orderController';
 
 const createResponse = () => {
   const res: any = {};
@@ -515,5 +523,326 @@ describe('orderController order retrieval', () => {
     await getMyOrderById(req, res);
 
     expect(res.status).toHaveBeenCalledWith(403);
+  });
+});
+
+describe('orderController.confirmOrderReceived', () => {
+  const shippedOrder = {
+    id: 'order-1',
+    userId: 'user-1',
+    email: 'user@example.com',
+    productAmount: 2000,
+    shippingFee: 399,
+    securityFee: 200,
+    totalAmount: 2599,
+    currency: 'GBP',
+    productId: 'product-1',
+    productName: 'Winter Coat',
+    deliveryType: 'pickup_point',
+    shippingOptionId: '12345',
+    shippingOptionName: 'InPost locker',
+    shippingCarrier: 'inpost_gb',
+    shippingWeight: 2000,
+    shipping: {
+      name: 'Jane Doe',
+      telephone: '+447700900000',
+      address: {
+        line1: '10 High Street',
+        city: 'London',
+        postal_code: 'SW1A 1AA',
+        country: 'GB',
+      },
+    },
+    pickupPoint: {
+      id: '999',
+      name: 'Locker A',
+      addressLine1: '10 High Street',
+      city: 'London',
+      postalCode: 'SW1A 1AA',
+      country: 'GB',
+      carrier: 'inpost_gb',
+    },
+    paymentIntentId: 'pi_123',
+    paymentStatus: 'succeeded',
+    status: 'shipped',
+    shipmentStatus: 'en_route',
+    shipmentId: 'shipment-1',
+    createdAt: new Date('2026-07-14T10:00:00.000Z'),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetShipmentByOrderId.mockResolvedValue(null);
+  });
+
+  it('lets the buyer confirm a shipped order as received', async () => {
+    mockGetOrderById.mockResolvedValue(shippedOrder);
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await confirmOrderReceived(req, res);
+
+    expect(mockUpdateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        buyerConfirmedReceived: true,
+        status: 'delivered',
+      }),
+    );
+    expect(mockUpdateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.not.objectContaining({
+        shipmentStatus: 'delivered',
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Order receipt confirmed',
+        data: {
+          order: expect.objectContaining({
+            id: 'order-1',
+            buyerConfirmedReceived: true,
+            deliveryState: 'delivered',
+            deliveryLabel: 'Delivered',
+          }),
+        },
+      }),
+    );
+  });
+
+  it('forbids confirming another user’s order', async () => {
+    mockGetOrderById.mockResolvedValue({
+      ...shippedOrder,
+      userId: 'other-user',
+    });
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await confirmOrderReceived(req, res);
+
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('returns 404 when confirming an unknown order', async () => {
+    mockGetOrderById.mockResolvedValue(null);
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'missing-order',
+      },
+    };
+    const res = createResponse();
+
+    await confirmOrderReceived(req, res);
+
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('rejects orders that are not ready for receipt confirmation', async () => {
+    mockGetOrderById.mockResolvedValue({
+      ...shippedOrder,
+      status: 'paid',
+      shipmentStatus: 'pending',
+    });
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await confirmOrderReceived(req, res);
+
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  it('rejects orders that have only been announced to the carrier', async () => {
+    mockGetOrderById.mockResolvedValue({
+      ...shippedOrder,
+      status: 'shipment_created',
+      shipmentStatus: 'announced',
+    });
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+    };
+    const res = createResponse();
+
+    await confirmOrderReceived(req, res);
+
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+});
+
+describe('orderController.submitOrderDispute', () => {
+  const disputableOrder = {
+    id: 'order-1',
+    userId: 'user-1',
+    email: 'user@example.com',
+    productAmount: 2000,
+    shippingFee: 399,
+    securityFee: 200,
+    totalAmount: 2599,
+    currency: 'GBP',
+    productId: 'product-1',
+    productName: 'Winter Coat',
+    deliveryType: 'pickup_point',
+    shippingOptionId: '12345',
+    shippingOptionName: 'InPost locker',
+    shippingCarrier: 'inpost_gb',
+    shippingWeight: 2000,
+    shipping: {
+      name: 'Jane Doe',
+      telephone: '+447700900000',
+      address: {
+        line1: '10 High Street',
+        city: 'London',
+        postal_code: 'SW1A 1AA',
+        country: 'GB',
+      },
+    },
+    pickupPoint: {
+      id: '999',
+      name: 'Locker A',
+      addressLine1: '10 High Street',
+      city: 'London',
+      postalCode: 'SW1A 1AA',
+      country: 'GB',
+      carrier: 'inpost_gb',
+    },
+    paymentIntentId: 'pi_123',
+    paymentStatus: 'succeeded',
+    status: 'shipped',
+    shipmentStatus: 'en_route',
+    shipmentId: 'shipment-1',
+    createdAt: new Date('2026-07-14T10:00:00.000Z'),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetShipmentByOrderId.mockResolvedValue(null);
+  });
+
+  it('lets the buyer submit a dispute for a shipped order', async () => {
+    mockGetOrderById.mockResolvedValue(disputableOrder);
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+      body: {
+        reason: 'wrong_item',
+        message: 'I received a different item.',
+      },
+    };
+    const res = createResponse();
+
+    await submitOrderDispute(req, res);
+
+    expect(mockUpdateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        buyerDisputeReason: 'wrong_item',
+        buyerDisputeStatus: 'under_review',
+        buyerDisputeMessage: 'I received a different item.',
+      }),
+    );
+    expect(mockUpdateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.not.objectContaining({
+        buyerConfirmedReceived: true,
+        shipmentStatus: 'delivered',
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Order dispute submitted',
+        data: {
+          order: expect.objectContaining({
+            id: 'order-1',
+            buyerDisputeReason: 'wrong_item',
+            buyerDisputeStatus: 'under_review',
+          }),
+        },
+      }),
+    );
+  });
+
+  it('rejects an unsupported dispute reason', async () => {
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+      body: {
+        reason: 'not_real',
+      },
+    };
+    const res = createResponse();
+
+    await submitOrderDispute(req, res);
+
+    expect(mockGetOrderById).not.toHaveBeenCalled();
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('rejects disputes after the buyer has confirmed receipt', async () => {
+    mockGetOrderById.mockResolvedValue({
+      ...disputableOrder,
+      buyerConfirmedReceived: true,
+    });
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      params: {
+        id: 'order-1',
+      },
+      body: {
+        reason: 'item_arrived_damaged',
+      },
+    };
+    const res = createResponse();
+
+    await submitOrderDispute(req, res);
+
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
   });
 });
