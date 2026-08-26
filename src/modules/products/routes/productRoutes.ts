@@ -9,7 +9,9 @@ import {
   getMyProducts,
   updateProduct,
   deleteProduct,
-  likeProduct
+  unlistProduct,
+  relistProduct,
+  likeProduct,
 } from '../controllers/productController';
 import {
   productListQuerySchema,
@@ -97,6 +99,11 @@ const router = Router();
  *           type: number
  *           description: Product quantity/number
  *           example: 10
+ *         status:
+ *           type: string
+ *           enum: [active, unlisted, sold]
+ *           description: Product listing lifecycle status
+ *           example: "active"
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -145,6 +152,11 @@ const router = Router();
  *         name: quality
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, unlisted, sold]
  *       - in: query
  *         name: minPrice
  *         schema:
@@ -411,7 +423,12 @@ router.get('/:id', authMiddleware, validateProductId, getProductById);
  *       500:
  *         description: Server error
  */
-router.get('/:id/with-details', authMiddleware, validateProductId, getProductWithDetails);
+router.get(
+  '/:id/with-details',
+  authMiddleware,
+  validateProductId,
+  getProductWithDetails,
+);
 
 /**
  * @swagger
@@ -613,7 +630,65 @@ router.post('/', authMiddleware, validateProduct, createProduct);
  *       500:
  *         description: Server error
  */
-router.put('/:id', authMiddleware, validateProductId, validateProductUpdate, updateProduct);
+router.put(
+  '/:id',
+  authMiddleware,
+  validateProductId,
+  validateProductUpdate,
+  updateProduct,
+);
+
+/**
+ * @swagger
+ * /api/products/{id}/unlist:
+ *   post:
+ *     summary: Unlist one of the authenticated seller's products
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product unlisted successfully
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Product not found
+ *       409:
+ *         description: Product cannot be unlisted
+ */
+router.post('/:id/unlist', authMiddleware, validateProductId, unlistProduct);
+
+/**
+ * @swagger
+ * /api/products/{id}/relist:
+ *   post:
+ *     summary: Relist one of the authenticated seller's products
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product relisted successfully
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Product not found
+ *       409:
+ *         description: Product cannot be relisted
+ */
+router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
 
 /**
  * @swagger
@@ -724,6 +799,11 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *         schema:
  *           type: string
  *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, unlisted, sold]
+ *       - in: query
  *         name: minPrice
  *         schema:
  *           type: number
@@ -807,6 +887,11 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *         name: quality
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, unlisted, sold]
  *       - in: query
  *         name: minPrice
  *         schema:

@@ -2,7 +2,9 @@ import { firestore } from '../../../shared/config/firebaseConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { Order } from '../model/Order';
 
-const removeUndefinedValues = <T extends Record<string, unknown>>(value: T): T =>
+const removeUndefinedValues = <T extends Record<string, unknown>>(
+  value: T,
+): T =>
   Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
   ) as T;
@@ -58,8 +60,14 @@ export class OrderRepository {
       const productData = productDoc.data()!;
       const quantity =
         typeof productData.number === 'number' ? productData.number : 0;
+      const productStatus =
+        typeof productData.status === 'string' ? productData.status : 'active';
       if (quantity <= 0) {
         throw new Error('Product is out of stock');
+      }
+
+      if (productStatus !== 'active') {
+        throw new Error('Product is not available');
       }
 
       if (
@@ -76,6 +84,7 @@ export class OrderRepository {
       });
       transaction.update(productRef, {
         number: quantity - 1,
+        status: quantity - 1 <= 0 ? 'sold' : 'active',
         updatedAt: new Date(),
       });
       transaction.set(paymentLockRef, {
@@ -167,15 +176,25 @@ export class OrderRepository {
   }
 
   private mapToOrder(id: string, data: FirebaseFirestore.DocumentData): Order {
-    const createdAt =
-      data.createdAt && typeof data.createdAt.toDate === 'function'
-        ? data.createdAt.toDate()
-        : new Date(data.createdAt);
+    const toDate = (value: unknown): Date | undefined => {
+      if (!value) {
+        return undefined;
+      }
+
+      if (typeof (value as { toDate?: unknown }).toDate === 'function') {
+        return (value as { toDate: () => Date }).toDate();
+      }
+
+      const date = new Date(value as string | number | Date);
+      return Number.isNaN(date.getTime()) ? undefined : date;
+    };
 
     return {
       id,
       ...data,
-      createdAt,
+      createdAt: toDate(data.createdAt) ?? new Date(data.createdAt),
+      buyerConfirmedReceivedAt: toDate(data.buyerConfirmedReceivedAt),
+      buyerDisputedAt: toDate(data.buyerDisputedAt),
     } as Order;
   }
 }

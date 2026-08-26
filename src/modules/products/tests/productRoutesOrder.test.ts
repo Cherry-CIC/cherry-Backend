@@ -10,6 +10,12 @@ const mockGetMyProducts = jest.fn((_req, res) => {
 const mockGetMyLikedProducts = jest.fn((_req, res) => {
   res.status(200).json({ handler: 'getMyLikedProducts' });
 });
+const mockUnlistProduct = jest.fn((req, res) => {
+  res.status(200).json({ handler: 'unlistProduct', id: req.params.id });
+});
+const mockRelistProduct = jest.fn((req, res) => {
+  res.status(200).json({ handler: 'relistProduct', id: req.params.id });
+});
 
 jest.mock('../../../shared/middleware/authMiddleWare', () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
@@ -33,16 +39,32 @@ jest.mock('../validators/productValidator', () => ({
 }));
 
 jest.mock('../controllers/productController', () => ({
-  getAllProducts: jest.fn((_req, res) => res.status(200).json({ handler: 'getAllProducts' })),
-  createProduct: jest.fn((_req, res) => res.status(201).json({ handler: 'createProduct' })),
+  getAllProducts: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'getAllProducts' }),
+  ),
+  createProduct: jest.fn((_req, res) =>
+    res.status(201).json({ handler: 'createProduct' }),
+  ),
   getProductById: mockGetProductById,
-  getProductWithDetails: jest.fn((_req, res) => res.status(200).json({ handler: 'getProductWithDetails' })),
-  getAllProductsWithDetails: jest.fn((_req, res) => res.status(200).json({ handler: 'getAllProductsWithDetails' })),
+  getProductWithDetails: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'getProductWithDetails' }),
+  ),
+  getAllProductsWithDetails: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'getAllProductsWithDetails' }),
+  ),
   getMyProducts: mockGetMyProducts,
   getMyLikedProducts: mockGetMyLikedProducts,
-  updateProduct: jest.fn((_req, res) => res.status(200).json({ handler: 'updateProduct' })),
-  deleteProduct: jest.fn((_req, res) => res.status(200).json({ handler: 'deleteProduct' })),
-  likeProduct: jest.fn((_req, res) => res.status(200).json({ handler: 'likeProduct' })),
+  updateProduct: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'updateProduct' }),
+  ),
+  deleteProduct: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'deleteProduct' }),
+  ),
+  unlistProduct: mockUnlistProduct,
+  relistProduct: mockRelistProduct,
+  likeProduct: jest.fn((_req, res) =>
+    res.status(200).json({ handler: 'likeProduct' }),
+  ),
 }));
 
 const productRoutes = require('../routes/productRoutes').default;
@@ -70,6 +92,24 @@ describe('product route ordering', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.handler).toBe('getMyLikedProducts');
     expect(mockGetMyLikedProducts).toHaveBeenCalledTimes(1);
+    expect(mockGetProductById).not.toHaveBeenCalled();
+  });
+
+  it('routes /:id/unlist to the unlist handler', async () => {
+    const res = await request(app).post('/api/products/product-1/unlist');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.handler).toBe('unlistProduct');
+    expect(mockUnlistProduct).toHaveBeenCalledTimes(1);
+    expect(mockGetProductById).not.toHaveBeenCalled();
+  });
+
+  it('routes /:id/relist to the relist handler', async () => {
+    const res = await request(app).post('/api/products/product-1/relist');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.handler).toBe('relistProduct');
+    expect(mockRelistProduct).toHaveBeenCalledTimes(1);
     expect(mockGetProductById).not.toHaveBeenCalled();
   });
 });
