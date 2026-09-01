@@ -4,7 +4,7 @@ import { UserRepository } from '../repositories/UserRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { AuthService } from '../services/AuthService';
-import { UserDto } from '../model/User';
+import { User, UserDto } from '../model/User';
 
 const userRepo = new UserRepository();
 
@@ -143,14 +143,16 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+        // The mobile app reads the legacy keys firstname/photoUrl/phone from the
+        // users doc, so mirror updates into both naming conventions.
         const updatedProfile = await userRepo.update(userProfile.id!, {
             ...(email !== undefined && { email }),
-            ...(displayName !== undefined && { displayName }),
-            ...(photoURL !== undefined && { photoURL }),
+            ...(displayName !== undefined && { displayName, firstname: displayName }),
+            ...(photoURL !== undefined && { photoURL, photoUrl: photoURL }),
             // TODO: Phone number updates in firestore, but not in Firebase Auth
-            ...(phoneNumber !== undefined && { phoneNumber }),
+            ...(phoneNumber !== undefined && { phoneNumber, phone: phoneNumber }),
             ...(address !== undefined && { address })
-        });
+        } as Partial<User>);
 
         ResponseHandler.success(res, updatedProfile, 'User profile updated successfully');
     } catch (err) {
