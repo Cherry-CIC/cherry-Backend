@@ -42,6 +42,9 @@ const router = Router();
  *           type: string
  *           format: uri
  *           description: The user's profile picture URL
+ *         phoneNumber:
+ *           type: string
+ *           description: The user's phone number
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -236,9 +239,12 @@ router.get('/profile', authMiddleware, getProfile);
  *               photoURL:
  *                 type: string
  *                 format: uri
+ *               phoneNumber:
+ *                 type: string
  *             example:
  *               displayName: "John Smith"
  *               photoURL: "https://example.com/new-photo.jpg"
+ *               phoneNumber: "+447700900000"
  *     responses:
  *       200:
  *         description: User profile updated successfully

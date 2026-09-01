@@ -4,6 +4,7 @@ import { UserRepository } from '../repositories/UserRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { AuthService } from '../services/AuthService';
+import { UserDto } from '../model/User';
 
 const userRepo = new UserRepository();
 
@@ -126,12 +127,13 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
     try {
         const user = (req as any).user;
-        const { displayName, photoURL } = req.body;
+        const { email, displayName, photoURL, phoneNumber, address } = req.body as UserDto;
 
-        // Update Firebase Auth user
+        // Update Firebase Auth user (only the fields it manages)
         await admin.auth().updateUser(user.uid, {
-            displayName,
-            photoURL
+            ...(email !== undefined && { email }),
+            ...(displayName !== undefined && { displayName }),
+            ...(photoURL !== undefined && { photoURL })
         });
 
         // Update user profile in Firestore
@@ -142,8 +144,12 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         }
 
         const updatedProfile = await userRepo.update(userProfile.id!, {
-            displayName,
-            photoURL
+            ...(email !== undefined && { email }),
+            ...(displayName !== undefined && { displayName }),
+            ...(photoURL !== undefined && { photoURL }),
+            // TODO: Phone number updates in firestore, but not in Firebase Auth
+            ...(phoneNumber !== undefined && { phoneNumber }),
+            ...(address !== undefined && { address })
         });
 
         ResponseHandler.success(res, updatedProfile, 'User profile updated successfully');
