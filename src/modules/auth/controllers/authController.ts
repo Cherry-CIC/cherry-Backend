@@ -127,11 +127,10 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
     try {
         const user = (req as any).user;
-        const { email, displayName, photoURL, phoneNumber, address } = req.body as UserDto;
+        const { displayName, photoURL, phoneNumber } = req.body as UserDto;
 
         // Update Firebase Auth user (only the fields it manages)
         await admin.auth().updateUser(user.uid, {
-            ...(email !== undefined && { email }),
             ...(displayName !== undefined && { displayName }),
             ...(photoURL !== undefined && { photoURL })
         });
@@ -146,12 +145,10 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         // The mobile app reads the legacy keys firstname/photoUrl/phone from the
         // users doc, so mirror updates into both naming conventions.
         const updatedProfile = await userRepo.update(userProfile.id!, {
-            ...(email !== undefined && { email }),
             ...(displayName !== undefined && { displayName, firstname: displayName }),
             ...(photoURL !== undefined && { photoURL, photoUrl: photoURL }),
             // TODO: Phone number updates in firestore, but not in Firebase Auth
-            ...(phoneNumber !== undefined && { phoneNumber, phone: phoneNumber }),
-            ...(address !== undefined && { address })
+            ...(phoneNumber !== undefined && { phoneNumber, phone: phoneNumber })
         } as Partial<User>);
 
         ResponseHandler.success(res, updatedProfile, 'User profile updated successfully');
