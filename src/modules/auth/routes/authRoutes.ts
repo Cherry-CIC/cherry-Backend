@@ -9,7 +9,9 @@ import {
 import {
     validateRegister,
     validateLogin,
+    updateProfileSchema,
 } from '../validators/authValidator';
+import { validateRequest } from '../../../shared/middleware/validateRequest';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
 const router = Router();
@@ -241,6 +243,8 @@ router.get('/profile', authMiddleware, getProfile);
  *                 format: uri
  *               phoneNumber:
  *                 type: string
+ *                 description: E.164 format, e.g. +447700900000
+ *                 pattern: '^\+[1-9]\d{1,14}$'
  *             example:
  *               displayName: "John Smith"
  *               photoURL: "https://example.com/new-photo.jpg"
@@ -264,7 +268,7 @@ router.get('/profile', authMiddleware, getProfile);
  *       404:
  *         description: User profile not found
  */
-router.put('/profile', authMiddleware, updateProfile);
+router.put('/profile', authMiddleware, validateRequest(updateProfileSchema), updateProfile);
 
 /**
  * @swagger
