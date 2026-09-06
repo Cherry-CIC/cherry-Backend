@@ -269,6 +269,25 @@ export class SendcloudService {
     }
   }
 
+  async downloadLabelPdf(labelUrl: string): Promise<Buffer> {
+    try {
+      const response = await this.client.get(labelUrl, {
+        responseType: 'arraybuffer',
+        headers: {
+          Accept: 'application/pdf',
+        },
+      });
+
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.message;
+      throw new Error(`Sendcloud API Error: ${errorMessage}`);
+    }
+  }
+
   async getTrackingInfo(trackingNumber: string): Promise<any> {
     try {
       const response = await this.client.get('/parcels', {

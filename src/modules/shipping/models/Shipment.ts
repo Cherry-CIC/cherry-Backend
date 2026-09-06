@@ -49,6 +49,7 @@ export interface SendcloudParcel {
     name: string;
   };
   label?: {
+    normal_printer?: string[];
     label_printer: string;
   };
 }

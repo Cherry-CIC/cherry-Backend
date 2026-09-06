@@ -114,4 +114,20 @@ describe('SendcloudService.getPickupPoints()', () => {
       'Sendcloud API Error (pickup points): Network timeout',
     );
   });
+
+  it('downloads a label PDF from an absolute Sendcloud label URL', async () => {
+    const pdf = Buffer.from('%PDF');
+    const labelUrl = 'https://panel.sendcloud.sc/labels/normal_printer/1';
+    mockGet.mockResolvedValue({ data: pdf });
+
+    const result = await service.downloadLabelPdf(labelUrl);
+
+    expect(result).toEqual(pdf);
+    expect(mockGet).toHaveBeenCalledWith(labelUrl, {
+      responseType: 'arraybuffer',
+      headers: {
+        Accept: 'application/pdf',
+      },
+    });
+  });
 });

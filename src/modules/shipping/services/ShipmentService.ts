@@ -1,21 +1,39 @@
 import { Order } from '../../order/model/Order';
 import { ShipmentRepository } from '../repositories/ShipmentRepository';
 import { SendcloudService } from './SendcloudService';
+import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
+
+const TEST_LABEL_SHIPMENT = {
+  id: 8,
+  name: 'Unstamped letter',
+};
 
 export class ShipmentService {
   constructor(
     private readonly shipmentRepository = new ShipmentRepository(),
-    private readonly sendcloudService = new SendcloudService()
+    private readonly sendcloudService = new SendcloudService(),
   ) {}
 
   async createShipmentForPaidOrder(order: Order): Promise<{
     shipment: any;
     sendcloudParcel: any;
   }> {
-    const existingShipment = await this.shipmentRepository.getShipmentByOrderId(order.id);
+    const existingShipment = await this.shipmentRepository.getShipmentByOrderId(
+      order.id,
+    );
     if (existingShipment) {
       return { shipment: existingShipment, sendcloudParcel: null };
     }
+
+    const labelMode = sendcloudConfig.labelMode;
+    const requestLabel = labelMode !== 'off';
+    const shipmentMethod =
+      labelMode === 'test'
+        ? TEST_LABEL_SHIPMENT
+        : {
+            id: Number(order.shippingOptionId),
+            name: order.shippingOptionName,
+          };
 
     const parcelData: any = {
       name: order.shipping.name,
@@ -28,10 +46,8 @@ export class ShipmentService {
       telephone: order.shipping.telephone,
       order_number: order.id,
       weight: (order.shippingWeight / 1000).toFixed(3),
-      request_label: false,
-      shipment: {
-        id: Number(order.shippingOptionId),
-      },
+      request_label: requestLabel,
+      shipment: shipmentMethod,
     };
 
     const derivedDescription = order.productName.trim().slice(0, 50);
@@ -47,7 +63,8 @@ export class ShipmentService {
 
     parcelData.to_service_point = Number(order.pickupPoint.id);
 
-    const sendcloudParcel = await this.sendcloudService.createParcel(parcelData);
+    const sendcloudParcel =
+      await this.sendcloudService.createParcel(parcelData);
 
     const shipment = await this.shipmentRepository.createShipment({
       orderId: order.id,
@@ -61,7 +78,10 @@ export class ShipmentService {
       trackingUrl: sendcloudParcel.tracking_url ?? null,
       carrier: sendcloudParcel.carrier?.name ?? order.shippingCarrier ?? null,
       status: 'announced',
-      labelUrl: sendcloudParcel.label?.label_printer ?? null,
+      labelUrl:
+        sendcloudParcel.label?.normal_printer?.[0] ??
+        sendcloudParcel.label?.label_printer ??
+        null,
       parcel: parcelData,
       createdAt: new Date(),
       updatedAt: new Date(),

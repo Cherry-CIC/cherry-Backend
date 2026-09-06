@@ -3,8 +3,11 @@ const mockGetPickupPoints = jest.fn();
 const mockGetShipmentBySendcloudId = jest.fn();
 const mockUpdateShipment = jest.fn();
 const mockUpdateOrder = jest.fn();
+const mockGetOrderById = jest.fn();
+const mockGetUserById = jest.fn();
 const mockGetProductById = jest.fn();
 const mockGetPostageSizeById = jest.fn();
+const mockSendBuyerDeliveredEmail = jest.fn();
 
 jest.mock('../services/CheckoutShippingService', () => ({
   CheckoutShippingService: jest.fn().mockImplementation(() => ({
@@ -25,8 +28,20 @@ jest.mock('../repositories/ShipmentRepository', () => ({
 jest.mock('../../order/repositories/OrderRepository', () => ({
   OrderRepository: jest.fn().mockImplementation(() => ({
     updateOrder: mockUpdateOrder,
-    getOrderById: jest.fn(),
+    getOrderById: mockGetOrderById,
     getAllOrders: jest.fn(),
+  })),
+}));
+
+jest.mock('../../auth/repositories/UserRepository', () => ({
+  UserRepository: jest.fn().mockImplementation(() => ({
+    getById: mockGetUserById,
+  })),
+}));
+
+jest.mock('../../notifications/services/EmailService', () => ({
+  EmailService: jest.fn().mockImplementation(() => ({
+    sendBuyerDeliveredEmail: mockSendBuyerDeliveredEmail,
   })),
 }));
 
@@ -65,6 +80,16 @@ describe('shippingController', () => {
     mockGetPostageSizeById.mockResolvedValue({
       id: 'postage-size-1',
       weight: 2000,
+    });
+    mockGetOrderById.mockResolvedValue(null);
+    mockGetUserById.mockResolvedValue({
+      id: 'user-1',
+      email: 'buyer@example.com',
+      displayName: 'Buyer Name',
+    });
+    mockSendBuyerDeliveredEmail.mockResolvedValue({
+      sent: true,
+      skipped: false,
     });
   });
 
@@ -108,7 +133,7 @@ describe('shippingController', () => {
             }),
           ],
         },
-      })
+      }),
     );
   });
 
@@ -145,6 +170,12 @@ describe('shippingController', () => {
       orderId: 'order-1',
       status: 'announced',
     });
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'buyer@example.com',
+      productName: 'Winter Coat',
+    });
 
     const req: any = {
       body: {
@@ -174,6 +205,48 @@ describe('shippingController', () => {
       shipmentId: 'shipment-1',
       status: 'delivered',
     });
+    expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith({
+      to: 'buyer@example.com',
+      buyerName: 'Buyer Name',
+      productName: 'Winter Coat',
+      orderId: 'order-1',
+    });
+    expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
+      buyerDeliveryEmailSentAt: expect.any(Date),
+    });
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('does not resend delivered email when it was already sent', async () => {
+    mockGetShipmentBySendcloudId.mockResolvedValue({
+      id: 'shipment-1',
+      orderId: 'order-1',
+      status: 'announced',
+    });
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'buyer@example.com',
+      productName: 'Winter Coat',
+      buyerDeliveryEmailSentAt: new Date(),
+    });
+
+    const req: any = {
+      body: {
+        action: 'parcel_status_changed',
+        parcel: {
+          id: 123,
+          status: {
+            message: 'Delivered',
+          },
+        },
+      },
+    };
+    const res = createResponse();
+
+    await handleSendcloudWebhook(req, res);
+
+    expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });
 });

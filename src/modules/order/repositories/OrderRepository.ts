@@ -194,6 +194,11 @@ export class OrderRepository {
       ...data,
       createdAt: toDate(data.createdAt) ?? new Date(data.createdAt),
       buyerConfirmedReceivedAt: toDate(data.buyerConfirmedReceivedAt),
+      sellerSoldEmailSentAt: toDate(data.sellerSoldEmailSentAt),
+      buyerShipmentStartedEmailSentAt: toDate(
+        data.buyerShipmentStartedEmailSentAt,
+      ),
+      buyerDeliveryEmailSentAt: toDate(data.buyerDeliveryEmailSentAt),
       buyerDisputedAt: toDate(data.buyerDisputedAt),
     } as Order;
   }

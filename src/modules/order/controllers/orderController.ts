@@ -11,6 +11,8 @@ import { ShipmentRepository } from '../../shipping/repositories/ShipmentReposito
 import { Shipment } from '../../shipping/models/Shipment';
 import { Order, OrderDisputeReason } from '../model/Order';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
+import { EmailService } from '../../notifications/services/EmailService';
+import { NotificationService } from '../../notifications/services/NotificationService';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
 
@@ -370,6 +372,54 @@ export const createOrder = async (
         shipmentStatus: shipment.status,
         status: 'shipment_created',
       });
+
+      const emailService = new EmailService();
+      const notificationService = new NotificationService(emailService);
+      const emailUpdates: Partial<Order> = {};
+
+      try {
+        const seller = await userRepo.getById(product.userId);
+        if (seller) {
+          const result = await notificationService.sendSellerLabelEmail(
+            savedOrder,
+            seller,
+            shipment,
+          );
+
+          if (result.sent) {
+            emailUpdates.sellerSoldEmailSentAt = new Date();
+          }
+        } else {
+          console.warn(`Seller profile not found for product ${product.id}`);
+        }
+      } catch (err) {
+        console.error('Failed to send seller item sold email:', err);
+      }
+
+      try {
+        const result = await emailService.sendBuyerShipmentStartedEmail({
+          to: email,
+          buyerName: dbUser.displayName,
+          productName: savedOrder.productName,
+          orderId: savedOrder.id,
+          trackingNumber: shipment.trackingNumber,
+          trackingUrl: shipment.trackingUrl,
+        });
+
+        if (result.sent) {
+          emailUpdates.buyerShipmentStartedEmailSentAt = new Date();
+        }
+      } catch (err) {
+        console.error('Failed to send buyer shipment started email:', err);
+      }
+
+      if (Object.keys(emailUpdates).length > 0) {
+        try {
+          await orderRepo.updateOrder(savedOrder.id, emailUpdates);
+        } catch (err) {
+          console.error('Failed to update order email timestamps:', err);
+        }
+      }
 
       ResponseHandler.success(
         res,

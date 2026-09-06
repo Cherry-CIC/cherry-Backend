@@ -70,6 +70,9 @@ export interface Order {
   shipmentId?: string;
   buyerConfirmedReceived?: boolean;
   buyerConfirmedReceivedAt?: Date;
+  sellerSoldEmailSentAt?: Date;
+  buyerShipmentStartedEmailSentAt?: Date;
+  buyerDeliveryEmailSentAt?: Date;
   buyerDisputeReason?: OrderDisputeReason;
   buyerDisputeStatus?: OrderDisputeStatus;
   buyerDisputeMessage?: string;

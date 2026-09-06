@@ -9,6 +9,8 @@ const mockCreateShipmentForPaidOrder = jest.fn();
 const mockGetShipmentByOrderId = jest.fn();
 const mockGetProductById = jest.fn();
 const mockGetPostageSizeById = jest.fn();
+const mockSendSellerLabelEmail = jest.fn();
+const mockSendBuyerShipmentStartedEmail = jest.fn();
 
 jest.mock('../../auth/repositories/UserRepository', () => ({
   UserRepository: jest.fn().mockImplementation(() => ({
@@ -48,6 +50,18 @@ jest.mock('../../shipping/services/ShipmentService', () => ({
 jest.mock('../../shipping/repositories/ShipmentRepository', () => ({
   ShipmentRepository: jest.fn().mockImplementation(() => ({
     getShipmentByOrderId: mockGetShipmentByOrderId,
+  })),
+}));
+
+jest.mock('../../notifications/services/EmailService', () => ({
+  EmailService: jest.fn().mockImplementation(() => ({
+    sendBuyerShipmentStartedEmail: mockSendBuyerShipmentStartedEmail,
+  })),
+}));
+
+jest.mock('../../notifications/services/NotificationService', () => ({
+  NotificationService: jest.fn().mockImplementation(() => ({
+    sendSellerLabelEmail: mockSendSellerLabelEmail,
   })),
 }));
 
@@ -106,10 +120,20 @@ describe('orderController.createOrder', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetUserById.mockResolvedValue({
-      id: 'user-1',
-      email: 'user@example.com',
-      displayName: 'Jane Doe',
+    mockGetUserById.mockImplementation((userId: string) => {
+      if (userId === 'seller-1') {
+        return Promise.resolve({
+          id: 'seller-1',
+          email: 'seller@example.com',
+          displayName: 'Seller Name',
+        });
+      }
+
+      return Promise.resolve({
+        id: 'user-1',
+        email: 'user@example.com',
+        displayName: 'Jane Doe',
+      });
     });
     mockVerifySucceededPaymentIntentForUser.mockResolvedValue({
       paymentIntentId: 'pi_123',
@@ -130,6 +154,7 @@ describe('orderController.createOrder', () => {
     });
     mockGetProductById.mockResolvedValue({
       id: 'product-1',
+      userId: 'seller-1',
       name: 'Winter Coat',
       postageSize: 'postage-size-1',
     });
@@ -147,6 +172,14 @@ describe('orderController.createOrder', () => {
         price: '3.99',
       },
     ]);
+    mockSendSellerLabelEmail.mockResolvedValue({
+      sent: true,
+      skipped: false,
+    });
+    mockSendBuyerShipmentStartedEmail.mockResolvedValue({
+      sent: true,
+      skipped: false,
+    });
   });
 
   it('creates a paid order and shipment', async () => {
@@ -155,6 +188,7 @@ describe('orderController.createOrder', () => {
       userId: 'user-1',
       email: 'user@example.com',
       ...payload,
+      productName: 'Winter Coat',
       paymentStatus: 'succeeded',
       shipmentStatus: 'pending',
       status: 'paid',
@@ -164,6 +198,10 @@ describe('orderController.createOrder', () => {
       shipment: {
         id: 'shipment-1',
         status: 'announced',
+        labelUrl: 'https://labels.example/1.pdf',
+        trackingNumber: 'TRACK123',
+        trackingUrl: 'https://track.example/123',
+        carrier: 'inpost_gb',
       },
       sendcloudParcel: {
         id: 99,
@@ -201,6 +239,75 @@ describe('orderController.createOrder', () => {
       shipmentStatus: 'announced',
       status: 'shipment_created',
     });
+    expect(mockGetUserById).toHaveBeenCalledWith('seller-1');
+    expect(mockSendSellerLabelEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'order-1',
+        productName: 'Winter Coat',
+      }),
+      expect.objectContaining({
+        id: 'seller-1',
+        email: 'seller@example.com',
+      }),
+      expect.objectContaining({
+        id: 'shipment-1',
+        labelUrl: 'https://labels.example/1.pdf',
+      }),
+    );
+    expect(mockSendBuyerShipmentStartedEmail).toHaveBeenCalledWith({
+      to: 'user@example.com',
+      buyerName: 'Jane Doe',
+      productName: 'Winter Coat',
+      orderId: 'order-1',
+      trackingNumber: 'TRACK123',
+      trackingUrl: 'https://track.example/123',
+    });
+    expect(mockUpdateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        sellerSoldEmailSentAt: expect.any(Date),
+        buyerShipmentStartedEmailSentAt: expect.any(Date),
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('does not fail order creation when email sending fails', async () => {
+    mockCreatePaidOrderAndDecrementInventory.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'user@example.com',
+      ...payload,
+      productName: 'Winter Coat',
+      paymentStatus: 'succeeded',
+      shipmentStatus: 'pending',
+      status: 'paid',
+      createdAt: new Date(),
+    });
+    mockCreateShipmentForPaidOrder.mockResolvedValue({
+      shipment: {
+        id: 'shipment-1',
+        status: 'announced',
+      },
+      sendcloudParcel: {
+        id: 99,
+      },
+    });
+    mockSendSellerLabelEmail.mockRejectedValue(new Error('Resend failed'));
+    mockSendBuyerShipmentStartedEmail.mockRejectedValue(
+      new Error('Resend failed'),
+    );
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payload,
+    };
+    const res = createResponse();
+
+    await createOrder(req, res);
+
     expect(res.status).toHaveBeenCalledWith(200);
   });
 

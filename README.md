@@ -69,12 +69,18 @@ Important vars for local work:
 - `SENDCLOUD_MODE`
 - `SENDCLOUD_PUBLIC_KEY`
 - `SENDCLOUD_SECRET_KEY`
+- `SENDCLOUD_LABEL_MODE`
+- `EMAIL_MODE`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
 - `FIREBASE_PROJECT_ID`
 
 Recommended defaults:
 
 - Keep Stripe in test mode locally
 - Set `SENDCLOUD_MODE=mock` outside production
+- Use `SENDCLOUD_LABEL_MODE=test` in development and `SENDCLOUD_LABEL_MODE=live` in production when real labels should be generated
+- Keep `EMAIL_MODE=off` unless you are intentionally sending email through Resend
 - Only use live Sendcloud credentials when you are deliberately testing the live shipping integration
 
 See `.env.example` for the full template.
