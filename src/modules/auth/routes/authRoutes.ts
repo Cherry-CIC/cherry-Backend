@@ -9,7 +9,9 @@ import {
 import {
     validateRegister,
     validateLogin,
+    updateProfileSchema,
 } from '../validators/authValidator';
+import { validateRequest } from '../../../shared/middleware/validateRequest';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
 const router = Router();
@@ -42,6 +44,9 @@ const router = Router();
  *           type: string
  *           format: uri
  *           description: The user's profile picture URL
+ *         phoneNumber:
+ *           type: string
+ *           description: The user's phone number
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -236,9 +241,14 @@ router.get('/profile', authMiddleware, getProfile);
  *               photoURL:
  *                 type: string
  *                 format: uri
+ *               phoneNumber:
+ *                 type: string
+ *                 description: E.164 format, e.g. +447700900000
+ *                 pattern: '^\+[1-9]\d{1,14}$'
  *             example:
  *               displayName: "John Smith"
  *               photoURL: "https://example.com/new-photo.jpg"
+ *               phoneNumber: "+447700900000"
  *     responses:
  *       200:
  *         description: User profile updated successfully
@@ -258,7 +268,7 @@ router.get('/profile', authMiddleware, getProfile);
  *       404:
  *         description: User profile not found
  */
-router.put('/profile', authMiddleware, updateProfile);
+router.put('/profile', authMiddleware, validateRequest(updateProfileSchema), updateProfile);
 
 /**
  * @swagger

@@ -4,6 +4,7 @@ import { UserRepository } from '../repositories/UserRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { AuthService } from '../services/AuthService';
+import { User, UserDto } from '../model/User';
 
 const userRepo = new UserRepository();
 
@@ -126,29 +127,43 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
     try {
         const user = (req as any).user;
-        const { displayName, photoURL } = req.body;
+        const { displayName, photoURL, phoneNumber } = req.body as Partial<UserDto>;
 
-        // Update Firebase Auth user
-        await admin.auth().updateUser(user.uid, {
-            displayName,
-            photoURL
-        });
-
-        // Update user profile in Firestore
         const userProfile = await userRepo.getById(user.uid);
         if (!userProfile) {
             ResponseHandler.notFound(res, 'User profile not found', 'User exists in Firebase Auth but not in database');
             return;
         }
 
-        const updatedProfile = await userRepo.update(userProfile.id!, {
-            displayName,
-            photoURL
+        await admin.auth().updateUser(user.uid, {
+            ...(displayName !== undefined && { displayName }),
+            ...(photoURL !== undefined && { photoURL }),
+            ...(phoneNumber !== undefined && { phoneNumber })
         });
+
+        // The mobile app reads the legacy keys firstname/photoUrl/phone from the
+        // users doc, so mirror updates into both naming conventions.
+        const updatedProfile = await userRepo.update(userProfile.id!, {
+            ...(displayName !== undefined && { displayName, firstname: displayName }),
+            ...(photoURL !== undefined && { photoURL, photoUrl: photoURL }),
+            ...(phoneNumber !== undefined && { phoneNumber, phone: phoneNumber })
+        } as Partial<User>);
 
         ResponseHandler.success(res, updatedProfile, 'User profile updated successfully');
     } catch (err) {
-        ResponseHandler.internalServerError(res, 'Failed to update user profile', err instanceof Error ? err.message : 'Unknown error');
+        const code = (err as { code?: string })?.code;
+        const message = err instanceof Error ? err.message : 'Unknown error';
+
+        if (code === 'auth/phone-number-already-exists') {
+            ResponseHandler.conflict(res, 'Phone number already in use', message);
+            return;
+        }
+        if (code === 'auth/invalid-phone-number' || code === 'auth/invalid-display-name' || code === 'auth/invalid-photo-url') {
+            ResponseHandler.badRequest(res, 'Invalid profile details', message);
+            return;
+        }
+
+        ResponseHandler.internalServerError(res, 'Failed to update user profile', message);
     }
 };
 
