@@ -13,17 +13,15 @@ import './shared/config/firebaseConfig';
 
 const app = express();
 app.post(
-  '/api/payment/webhook',
-  express.raw({ type: 'application/json' }),
-  stripeWebhook,
+    '/api/payment/webhook',
+    express.raw({ type: 'application/json' }),
+    stripeWebhook,
 );
-app.use(
-  express.json({
+app.use(express.json({
     verify: (req, res, buffer) => {
-      (req as any).rawBody = Buffer.from(buffer);
+        (req as any).rawBody = Buffer.from(buffer);
     },
-  }),
-);
+}));
 
 import productRoutes from './modules/products/routes/productRoutes';
 import categoryRoutes from './modules/categories/routes/categoryRoutes';
@@ -53,11 +51,11 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // 404 handler
 app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-    path: req.originalUrl,
-  });
+    res.status(404).json({
+        success: false,
+        message: 'Route not found',
+        path: req.originalUrl
+    });
 });
 
 export default app;

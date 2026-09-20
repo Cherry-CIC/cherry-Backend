@@ -1,142 +1,77 @@
 # Public seller profiles
 
-`GET /api/users/{userId}/public-profile?limit=20&cursor=...` requires the existing
-Firebase bearer ID-token middleware. The path is a Firebase Authentication UID,
-not a generated Firestore document ID. No private account fields are returned.
+`GET /api/users/{userId}/public-profile?limit=20&cursor=...` requires a Firebase
+bearer ID token. `userId` is a Firebase UID, not an internal document ID.
+The exact contract, example, validation limits and error schemas are maintained
+in [Swagger JSDoc](../../src/modules/users/routes/userRoutes.ts).
 
-This change is independent of UGC policy and Community Rules work. It does not
-change registration, account settings, product creation or `my-products`.
+Responses contain exactly `{ success, data: { user, products }, meta }`. The user
+appears even on empty pages. Limit defaults to 20 (range 1–50); `nextCursor` is
+always present and is null when `hasMore` is false. Responses use
+`Cache-Control: private, no-store`. Unknown query fields cannot override policy.
+Unavailable accounts return generic 404; operational failures remain retryable 503. Logs and authentication errors do not expose raw Firebase exceptions.
+There is no existing application blocking/rate-limit system; deployment controls
+may supply 403/429. This change adds neither a blocking system nor IAM permissions.
 
-## Contract
+## Identity and privacy decisions
 
-A successful response contains exactly `success`, `data` and `meta`:
+`PublicUserRepository.getByFirebaseUid` owns profile resolution:
 
-```json
-{
-  "success": true,
-  "data": {
-    "user": {
-      "id": "seller-firebase-uid",
-      "username": "Alex",
-      "profileImageUrl": null
-    },
-    "products": []
-  },
-  "meta": { "limit": 20, "nextCursor": null, "hasMore": false }
-}
-```
+1. Require an existing, enabled Firebase Authentication account. Only missing or
+   disabled accounts become unavailable; operational errors propagate.
+2. Read selected fields from `users/{uid}` and records whose stored `id` equals
+   the UID. Exclude the canonical document from legacy candidates. Contradictory
+   `id` or `firebaseUid` fields make the profile unavailable.
+3. Prefer trimmed canonical `username`, then an unambiguous legacy `username`,
+   otherwise `User`. Avatar precedence is canonical `profileImageUrl`, `photoURL`,
+   `photoUrl`, then the same legacy aliases. Invalid aliases fall through; require
+   HTTP(S), a host and no embedded credentials, otherwise return null.
+4. Conflicting non-empty legacy usernames or valid avatars make the profile
+   unavailable, even with canonical values. Consistent duplicates and absent
+   values may combine. More than 20 linked records requires review, not arbitrary
+   selection.
 
-The user appears on every page, including empty pages. Limit is an integer from
-1 to 50, default 20. The successful response has `Cache-Control: private, no-store`.
-Unknown query fields are stripped by the established validation middleware;
-clients cannot override owner, status or visibility. Invalid UIDs and cursors
-return 400. Firebase UID validation rejects controls before trimming, separators,
-`.` and `..`, `deleted_user`, empty values and identifiers over 128 characters.
+The user allowlist is **only `id`, `username`, `profileImageUrl`**. Flutter collects
+Username and First Name separately; social login can put a provider's full name
+in `firstname`. Neither `firstname`, `displayName` nor email has established public
+provenance, so none is used as a fallback. Authentication records never leave the
+repository, and private nested records never enter the response DTO.
 
-Missing or invalid authentication returns 401. Unavailable profiles all return
-404 with `This profile is unavailable` and no user or listing data. Database,
-Authentication lookup, missing encryption configuration and scan-budget failures
-return a generic retryable 503. Raw errors are neither returned nor logged by
-this endpoint. The shared authentication middleware also uses a fixed error
-summary instead of exposing Firebase exceptions. There is no application-level
-blocking or rate-limit system at the inspected revision. Existing deployment
-access/rate controls, if configured, may return 403 or 429; this change does not
-claim to introduce either system or change IAM permissions.
+## Listing and pagination decisions
 
-## Public identity and duplicate records
+Force the owner and `status == active`, then recheck each record before mapping.
+Require positive integer stock and valid required Flutter fields. Missing/unknown
+status is excluded. Legacy listings lack publication fields; absent fields retain
+the active-and-in-stock rule. Explicit fields are handled defensively:
 
-`PublicUserRepository.getByFirebaseUid` is the single profile-resolution boundary:
+- `visibility`: only `public`; `moderationStatus`: only `approved`;
+  `publicationStatus`: only `published`.
+- Any `moderation` or `publication` object is excluded pending a reviewed schema.
+- `deleted`, `isDeleted`, `removed`, `isRemoved`, `hidden`, `isHidden`,
+  `moderationHidden`: absent or false only.
+- `deletedAt`, `removedAt`, `hiddenAt`: absent or null only.
 
-1. Firebase Admin Authentication must report an existing, enabled account.
-   Authentication records never leave the repository. Only missing/disabled
-   account errors become unavailable; operational failures propagate.
-2. Read selected fields from `users/{uid}` and query `users` where stored `id`
-   equals the UID. The canonical record is excluded from the legacy candidates.
-3. Reject contradictory stored `id` or `firebaseUid` fields. Never use an internal
-   generated document ID as an account identity.
-4. Prefer a non-empty, trimmed canonical `username`, then an unambiguous linked
-   legacy `username`. Otherwise use the neutral display label `User`.
-5. Avatar precedence is canonical `profileImageUrl`, `photoURL`, `photoUrl`, then
-   the same aliases on linked legacy records. Invalid aliases fall through.
-   Only HTTP(S) URLs with a host and no embedded credentials are accepted;
-   otherwise return null.
-6. Distinct non-empty legacy usernames or distinct valid legacy avatars make the
-   profile unavailable, even when a canonical value exists. Consistent duplicate
-   values and missing values can be combined. More than 20 linked records also
-   makes the profile unavailable, rather than selecting an arbitrary subset.
-   This bounds reads and deliberately requires review of damaged records.
+No publication fields are written or migrated. Future moderation changes must
+update the predicate and cursor policy version. Only permitted products receive
+`visibility: public`. The product DTO includes required detail/checkout fields,
+calculated `securityFee` and optional category/charity IDs, never nested relations.
+Stored price/donation are preserved; fees use existing GBP/pence checkout helpers.
+Missing description/likes default to `''`/0. Invalid required fields or timestamps
+are excluded, invalid image URLs removed, and missing `createdAt` is excluded by
+Firestore ordering. Stored identifiers are never normalised into other IDs.
+Damaged records require separate review; monetary values are never invented.
 
-Only `id`, `username`, `profileImageUrl` can appear in the user DTO. Email, private
-names, addresses, provider identities, settings and nested records are excluded.
+Order by `createdAt` descending, then document ID descending, preserving timestamp
+nanoseconds. Scan chunks of 100 until `limit + 1` eligible records or exhaustion.
+Only the last returned public record can anchor the next cursor; excluded records
+cannot produce misleading empty pages or `hasMore`. Exhausting the 5,000-record
+budget returns 503, not a partial page. Persistent exhaustion requires data review.
 
-### Why private names are not fallbacks
+AES-256-GCM cursors bind seller, viewer and policy, expire after 24 hours and are
+invalidated by key rotation/policy changes. Inventory is not a frozen snapshot:
+sold/hidden records disappear; new records before the cursor appear on refresh.
 
-The Flutter registration form collects Username and First Name separately.
-Social sign-in can copy a provider's full display name into `firstname`. Previous
-seller displays used `users/{uid}.username`, then `User`; no inspected code
-establishes `displayName` or `firstname` as explicitly public. Therefore this
-endpoint deliberately does not expose either field, even for legacy accounts.
-Their existence was inspected, not treated as consent to publish them. A seller
-without a chosen public username remains available under `User`.
-
-## Listings and pagination
-
-`PublicProductRepository` queries products by forced owner and `status == active`,
-ordered by `createdAt` descending and document ID descending. Every record is
-checked again before mapping. Positive integer stock is required. A missing or
-unknown status is excluded, rather than inferred as active.
-
-Existing listings have no persisted visibility/moderation schema. The explicit
-legacy rule is that absent publication fields retain active-and-positive-stock
-eligibility. Defensive handling of fields already present in a document is:
-
-- `visibility` must be `public` when present.
-- `moderationStatus` must be `approved` when present.
-- `publicationStatus` must be `published` when present.
-- Unknown `moderation` or `publication` objects are excluded pending a reviewed
-  schema, rather than interpreted as approval.
-- `deleted`, `isDeleted`, `removed`, `isRemoved`, `hidden`, `isHidden` and
-  `moderationHidden` must be absent or false.
-- `deletedAt`, `removedAt` and `hiddenAt` must be absent or null.
-
-These fields are read defensively, not introduced or persisted by this change.
-Future moderation changes must update the predicate and cursor policy version
-before deployment. Missing fields do not hide all valid legacy listings.
-
-Only eligible products receive the literal `visibility: public`. The product DTO
-contains the fields required by Flutter listing details and checkout, calculated
-`securityFee`, and optional category/charity IDs. It includes no nested category,
-charity, order or shipment records. Stored `donation` and `price` are preserved;
-security fees use the existing GBP-to-pence and checkout calculation helpers.
-Missing description becomes an empty string and missing likes becomes zero,
-matching creation defaults. Missing or invalid money is never fabricated.
-Malformed required product fields or non-Timestamp `createdAt` are excluded;
-invalid image URLs are removed. Listing records missing `createdAt` do not enter
-the ordered Firestore query. These damaged records need separate data review.
-
-The repository scans chunks of 100 until it finds `limit + 1` eligible records or
-the source is exhausted. Excluded records cannot cause intermediate empty pages
-or determine `hasMore`. The next position uses the last returned public record,
-never an excluded record. A 5,000-record scan budget returns 503 on exhaustion
-instead of a misleading partial page. It bounds per-request reads; a persistently
-exhausted seller requires data review rather than repeated retries alone.
-
-Cursors use AES-256-GCM authenticated encryption. Seller UID, viewer UID and the
-versioned public policy are authenticated scope. Timestamp seconds and nanoseconds
-are preserved; document ID breaks ties. Cursors expire after 24 hours and are
-invalidated by key rotation or policy changes. They contain no private records
-and cannot be modified or reused for a different seller or viewer. As with normal
-Firestore pagination, changing inventory between requests is not a frozen
-snapshot: sold/hidden listings are excluded on the next request, and new listings
-before the current position appear after refresh.
-
-## Local verification
-
-Use fictional accounts and the local standard-edition emulator. No real user
-records are queried or modified by tests. The smoke script refuses to run unless
-the project is `demo-cherry-profiles` and both emulator hosts are numeric IPv4
-loopback addresses. It sets inert service configuration and cleans up only its
-uniquely prefixed fixture accounts and documents.
+## Verification
 
 ```bash
 npm install
@@ -147,112 +82,71 @@ FIREBASE_PROJECT_ID=demo-cherry-profiles npx -y firebase-tools@latest emulators:
   --only auth,firestore 'node scripts/test-public-profiles-emulator.js'
 ```
 
-The current Firebase CLI requires Java 21 or later. Point `JAVA_HOME` and `PATH`
-to an existing supported installation when necessary. Emulator rules deny client
-access; Admin SDK tests exercise the mandatory server filtering. These local
-rules are not referenced by the deployment configuration.
+Use Java 21+ and fictional accounts. The script requires the exact demo project
+and numeric IPv4 loopback emulator hosts, sets inert service configuration and
+cleans up only uniquely prefixed fixtures. Local rules deny client access and are
+not part of deployment configuration. Admin SDK checks enforce server filtering.
+[The emulator does not enforce composite indexes](https://firebase.google.com/docs/emulator-suite/connect_firestore#how_the_cloud_firestore_emulator_differs_from_production).
 
-The smoke script exercises the actual app, bearer verification, Firestore query,
-precise pagination, scan-through behaviour, unavailable accounts, network-body
-privacy checks and served Swagger. The emulator does not enforce composite index
-requirements, so staging still must verify the deployed index is ready.
-See [Firebase emulator limitations](https://firebase.google.com/docs/emulator-suite/connect_firestore#how_the_cloud_firestore_emulator_differs_from_production).
+Recorded checks: build, 20 backend suites/249 tests, strict Swagger generation,
+24 emulator HTTP responses/714 assertions, and 40 existing Flutter parser,
+view-model, widget/navigation tests passed. The temporary empty Flutter `.env`
+asset was removed; no Flutter source changed. New files pass Prettier; existing
+shared files retain their original formatting to minimise review churn.
+Repository lint remains blocked by the existing ESLint 9/legacy-config mismatch
+and missing `@typescript-eslint/parser`; repository-wide formatting has existing
+drift. No unrelated tooling cleanup is included.
 
-The repository's existing `npm run lint` is blocked by ESLint 9 expecting a flat
-configuration while only `.eslintrc.json` exists. Legacy-config mode also fails
-because its declared `@typescript-eslint/parser` dependency is absent. The full
-format check also finds existing formatting drift. These baseline tooling issues
-are separate from this API change; changed files are checked with Prettier.
+## Deployment and release gate
 
-## Deployment runbook and release gate
+Started from `main` at `acf818eaa05c86e3356f1ba06440d967e52bae74`. Live Swagger had
+no equivalent endpoint on 20 September 2026, but does not establish the deployed
+Cloud Run revision. Remote database edition remains unverified. Cloud deployment,
+index readiness, deployed Swagger and the actual device journey are **pending**;
+local tests do not establish those outcomes.
 
-Do not release [Flutter PR #511](https://github.com/Cherry-CIC/MVP/pull/511) until
-an approved backend environment passes the following steps. Cloud Run's deployed
-revision must be established independently; Swagger does not identify its source
-commit. The implementation started from `main` at
-`acf818eaa05c86e3356f1ba06440d967e52bae74`; live Swagger had no equivalent endpoint
-when inspected on 20 September 2026.
-
-1. Confirm the approved non-production project, native Firestore database,
-   Cloud Run service/region and test accounts. Refresh authorised cloud credentials
-   if needed. Remote database edition has not been verified from this workstation.
-2. Set `PUBLIC_PROFILE_CURSOR_KEY` to 32 cryptographically random bytes encoded as
-   canonical base64, supplied through the deployment's secret mechanism. Use one
-   stable value across replicas/revisions. Do not commit a key. Rotation invalidates
-   existing cursors; clients should reload the first page. No insecure fallback
-   key or additional service-account permissions are used.
-3. Review `firestore.indexes.json`: products collection, `userId ASC`, `status ASC`,
-   `createdAt DESC`, document ID `DESC`. This repository previously had no tracked
-   index configuration. First compare against the project's existing index
-   inventory and preserve all unrelated indexes. Merge any existing definitions
-   into the normal deployment inventory. Never use `--force` to delete indexes.
-   With the reviewed inventory, deploy indexes only:
+1. Confirm the approved non-production project/database, Cloud Run service/region
+   and test accounts; refresh cloud credentials. No deployment workflow is
+   committed, so do not guess a production target.
+2. Supply `PUBLIC_PROFILE_CURSOR_KEY`: 32 random bytes in canonical base64, via the
+   deployment secret mechanism, consistent across replicas. Never commit the key.
+   Rotation invalidates cursors; clients reload page one. There is no fallback key.
+3. Review the committed products index: `userId ASC`, `status ASC`, `createdAt DESC`,
+   document ID `DESC`. This is the first tracked index configuration: reconcile
+   it with the remote inventory and preserve unrelated indexes. Never use
+   `--force` to delete indexes. Deploy the reviewed inventory only, then wait for
+   readiness; do not deploy or relax client rules:
 
    ```bash
    npx -y firebase-tools@latest deploy --only firestore:indexes --project APPROVED_PROJECT_ID
    ```
 
-   Wait for the index to become ready. Do not deploy or relax client security rules.
-
-4. Build/deploy this branch's container through the approved Cloud Run workflow
-   to non-production first. Keep Stripe sandbox, Sendcloud mock and email off for
-   test environments. No established deployment workflow is committed here, so
-   do not guess a production service or deploy against real records by default.
-5. Use approved test accounts for sellers with active listings, no listings,
-   unlisted/sold/zero-stock listings, missing/deleted sellers and several pages.
-   Inspect actual response bodies against the strict user and product allowlists.
-   Check 401, generic 404, cursor rejection and retryable failures.
-6. Verify the deployed `/api-docs/` includes the exact public-profile route and
-   `PublicUser`, `PublicProfileProduct`, pagination and response schemas.
-7. Coordinate the production rollout before Flutter PR #511. Recheck the deployed
-   [Swagger](https://cherry-backend-401854471349.europe-west2.run.app/api-docs/) and
-   record the backend image/revision and index readiness.
-8. On Flutter, open another seller's listing, check chosen username/avatar, open
-   their profile, open a listing and navigate back to the correct profile and
-   original listing. The app's emulator configuration can also support a separate
-   local UI check; backend smoke checks do not claim to complete that UI journey.
-
-Cloud deployment, remote index readiness and the Flutter device journey remain
-release gates until their evidence is recorded. A successful local emulator run
-is not evidence of production deployment.
+4. Deploy the branch container to non-production through the approved workflow.
+   Keep Stripe sandbox, Sendcloud mock and email off. Check approved sellers with
+   active/no/unlisted/sold/zero-stock listings, missing/deleted accounts and multiple
+   pages. Inspect network bodies for private fields and verify auth/cursor/error
+   handling. Verify `/api-docs/` exposes the exact route and public schemas.
+5. Coordinate backend production rollout before [Flutter PR #511](https://github.com/Cherry-CIC/MVP/pull/511).
+   Record image/revision and index readiness, and verify
+   [deployed Swagger](https://cherry-backend-401854471349.europe-west2.run.app/api-docs/).
+   On a device, open another seller's listing, check username/avatar, open their
+   profile, open a listing and navigate back to the correct profile/original listing.
 
 ## Reviewed migration plan
 
-No migration is performed by this endpoint. The eventual target is one canonical
-profile record per Firebase UID:
+No migration, registration, `my-products`, UGC or Community Rules changes are
+included. The eventual target is one canonical profile record per Firebase UID:
 
-1. In an approved environment, inventory canonical and stored-UID-linked records,
-   identify contradictions, missing usernames, duplicate public values and orphan
-   Authentication accounts. Keep the inventory private; do not log profile data.
-2. Back up the affected records and agree retention, rollback and conflict rules.
-   Resolve contradictions with account owners or an authorised review. Never
-   infer public usernames from email, private names or provider display names.
-3. Merge reviewed public values into `users/{uid}` with idempotent, dry-run-first
-   tooling and a recorded mapping. Do not overwrite a canonical chosen username
-   with a legacy value automatically. Honour intended avatar removal.
-4. In a separate reviewed change, update all profile writers/readers (including
-   registration, editing and deletion) to use the canonical record consistently.
-   Keep private fields segregated by access purpose. Do not relax Firestore rules.
-5. Verify public/profile/checkout/deletion flows, then archive/remove duplicate
-   records under the agreed retention policy. Remove the legacy repository lookup
-   only after verification. Keep the public API contract unchanged.
-
-## Verification recorded for this branch
-
-- TypeScript build: passed.
-- Configured backend Jest suite: 20 suites, 249 tests passed.
-- Changed-file Prettier and Git whitespace checks: passed.
-- Swagger generation with `failOnErrors: true`: passed, including exact public
-  schema and route assertions.
-- Real local Auth/Firestore emulator HTTP checks: 24 API responses and 714
-  assertions passed, including recursive private-field rejection.
-- Existing Flutter public-profile parser, view-model, widget and navigation
-  suites: 40 tests passed. An empty temporary `.env` asset allowed the test bundle
-  to build; it was removed afterwards. No Flutter source was changed.
-- Repository-wide formatting: 49 existing files need formatting.
-- Repository-wide lint: blocked by the pre-existing configuration/parser issues
-  described above. No repository-wide cleanup was included.
-- Remote deployment, deployed index/Swagger verification and a device journey
-  against approved test accounts: pending approved environment details and valid
-  cloud credentials. The emulator and Flutter tests are separate checks, not a
-  claim of a deployed end-to-end device test.
+1. Privately inventory canonical/linked records, identity conflicts, duplicate
+   public values, missing usernames and orphan accounts in an approved environment.
+2. Back up records and agree retention/rollback/conflict rules. Resolve ambiguity
+   with account owners or authorised review, never by deriving names from email
+   or private/provider names.
+3. Merge reviewed public values into `users/{uid}` using idempotent, dry-run-first
+   tooling and a recorded mapping. Preserve canonical usernames and intended
+   avatar removal.
+4. Separately update all writers/readers, including registration, editing and
+   deletion. Segregate private fields; do not relax Firestore rules.
+5. Verify profile, checkout and deletion flows before retiring duplicate records
+   under the retention policy. Remove legacy lookup only after verification,
+   preserving the public API contract.
