@@ -13,20 +13,23 @@ import './shared/config/firebaseConfig';
 
 const app = express();
 app.post(
-    '/api/payment/webhook',
-    express.raw({ type: 'application/json' }),
-    stripeWebhook,
+  '/api/payment/webhook',
+  express.raw({ type: 'application/json' }),
+  stripeWebhook,
 );
-app.use(express.json({
+app.use(
+  express.json({
     verify: (req, res, buffer) => {
-        (req as any).rawBody = Buffer.from(buffer);
+      (req as any).rawBody = Buffer.from(buffer);
     },
-}));
+  }),
+);
 
 import productRoutes from './modules/products/routes/productRoutes';
 import categoryRoutes from './modules/categories/routes/categoryRoutes';
 import charityRoutes from './modules/charities/routes/charityRoutes';
 import authRoutes from './modules/auth/routes/authRoutes';
+import userRoutes from './modules/users/routes/userRoutes';
 import paymentRoutes from './modules/payment/routes/paymentRoutes';
 import orderRoutes from './modules/order/routes/orderRoutes';
 import adminRoutes from './modules/order/routes/adminRoutes';
@@ -38,6 +41,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/charities', charityRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/admin', adminRoutes);
@@ -49,11 +53,11 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // 404 handler
 app.use('*', (req, res) => {
-    res.status(404).json({
-        success: false,
-        message: 'Route not found',
-        path: req.originalUrl
-    });
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.originalUrl,
+  });
 });
 
 export default app;
