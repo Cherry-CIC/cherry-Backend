@@ -35,7 +35,7 @@ const publicImageUrl = (value: unknown): string | null => {
       url.hostname &&
       !url.username &&
       !url.password
-      ? text
+      ? url.href
       : null;
   } catch {
     return null;
@@ -188,12 +188,12 @@ export class PublicProductRepository {
     }[] = [];
     let scanned = 0;
     let exhausted = false;
+    // Seller badges request limit=1. Read only the page and lookahead first;
+    // larger follow-up batches keep sparse inventories efficient to scan.
+    let batchSize = limit + 1;
 
     while (publicRecords.length < limit + 1 && !exhausted) {
-      const sourceLimit = Math.min(
-        SCAN_CHUNK_SIZE,
-        MAX_SCANNED_PRODUCTS - scanned,
-      );
+      const sourceLimit = Math.min(batchSize, MAX_SCANNED_PRODUCTS - scanned);
       if (sourceLimit === 0) {
         // Fail retryably instead of revealing a misleading partial/empty page.
         throw new Error('Public product scan limit exceeded');
@@ -223,6 +223,7 @@ export class PublicProductRepository {
         // Snapshot cursors safely skip malformed timestamps in the source scan.
         // They never leave the server or determine client pagination metadata.
         query = baseQuery.startAfter(snapshot.docs[snapshot.docs.length - 1]);
+        batchSize = SCAN_CHUNK_SIZE;
       }
     }
 

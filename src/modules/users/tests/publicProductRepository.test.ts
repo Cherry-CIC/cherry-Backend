@@ -316,6 +316,8 @@ describe('PublicProductRepository', () => {
         product_images: [
           'https://example.org/safe.jpg',
           'http://example.org/safe.jpg',
+          'HTTPS://EXAMPLE.ORG/normalised.jpg',
+          'https:example.org/absolute.jpg',
           'https://username:secret@example.org/private.jpg',
           'data:image/png;base64,secret',
           'file:///private.jpg',
@@ -334,6 +336,8 @@ describe('PublicProductRepository', () => {
       product_images: [
         'https://example.org/safe.jpg',
         'http://example.org/safe.jpg',
+        'https://example.org/normalised.jpg',
+        'https://example.org/absolute.jpg',
       ],
     });
     expect(result.products[0]).not.toHaveProperty('categoryId');
@@ -385,7 +389,9 @@ describe('PublicProductRepository', () => {
     ]);
     const repository = new PublicProductRepository(source.db);
     const first = await repository.getPublicPage('seller-uid', 1);
-    expect(source.read).toHaveBeenCalledTimes(3);
+    expect(source.read.mock.calls.map(([limit]) => limit)).toEqual([
+      2, 100, 100, 100,
+    ]);
     expect(first.products.map(({ id }) => id)).toEqual(['first']);
     expect(first.nextPosition?.id).toBe('first');
     const second = await repository.getPublicPage(
@@ -423,6 +429,24 @@ describe('PublicProductRepository', () => {
     expect(last.nextPosition).toBeNull();
   });
 
+  it.each([1, 20, 50])(
+    'reads only the requested page and lookahead when listings are public (limit=%i)',
+    async (limit) => {
+      const source = database(
+        Array.from({ length: 200 }, (_, index) =>
+          fixture(`item-${index.toString().padStart(3, '0')}`),
+        ),
+      );
+      const page = await new PublicProductRepository(source.db).getPublicPage(
+        'seller-uid',
+        limit,
+      );
+      expect(source.read.mock.calls).toEqual([[limit + 1]]);
+      expect(page.products).toHaveLength(limit);
+      expect(page.nextPosition?.id).toBe(page.products[limit - 1].id);
+    },
+  );
+
   it('fails operationally at the scan budget rather than returning misleading metadata', async () => {
     const source = database(
       Array.from({ length: 5001 }, (_, index) =>
@@ -432,7 +456,10 @@ describe('PublicProductRepository', () => {
     await expect(
       new PublicProductRepository(source.db).getPublicPage('seller-uid', 20),
     ).rejects.toThrow('Public product scan limit exceeded');
-    expect(source.read).toHaveBeenCalledTimes(50);
+    expect(source.read).toHaveBeenCalledTimes(51);
+    expect(
+      source.read.mock.calls.reduce((total, [limit]) => total + limit, 0),
+    ).toBe(5000);
   });
 
   it('preserves database failures for the service to handle as retryable errors', async () => {

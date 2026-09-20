@@ -379,6 +379,7 @@ describe('Public profile Swagger', () => {
         }
       >;
       components: {
+        securitySchemes: { bearerAuth: object };
         schemas: Record<
           string,
           {
@@ -392,6 +393,13 @@ describe('Public profile Swagger', () => {
     const operation = spec.paths['/api/users/{userId}/public-profile'].get;
     expect(operation.tags).toContain('Users');
     expect(operation.security).toEqual([{ bearerAuth: [] }]);
+    expect(spec.components.securitySchemes.bearerAuth).toEqual({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+      description:
+        'Enter a Firebase ID token. Custom tokens must first be exchanged for an ID token.',
+    });
     expect(
       operation.parameters.map(({ name, in: location }) => [name, location]),
     ).toEqual([
@@ -406,6 +414,14 @@ describe('Public profile Swagger', () => {
       minimum: 1,
       maximum: 50,
       default: 20,
+    });
+    expect(
+      operation.parameters.find(({ name }) => name === 'cursor')?.schema,
+    ).toEqual({
+      type: 'string',
+      minLength: 40,
+      maxLength: 4096,
+      pattern: '^[A-Za-z0-9_-]+$',
     });
     expect(Object.keys(operation.responses).sort()).toEqual([
       '200',

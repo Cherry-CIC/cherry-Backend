@@ -190,7 +190,9 @@ const router = Router();
  *         description: Opaque nextCursor from this seller's previous page, for this authenticated viewer. Do not parse or modify it.
  *         schema:
  *           type: string
+ *           minLength: 40
  *           maxLength: 4096
+ *           pattern: '^[A-Za-z0-9_-]+$'
  *     responses:
  *       '200':
  *         description: Available public profile, including sellers with no available listings.

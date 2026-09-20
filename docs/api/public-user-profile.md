@@ -57,12 +57,14 @@ update the predicate and cursor policy version. Only permitted products receive
 calculated `securityFee` and optional category/charity IDs, never nested relations.
 Stored price/donation are preserved; fees use existing GBP/pence checkout helpers.
 Missing description/likes default to `''`/0. Invalid required fields or timestamps
-are excluded, invalid image URLs removed, and missing `createdAt` is excluded by
-Firestore ordering. Stored identifiers are never normalised into other IDs.
+are excluded. Valid image URLs are normalised and invalid ones removed. Firestore
+ordering excludes records missing `createdAt`. Stored identifiers are never normalised into other IDs.
 Damaged records require separate review; monetary values are never invented.
 
 Order by `createdAt` descending, then document ID descending, preserving timestamp
-nanoseconds. Scan chunks of 100 until `limit + 1` eligible records or exhaustion.
+nanoseconds. First fetch `limit + 1` records, then use batches of up to 100 if
+filtering leaves the page or lookahead incomplete. Stop at `limit + 1` eligible
+records or exhaustion.
 Only the last returned public record can anchor the next cursor; excluded records
 cannot produce misleading empty pages or `hasMore`. Exhausting the 5,000-record
 budget returns 503, not a partial page. Persistent exhaustion requires data review.
@@ -88,7 +90,7 @@ cleans up only uniquely prefixed fixtures. Local rules deny client access and ar
 not part of deployment configuration. Admin SDK checks enforce server filtering.
 [The emulator does not enforce composite indexes](https://firebase.google.com/docs/emulator-suite/connect_firestore#how_the_cloud_firestore_emulator_differs_from_production).
 
-Recorded checks: build, 20 backend suites/249 tests, strict Swagger generation,
+Recorded checks: build, 20 backend suites/252 tests, strict Swagger generation,
 24 emulator HTTP responses/714 assertions, and 40 existing Flutter parser,
 view-model, widget/navigation tests passed. The temporary empty Flutter `.env`
 asset was removed; no Flutter source changed. New files pass Prettier; existing
