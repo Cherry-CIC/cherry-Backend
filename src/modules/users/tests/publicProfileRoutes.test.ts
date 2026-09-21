@@ -3,11 +3,10 @@ import swaggerJsdoc from 'swagger-jsdoc';
 import app from '../../../app';
 import { admin } from '../../../shared/config/firebaseConfig';
 import { swaggerOptions } from '../../../shared/config/swaggerConfig';
-import { PublicProduct } from '../model/PublicProduct';
+import { PublicProduct } from '../model/PublicProfile';
 import { PublicProductRepository } from '../repositories/PublicProductRepository';
 import { PublicUserRepository } from '../repositories/PublicUserRepository';
 import { PublicProfileService } from '../services/PublicProfileService';
-import { ServiceFactory } from '../services/ServiceFactory';
 
 jest.mock('../../../shared/config/firebaseConfig', () => {
   const auth = { verifyIdToken: jest.fn() };
@@ -88,7 +87,6 @@ beforeEach(() => {
   process.env.PUBLIC_PROFILE_CURSOR_KEY = Buffer.alloc(32, 7).toString(
     'base64',
   );
-  ServiceFactory.reset();
   verifyToken.mockReset().mockResolvedValue({ uid: 'viewer-uid' });
   getUser.mockReset().mockResolvedValue(user);
   getProducts
@@ -104,7 +102,6 @@ afterAll(() => {
   } else {
     process.env.PUBLIC_PROFILE_CURSOR_KEY = originalCursorKey;
   }
-  ServiceFactory.reset();
   jest.restoreAllMocks();
 });
 

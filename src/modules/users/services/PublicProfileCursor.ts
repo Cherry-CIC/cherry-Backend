@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
-import { PublicProductPosition } from '../model/PublicProduct';
+import { PublicProductPosition } from '../model/PublicProfile';
 
 // Change this whenever public eligibility or ordering semantics change.
 const POLICY = 'public-profile:active-stock-permitted:v1';

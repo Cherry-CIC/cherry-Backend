@@ -51,13 +51,7 @@ const { admin, firestore } = require('../dist/shared/config/firebaseConfig');
 const prefix = `profile-test-${randomBytes(8).toString('hex')}`;
 const accounts = new Set();
 const documents = new Set();
-let assertions = 0;
 let responses = 0;
-
-function check(condition, message) {
-  assertions += 1;
-  assert.ok(condition, message);
-}
 
 const prohibitedKeys = new Set([
   'email',
@@ -90,7 +84,7 @@ const prohibitedKeys = new Set([
 function assertPrivateFieldsAbsent(value) {
   if (value === null || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
-    check(
+    assert.ok(
       !prohibitedKeys.has(key.toLowerCase()),
       'Private response key found.',
     );
@@ -145,10 +139,7 @@ async function profile(uid, token, query = {}) {
   const response = await call;
   responses += 1;
   assertPrivateFieldsAbsent(response.body);
-  check(
-    !JSON.stringify(response.body).includes('PRIVATE_FIXTURE'),
-    'Private fixture content escaped the allowlist.',
-  );
+  assert.ok(!JSON.stringify(response.body).includes('PRIVATE_FIXTURE'));
   return response;
 }
 
@@ -164,57 +155,38 @@ function assertPage(response, uid, expectedLimit) {
     'username',
   ]);
   assert.equal(body.data.user.id, uid);
-  check(
-    body.data.user.username.trim().length > 0,
-    'Username must be non-empty.',
-  );
+  assert.equal(typeof body.data.user.username, 'string');
+  assert.ok(body.data.user.username.trim().length > 0);
   const avatar = body.data.user.profileImageUrl;
-  check(
-    avatar === null || /^https?:\/\//.test(avatar),
-    'Avatar must be an HTTP(S) URL or null.',
+  assert.ok(
+    avatar === null ||
+      (typeof avatar === 'string' && /^https?:\/\//.test(avatar)),
   );
   assert.equal(body.meta.limit, expectedLimit);
   assert.equal(typeof body.meta.hasMore, 'boolean');
-  check(Object.hasOwn(body.meta, 'nextCursor'), 'nextCursor must be present.');
+  assert.ok(Object.hasOwn(body.meta, 'nextCursor'));
   if (body.meta.hasMore) {
-    check(
-      typeof body.meta.nextCursor === 'string' &&
-        body.meta.nextCursor.length > 0,
-      'Further pages require a cursor.',
-    );
+    assert.equal(typeof body.meta.nextCursor, 'string');
+    assert.ok(body.meta.nextCursor.length > 0);
   } else {
     assert.equal(body.meta.nextCursor, null);
   }
-  check(Array.isArray(body.data.products), 'Products must be an array.');
+  assert.ok(Array.isArray(body.data.products));
   for (const product of body.data.products) {
     assert.equal(product.userId, uid);
     assert.equal(product.status, 'active');
     assert.equal(product.visibility, 'public');
     for (const key of ['id', 'name', 'quality', 'size', 'postageSize']) {
-      check(
-        typeof product[key] === 'string' && product[key].trim().length > 0,
-        'A required product string is missing.',
-      );
+      assert.equal(typeof product[key], 'string');
+      assert.ok(product[key].trim().length > 0);
     }
     assert.equal(typeof product.description, 'string');
-    check(
-      Array.isArray(product.product_images),
-      'Product images are required.',
-    );
+    assert.ok(Array.isArray(product.product_images));
     for (const key of ['price', 'donation']) {
-      check(
-        Number.isFinite(product[key]) && product[key] >= 0,
-        'Money must be a finite, non-negative number.',
-      );
+      assert.ok(Number.isFinite(product[key]) && product[key] >= 0);
     }
-    check(
-      Number.isInteger(product.likes) && product.likes >= 0,
-      'Invalid likes.',
-    );
-    check(
-      Number.isInteger(product.number) && product.number > 0,
-      'Invalid stock.',
-    );
+    assert.ok(Number.isInteger(product.likes) && product.likes >= 0);
+    assert.ok(Number.isInteger(product.number) && product.number > 0);
   }
 }
 
@@ -362,7 +334,7 @@ async function main() {
   const firstPage = await profile(seller, token, { limit: 1 });
   assertPage(firstPage, seller, 1);
   const firstCursor = firstPage.body.meta.nextCursor;
-  check(Boolean(firstCursor), 'Several listings require a second page.');
+  assert.ok(firstCursor, 'Several listings require a second page.');
   const expectedIds = [
     'public-c',
     'public-b',
@@ -381,8 +353,8 @@ async function main() {
     assert.equal(response.body.data.products.length, 1);
     observedIds.push(response.body.data.products[0].id);
     const nextCursor = response.body.meta.nextCursor;
-    check(!nextCursor || nextCursor !== cursor, 'Cursor must advance.');
-    check(
+    assert.ok(!nextCursor || nextCursor !== cursor, 'Cursor must advance.');
+    assert.ok(
       observedIds.length <= expectedIds.length,
       'Pagination must terminate.',
     );
@@ -409,33 +381,23 @@ async function main() {
   assert.equal(legacy.body.data.user.username, 'Legacy public seller');
   for (const uid of [disabledSeller, deletedSeller, `${prefix}-missing`]) {
     const response = await profile(uid, token);
-    check(
-      [404, 410].includes(response.status),
-      'Unavailable seller must be generic.',
-    );
-    check(
-      !response.body.data,
-      'Unavailable seller must not return profile data.',
-    );
+    assert.ok([404, 410].includes(response.status));
+    assert.ok(!response.body.data);
   }
   assert.equal((await profile('deleted_user', token)).status, 400);
 
   const docs = await request(app).get('/api-docs/swagger-ui-init.js');
   assert.equal(docs.status, 200);
-  check(
-    docs.text.includes('/api/users/{userId}/public-profile'),
-    'Swagger route missing.',
-  );
-  check(
-    docs.text.includes('PublicUser'),
-    'Swagger public user schema missing.',
-  );
-  check(
-    docs.text.includes('PublicProfileProduct'),
-    'Swagger public product schema missing.',
-  );
+  for (const schema of [
+    '/api/users/{userId}/public-profile',
+    'PublicUser',
+    'PublicProfileProduct',
+  ]) {
+    assert.ok(docs.text.includes(schema), 'Swagger contract missing.');
+  }
+  assert.equal(responses, 24, 'All API scenarios must run.');
   console.log(
-    `Public-profile emulator checks passed: ${responses} API responses, ${assertions} assertions.`,
+    `Public-profile emulator checks passed: ${responses} API responses.`,
   );
 }
 

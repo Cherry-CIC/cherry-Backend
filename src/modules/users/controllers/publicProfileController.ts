@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { PublicProfileQuery } from '../model/PublicProfile';
 import { InvalidPublicProfileCursor } from '../services/PublicProfileCursor';
-import { ServiceFactory } from '../services/ServiceFactory';
+import { PublicProfileService } from '../services/PublicProfileService';
 
 export const getPublicProfile = async (
   req: Request,
@@ -16,12 +16,11 @@ export const getPublicProfile = async (
     return;
   }
   try {
-    const page =
-      await ServiceFactory.getPublicProfileService().getPublicProfile(
-        req.params.userId as string,
-        viewerId,
-        req.query as unknown as PublicProfileQuery,
-      );
+    const page = await new PublicProfileService().getPublicProfile(
+      req.params.userId as string,
+      viewerId,
+      req.query as unknown as PublicProfileQuery,
+    );
     if (!page) {
       ResponseHandler.notFound(res, 'This profile is unavailable');
       return;

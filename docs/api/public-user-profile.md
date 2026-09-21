@@ -91,7 +91,7 @@ not part of deployment configuration. Admin SDK checks enforce server filtering.
 [The emulator does not enforce composite indexes](https://firebase.google.com/docs/emulator-suite/connect_firestore#how_the_cloud_firestore_emulator_differs_from_production).
 
 Recorded checks: build, 20 backend suites/252 tests, strict Swagger generation,
-24 emulator HTTP responses/714 assertions, and 40 existing Flutter parser,
+24 emulator HTTP responses with recursive privacy checks, and 40 existing Flutter parser,
 view-model, widget/navigation tests passed. The temporary empty Flutter `.env`
 asset was removed; no Flutter source changed. New files pass Prettier; existing
 shared files retain their original formatting to minimise review churn.

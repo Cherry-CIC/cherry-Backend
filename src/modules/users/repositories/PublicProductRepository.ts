@@ -6,7 +6,7 @@ import {
   PublicProduct,
   PublicProductPage,
   PublicProductPosition,
-} from '../model/PublicProduct';
+} from '../model/PublicProfile';
 
 const SCAN_CHUNK_SIZE = 100;
 const MAX_SCANNED_PRODUCTS = 5000;

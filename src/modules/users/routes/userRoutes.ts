@@ -147,13 +147,6 @@ const router = Router();
  *         timestamp:
  *           type: string
  *           format: date-time
- *   responses:
- *     PublicProfileFailure:
- *       description: Request failed. No user or product data is returned.
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/PublicProfileError'
  * /api/users/{userId}/public-profile:
  *   get:
  *     summary: View another seller's public profile and available listings

@@ -1,7 +1,7 @@
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
 import { admin, firestore } from '../../../shared/config/firebaseConfig';
-import { PublicUser } from '../model/PublicUser';
+import { PublicUser } from '../model/PublicProfile';
 
 const MAX_LINKED_PROFILES = 20;
 const PROFILE_FIELDS = [
