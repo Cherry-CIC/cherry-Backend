@@ -482,7 +482,6 @@ export const likeProduct = async (
       return;
     }
 
-    // Convert the boolean 'like' flag to a numeric delta (+1 for like, -1 for unlike)
     const { product, liked } = await productService.setProductLikeStatus(
       user.uid,
       id,
@@ -498,6 +497,13 @@ export const likeProduct = async (
       'Product likes updated successfully',
     );
   } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message === 'You cannot like your own product'
+    ) {
+      ResponseHandler.forbidden(res, err.message);
+      return;
+    }
     if (err instanceof Error && err.message === 'Product not found') {
       ResponseHandler.notFound(
         res,
