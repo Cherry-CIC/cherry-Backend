@@ -106,10 +106,10 @@ These files are the main entry points for the checkout path:
 
 ## User-Facing Account APIs
 
-- `GET /api/users/:userId/public-profile`
-  Returns an authenticated seller profile using only approved public fields and
-  available listings, with seller-scoped cursor pagination. See the
-  [contract, migration plan and deployment runbook](docs/api/public-user-profile.md).
+- `GET /api/users/:userId/profile`
+  Returns another user's authenticated safe profile fields.
+- `GET /api/users/:userId/products`
+  Returns another user's visible products with cursor pagination.
 
 The backend now exposes authenticated user-facing listing, likes, and order-tracking routes:
 

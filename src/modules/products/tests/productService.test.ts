@@ -91,7 +91,7 @@ describe('ProductService pagination', () => {
     expect(pageTwo.hasMore).toBe(false);
   });
 
-  it('excludes out-of-stock products from public pagination', async () => {
+  it('excludes out-of-stock products from marketplace pagination', async () => {
     const availableProduct = createProduct(
       'available-product',
       '2026-07-13T10:00:00.000Z',
@@ -120,7 +120,7 @@ describe('ProductService pagination', () => {
     ]);
   });
 
-  it('excludes unlisted and sold products from public pagination', async () => {
+  it('excludes unlisted and sold products from marketplace pagination', async () => {
     const availableProduct = createProduct(
       'available-product',
       '2026-07-13T10:00:00.000Z',

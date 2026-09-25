@@ -1,7 +1,7 @@
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
 import { admin, firestore } from '../../../shared/config/firebaseConfig';
-import { PublicUser } from '../model/PublicProfile';
+import { UserProfile } from '../model/UserProfile';
 
 const MAX_LINKED_PROFILES = 20;
 const PROFILE_FIELDS = [
@@ -15,10 +15,10 @@ const PROFILE_FIELDS = [
 
 type ProfileRecord = Record<string, unknown>;
 
-const publicUsername = (value: unknown): string | null =>
+const safeUsername = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 
-const publicImage = (record: ProfileRecord): string | null => {
+const safeImage = (record: ProfileRecord): string | null => {
   for (const field of ['profileImageUrl', 'photoURL', 'photoUrl']) {
     const value = record[field];
     if (typeof value !== 'string' || value.trim().length === 0) {
@@ -36,7 +36,7 @@ const publicImage = (record: ProfileRecord): string | null => {
         return url.href;
       }
     } catch {
-      // Invalid legacy images are absent public values, not operational errors.
+      // Invalid legacy images are absent safe values, not operational errors.
     }
   }
 
@@ -49,19 +49,19 @@ const hasConflictingIdentity = (record: ProfileRecord, uid: string): boolean =>
   );
 
 /** Resolves both storage layouts without exposing either document shape. */
-export class PublicUserRepository {
+export class UserProfileRepository {
   constructor(
     private readonly db: Firestore = firestore,
     private readonly auth: Pick<Auth, 'getUser'> = admin.auth(),
   ) {}
 
-  async getByFirebaseUid(uid: string): Promise<PublicUser | null> {
+  async getByFirebaseUid(uid: string): Promise<UserProfile | null> {
     if (!uid || uid === 'deleted_user') {
       return null;
     }
 
     // Authentication is authoritative for account availability. Stale Firestore
-    // profiles must not make deleted or disabled accounts publicly available.
+    // profiles must not make deleted or disabled accounts available.
     try {
       const account = await this.auth.getUser(uid);
       if (account.disabled || account.uid !== uid) {
@@ -111,31 +111,31 @@ export class PublicUserRepository {
 
     const legacyNames = new Set(
       legacy
-        .map((record) => publicUsername(record.username))
+        .map((record) => safeUsername(record.username))
         .filter((value): value is string => value !== null),
     );
     const legacyImages = new Set(
       legacy
-        .map(publicImage)
+        .map(safeImage)
         .filter((value): value is string => value !== null),
     );
     if (legacyNames.size > 1 || legacyImages.size > 1) {
       return null;
     }
 
-    // A chosen username is the only verified public name. Flutter's firstname
+    // A chosen username is the only verified safe name. Flutter's firstname
     // can contain a provider's full name; neither it, displayName nor email is
     // an approved fallback. Existing profiles without a username use "User".
     // Canonical values win over an unambiguous linked legacy value. Missing or
-    // invalid avatar aliases fall through in the order listed in publicImage.
+    // invalid avatar aliases fall through in the order listed in safeImage.
     return {
       id: uid,
       username:
-        (canonical ? publicUsername(canonical.username) : null) ??
+        (canonical ? safeUsername(canonical.username) : null) ??
         legacyNames.values().next().value ??
         'User',
       profileImageUrl:
-        (canonical ? publicImage(canonical) : null) ??
+        (canonical ? safeImage(canonical) : null) ??
         legacyImages.values().next().value ??
         null,
     };

@@ -1,5 +1,5 @@
 import { Timestamp } from 'firebase-admin/firestore';
-import { PublicProductRepository } from '../repositories/PublicProductRepository';
+import { UserProductRepository } from '../repositories/UserProductRepository';
 
 jest.mock('../../../shared/config/firebaseConfig', () => ({ firestore: {} }));
 
@@ -99,18 +99,18 @@ const database = (records: RecordFixture[], ignoreFilters = false) => {
   };
 };
 
-describe('PublicProductRepository', () => {
+describe('UserProductRepository', () => {
   it.each([' padded ', 'control\u0085id'])(
     'excludes document IDs that cannot safely round-trip through detail URLs and cursors',
     async (id) => {
       const source = database([fixture(id)]);
       await expect(
-        new PublicProductRepository(source.db).getPublicPage('seller-uid', 1),
+        new UserProductRepository(source.db).getPage('seller-uid', 1),
       ).resolves.toEqual({ products: [], nextPosition: null });
     },
   );
 
-  it('matches the Flutter product contract through an explicit public allowlist', async () => {
+  it('matches the Flutter product contract through an explicit safe allowlist', async () => {
     const privateData = {
       email: 'private@example.org',
       phone: 'private',
@@ -133,7 +133,7 @@ describe('PublicProductRepository', () => {
         securityFee: 999,
       }),
     ]);
-    const result = await new PublicProductRepository(source.db).getPublicPage(
+    const result = await new UserProductRepository(source.db).getPage(
       'seller-uid',
       20,
     );
@@ -157,7 +157,6 @@ describe('PublicProductRepository', () => {
           categoryId: 'shirts-id',
           charityId: 'charity-id',
           status: 'active',
-          visibility: 'public',
         },
       ],
       nextPosition: null,
@@ -173,7 +172,6 @@ describe('PublicProductRepository', () => {
     expect(source.collection).toHaveBeenCalledWith('products');
     expect(source.where.mock.calls).toEqual([
       ['userId', '==', 'seller-uid'],
-      ['status', '==', 'active'],
     ]);
     expect(source.orderBy.mock.calls[0]).toEqual(['createdAt', 'desc']);
     expect(source.orderBy.mock.calls[1][1]).toBe('desc');
@@ -183,7 +181,7 @@ describe('PublicProductRepository', () => {
     const source = database([
       fixture('listing', { price: 12.35, donation: 10 }),
     ]);
-    const result = await new PublicProductRepository(source.db).getPublicPage(
+    const result = await new UserProductRepository(source.db).getPage(
       'seller-uid',
       1,
     );
@@ -209,7 +207,7 @@ describe('PublicProductRepository', () => {
       ],
       true,
     );
-    const result = await new PublicProductRepository(source.db).getPublicPage(
+    const result = await new UserProductRepository(source.db).getPage(
       'seller-uid',
       20,
     );
@@ -240,16 +238,16 @@ describe('PublicProductRepository', () => {
     { removedAt: new Timestamp(10, 0) },
     { hiddenAt: new Timestamp(10, 0) },
     { hidden: 'false' },
-  ])('excludes explicit non-public or unknown state %j', async (state) => {
+  ])('excludes explicit non-displayable or unknown state %j', async (state) => {
     const source = database([fixture('excluded', state)]);
     await expect(
-      new PublicProductRepository(source.db).getPublicPage('seller-uid', 20),
+      new UserProductRepository(source.db).getPage('seller-uid', 20),
     ).resolves.toEqual({ products: [], nextPosition: null });
   });
 
-  it('accepts the documented legacy rule and recognised public states', async () => {
+  it('accepts the documented legacy rule and recognised safe states', async () => {
     const source = database([
-      fixture('legacy'),
+      fixture('legacy', { status: undefined }),
       fixture('explicit', {
         visibility: 'public',
         moderationStatus: 'approved',
@@ -259,22 +257,22 @@ describe('PublicProductRepository', () => {
         removedAt: null,
       }),
     ]);
-    const result = await new PublicProductRepository(source.db).getPublicPage(
+    const result = await new UserProductRepository(source.db).getPage(
       'seller-uid',
       20,
     );
     expect(result.products.map(({ id }) => id)).toEqual(['legacy', 'explicit']);
   });
 
-  it('returns an empty page for no public products and never queries anonymised owners', async () => {
+  it('returns an empty page for no user products and never queries anonymised owners', async () => {
     const source = database([fixture('sold', { status: 'sold' })]);
-    const repository = new PublicProductRepository(source.db);
-    await expect(repository.getPublicPage('seller-uid', 20)).resolves.toEqual({
+    const repository = new UserProductRepository(source.db);
+    await expect(repository.getPage('seller-uid', 20)).resolves.toEqual({
       products: [],
       nextPosition: null,
     });
     source.collection.mockClear();
-    await expect(repository.getPublicPage('deleted_user', 20)).resolves.toEqual(
+    await expect(repository.getPage('deleted_user', 20)).resolves.toEqual(
       {
         products: [],
         nextPosition: null,
@@ -302,7 +300,7 @@ describe('PublicProductRepository', () => {
   ])('excludes malformed contract data %j', async (data) => {
     const source = database([fixture('invalid', data)]);
     await expect(
-      new PublicProductRepository(source.db).getPublicPage('seller-uid', 20),
+      new UserProductRepository(source.db).getPage('seller-uid', 20),
     ).resolves.toEqual({ products: [], nextPosition: null });
   });
 
@@ -326,7 +324,7 @@ describe('PublicProductRepository', () => {
         ],
       }),
     ]);
-    const result = await new PublicProductRepository(source.db).getPublicPage(
+    const result = await new UserProductRepository(source.db).getPage(
       'seller-uid',
       20,
     );
@@ -351,15 +349,15 @@ describe('PublicProductRepository', () => {
       fixture('older', { createdAt: new Timestamp(100, 123456788) }),
       fixture('newer', { createdAt: new Timestamp(100, 123456790) }),
     ]);
-    const repository = new PublicProductRepository(source.db);
-    const first = await repository.getPublicPage('seller-uid', 2);
+    const repository = new UserProductRepository(source.db);
+    const first = await repository.getPage('seller-uid', 2);
     expect(first.products.map(({ id }) => id)).toEqual(['newer', 'z']);
     expect(first.nextPosition).toEqual({
       seconds: 100,
       nanoseconds: 123456789,
       id: 'z',
     });
-    const second = await repository.getPublicPage(
+    const second = await repository.getPage(
       'seller-uid',
       2,
       first.nextPosition!,
@@ -371,7 +369,7 @@ describe('PublicProductRepository', () => {
     ).toBe(4);
   });
 
-  it('scans excluded source pages before determining public page boundaries', async () => {
+  it('scans excluded source pages before determining eligible page boundaries', async () => {
     const source = database([
       fixture('first', { createdAt: new Timestamp(1000, 0) }),
       ...Array.from({ length: 225 }, (_, index) =>
@@ -387,21 +385,21 @@ describe('PublicProductRepository', () => {
         moderationStatus: 'hidden',
       }),
     ]);
-    const repository = new PublicProductRepository(source.db);
-    const first = await repository.getPublicPage('seller-uid', 1);
+    const repository = new UserProductRepository(source.db);
+    const first = await repository.getPage('seller-uid', 1);
     expect(source.read.mock.calls.map(([limit]) => limit)).toEqual([
       2, 100, 100, 100,
     ]);
     expect(first.products.map(({ id }) => id)).toEqual(['first']);
     expect(first.nextPosition?.id).toBe('first');
-    const second = await repository.getPublicPage(
+    const second = await repository.getPage(
       'seller-uid',
       1,
       first.nextPosition!,
     );
     expect(second.products.map(({ id }) => id)).toEqual(['second']);
     expect(second.nextPosition?.id).toBe('second');
-    const third = await repository.getPublicPage(
+    const third = await repository.getPage(
       'seller-uid',
       1,
       second.nextPosition!,
@@ -410,17 +408,17 @@ describe('PublicProductRepository', () => {
     expect(third.nextPosition).toBeNull();
   });
 
-  it('fills minimum and maximum pages and only returns a cursor when another public product exists', async () => {
+  it('fills minimum and maximum pages and only returns a cursor when another user product exists', async () => {
     const source = database(
       Array.from({ length: 51 }, (_, index) =>
         fixture(`item-${index.toString().padStart(2, '0')}`),
       ),
     );
-    const repository = new PublicProductRepository(source.db);
-    const first = await repository.getPublicPage('seller-uid', 50);
+    const repository = new UserProductRepository(source.db);
+    const first = await repository.getPage('seller-uid', 50);
     expect(first.products).toHaveLength(50);
     expect(first.nextPosition?.id).toBe(first.products[49].id);
-    const last = await repository.getPublicPage(
+    const last = await repository.getPage(
       'seller-uid',
       1,
       first.nextPosition!,
@@ -430,14 +428,14 @@ describe('PublicProductRepository', () => {
   });
 
   it.each([1, 20, 50])(
-    'reads only the requested page and lookahead when listings are public (limit=%i)',
+    'reads only the requested page and lookahead when listings are eligible (limit=%i)',
     async (limit) => {
       const source = database(
         Array.from({ length: 200 }, (_, index) =>
           fixture(`item-${index.toString().padStart(3, '0')}`),
         ),
       );
-      const page = await new PublicProductRepository(source.db).getPublicPage(
+      const page = await new UserProductRepository(source.db).getPage(
         'seller-uid',
         limit,
       );
@@ -454,8 +452,8 @@ describe('PublicProductRepository', () => {
       ),
     );
     await expect(
-      new PublicProductRepository(source.db).getPublicPage('seller-uid', 20),
-    ).rejects.toThrow('Public product scan limit exceeded');
+      new UserProductRepository(source.db).getPage('seller-uid', 20),
+    ).rejects.toThrow('User product scan limit exceeded');
     expect(source.read).toHaveBeenCalledTimes(51);
     expect(
       source.read.mock.calls.reduce((total, [limit]) => total + limit, 0),
@@ -470,7 +468,7 @@ describe('PublicProductRepository', () => {
       },
     } as unknown as FirebaseFirestore.Firestore;
     await expect(
-      new PublicProductRepository(db).getPublicPage('seller-uid', 20),
+      new UserProductRepository(db).getPage('seller-uid', 20),
     ).rejects.toBe(failure);
   });
 });

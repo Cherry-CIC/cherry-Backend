@@ -33,7 +33,7 @@ Object.assign(process.env, {
   GCLOUD_PROJECT: PROJECT_ID,
   GOOGLE_CLOUD_PROJECT: PROJECT_ID,
   FIREBASE_API_KEY: 'emulator-only-api-key',
-  PUBLIC_PROFILE_CURSOR_KEY: randomBytes(32).toString('base64'),
+  USER_PRODUCTS_CURSOR_KEY: randomBytes(32).toString('base64'),
   STRIPE_SECRET_KEY: 'sk_test_emulator_only',
   STRIPE_PUBLISHABLE_KEY: 'pk_test_emulator_only',
   STRIPE_WEBHOOK_SECRET: 'whsec_emulator_only',
@@ -131,9 +131,9 @@ async function signIn(uid) {
   return body.idToken;
 }
 
-async function profile(uid, token, query = {}) {
+async function callApi(path, token, query = {}) {
   const call = request(app)
-    .get(`/api/users/${encodeURIComponent(uid)}/public-profile`)
+    .get(path)
     .query(query);
   if (token) call.set('Authorization', `Bearer ${token}`);
   const response = await call;
@@ -143,25 +143,44 @@ async function profile(uid, token, query = {}) {
   return response;
 }
 
-function assertPage(response, uid, expectedLimit) {
-  assert.equal(response.status, 200, 'Public-profile request should succeed.');
+async function userProfile(uid, token) {
+  return callApi(`/api/users/${encodeURIComponent(uid)}/profile`, token);
+}
+
+async function userProducts(uid, token, query = {}) {
+  return callApi(
+    `/api/users/${encodeURIComponent(uid)}/products`,
+    token,
+    query,
+  );
+}
+
+function assertProfile(response, uid) {
+  assert.equal(response.status, 200, 'User profile request should succeed.');
   const { body } = response;
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'meta', 'success']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'success']);
   assert.equal(body.success, true);
-  assert.deepEqual(Object.keys(body.data).sort(), ['products', 'user']);
-  assert.deepEqual(Object.keys(body.data.user).sort(), [
+  assert.deepEqual(Object.keys(body.data).sort(), [
     'id',
     'profileImageUrl',
     'username',
   ]);
-  assert.equal(body.data.user.id, uid);
-  assert.equal(typeof body.data.user.username, 'string');
-  assert.ok(body.data.user.username.trim().length > 0);
-  const avatar = body.data.user.profileImageUrl;
+  assert.equal(body.data.id, uid);
+  assert.equal(typeof body.data.username, 'string');
+  assert.ok(body.data.username.trim().length > 0);
+  const avatar = body.data.profileImageUrl;
   assert.ok(
     avatar === null ||
       (typeof avatar === 'string' && /^https?:\/\//.test(avatar)),
   );
+}
+
+function assertPage(response, uid, expectedLimit) {
+  assert.equal(response.status, 200, 'User products request should succeed.');
+  const { body } = response;
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'meta', 'success']);
+  assert.equal(body.success, true);
+  assert.deepEqual(Object.keys(body.data).sort(), ['products']);
   assert.equal(body.meta.limit, expectedLimit);
   assert.equal(typeof body.meta.hasMore, 'boolean');
   assert.ok(Object.hasOwn(body.meta, 'nextCursor'));
@@ -175,7 +194,7 @@ function assertPage(response, uid, expectedLimit) {
   for (const product of body.data.products) {
     assert.equal(product.userId, uid);
     assert.equal(product.status, 'active');
-    assert.equal(product.visibility, 'public');
+    assert.ok(!Object.hasOwn(product, 'visibility'));
     for (const key of ['id', 'name', 'quality', 'size', 'postageSize']) {
       assert.equal(typeof product[key], 'string');
       assert.ok(product[key].trim().length > 0);
@@ -222,7 +241,7 @@ async function main() {
   });
   await writeDocument('users', 'seller-linked-profile', {
     id: seller,
-    username: 'Older public name',
+    username: 'Older safe name',
     displayName: 'PRIVATE_FIXTURE full name',
     ...privateFields,
     firebaseUid: seller,
@@ -236,7 +255,7 @@ async function main() {
   }
   await writeDocument('users', 'legacy-generated-document', {
     id: legacySeller,
-    username: 'Legacy public seller',
+    username: 'Legacy visible seller',
     photoURL: 'https://example.invalid/legacy-avatar.jpg',
     ...privateFields,
     firebaseUid: legacySeller,
@@ -268,14 +287,14 @@ async function main() {
   };
   // Equal timestamps exercise the document-ID tie-break. Sub-millisecond
   // timestamps detect lossy cursor serialisation through Date/toMillis.
-  const publicFixtures = [
-    ['public-a', new Timestamp(seconds, 100)],
-    ['public-b', new Timestamp(seconds, 100)],
-    ['public-c', new Timestamp(seconds, 101)],
-    ['public-d', new Timestamp(seconds - 1, 999999999)],
-    ['public-e', new Timestamp(seconds - 2, 0)],
+  const visibleFixtures = [
+    ['visible-a', new Timestamp(seconds, 100)],
+    ['visible-b', new Timestamp(seconds, 100)],
+    ['visible-c', new Timestamp(seconds, 101)],
+    ['visible-d', new Timestamp(seconds - 1, 999999999)],
+    ['visible-e', new Timestamp(seconds - 2, 0)],
   ];
-  for (const [name, createdAt] of publicFixtures) {
+  for (const [name, createdAt] of visibleFixtures) {
     await writeDocument('products', name, { ...baseProduct, createdAt });
   }
   const exclusions = [
@@ -313,15 +332,17 @@ async function main() {
   }
   await stockBatch.commit();
 
-  assert.equal((await profile(seller)).status, 401);
-  assert.equal((await profile(seller, 'not-a-firebase-token')).status, 401);
+  assert.equal((await userProfile(seller)).status, 401);
+  assert.equal((await userProfile(seller, 'not-a-firebase-token')).status, 401);
   for (const limit of [0, 51, 1.5, 'invalid']) {
-    assert.equal((await profile(seller, token, { limit })).status, 400);
+    assert.equal((await userProducts(seller, token, { limit })).status, 400);
   }
-  const defaultPage = await profile(seller, token);
+  const profileResponse = await userProfile(seller, token);
+  assertProfile(profileResponse, seller);
+  assert.equal(profileResponse.body.data.username, 'Alex');
+  const defaultPage = await userProducts(seller, token);
   assertPage(defaultPage, seller, 20);
-  assert.equal(defaultPage.body.data.user.username, 'Alex');
-  assert.equal(defaultPage.body.data.products.length, publicFixtures.length);
+  assert.equal(defaultPage.body.data.products.length, visibleFixtures.length);
   for (const product of defaultPage.body.data.products) {
     assert.equal(
       product.securityFee,
@@ -330,22 +351,22 @@ async function main() {
     );
   }
   assert.equal(defaultPage.body.meta.hasMore, false);
-  assertPage(await profile(seller, token, { limit: 50 }), seller, 50);
-  const firstPage = await profile(seller, token, { limit: 1 });
+  assertPage(await userProducts(seller, token, { limit: 50 }), seller, 50);
+  const firstPage = await userProducts(seller, token, { limit: 1 });
   assertPage(firstPage, seller, 1);
   const firstCursor = firstPage.body.meta.nextCursor;
   assert.ok(firstCursor, 'Several listings require a second page.');
   const expectedIds = [
-    'public-c',
-    'public-b',
-    'public-a',
-    'public-d',
-    'public-e',
+    'visible-c',
+    'visible-b',
+    'visible-a',
+    'visible-d',
+    'visible-e',
   ].map((name) => `${prefix}-${name}`);
   const observedIds = [];
   let cursor;
   do {
-    const response = await profile(seller, token, {
+    const response = await userProducts(seller, token, {
       limit: 1,
       ...(cursor && { cursor }),
     });
@@ -369,35 +390,38 @@ async function main() {
     [seller, token, `${firstCursor.slice(0, -1)}!`],
   ]) {
     assert.equal(
-      (await profile(uid, bearer, { cursor: invalidCursor })).status,
+      (await userProducts(uid, bearer, { cursor: invalidCursor })).status,
       400,
     );
   }
-  const empty = await profile(emptySeller, token);
+  const empty = await userProducts(emptySeller, token);
   assertPage(empty, emptySeller, 20);
   assert.deepEqual(empty.body.data.products, []);
-  const legacy = await profile(legacySeller, token);
+  const legacyProfile = await userProfile(legacySeller, token);
+  assertProfile(legacyProfile, legacySeller);
+  assert.equal(legacyProfile.body.data.username, 'Legacy visible seller');
+  const legacy = await userProducts(legacySeller, token);
   assertPage(legacy, legacySeller, 20);
-  assert.equal(legacy.body.data.user.username, 'Legacy public seller');
   for (const uid of [disabledSeller, deletedSeller, `${prefix}-missing`]) {
-    const response = await profile(uid, token);
+    const response = await userProfile(uid, token);
     assert.ok([404, 410].includes(response.status));
     assert.ok(!response.body.data);
   }
-  assert.equal((await profile('deleted_user', token)).status, 400);
+  assert.equal((await userProfile('deleted_user', token)).status, 400);
 
   const docs = await request(app).get('/api-docs/swagger-ui-init.js');
   assert.equal(docs.status, 200);
   for (const schema of [
-    '/api/users/{userId}/public-profile',
-    'PublicUser',
-    'PublicProfileProduct',
+    '/api/users/{userId}/profile',
+    '/api/users/{userId}/products',
+    'UserProfile',
+    'UserProduct',
   ]) {
     assert.ok(docs.text.includes(schema), 'Swagger contract missing.');
   }
-  assert.equal(responses, 24, 'All API scenarios must run.');
+  assert.equal(responses, 26, 'All API scenarios must run.');
   console.log(
-    `Public-profile emulator checks passed: ${responses} API responses.`,
+    `User profile/products emulator checks passed: ${responses} API responses.`,
   );
 }
 
@@ -422,10 +446,10 @@ main()
   .catch((error) => {
     // Do not print assertion operands, tokens or backend exception bodies.
     const location = String(error?.stack || '').match(
-      /test-public-profiles-emulator\.js:\d+:\d+/,
+      /test-user-profile-products-emulator\.js:\d+:\d+/,
     )?.[0];
     console.error(
-      `Public-profile emulator integration failed${location ? ` at ${location}` : ''}.`,
+      `User profile/products emulator integration failed${location ? ` at ${location}` : ''}.`,
     );
     process.exitCode = 1;
   })

@@ -1,32 +1,32 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
-import { PublicProductPosition } from '../model/PublicProfile';
+import { UserProductPosition } from '../model/UserProfile';
 
-// Change this whenever public eligibility or ordering semantics change.
-const POLICY = 'public-profile:active-stock-permitted:v1';
+// Change this whenever visible-product eligibility or ordering semantics change.
+const POLICY = 'user-products:active-stock-permitted:v1';
 const MAX_AGE_SECONDS = 24 * 60 * 60;
 
-export class InvalidPublicProfileCursor extends Error {
+export class InvalidUserProductCursor extends Error {
   constructor() {
     super('Invalid cursor');
   }
 }
 
 /** Authenticated encryption keeps the position opaque and binds its scope. */
-export class PublicProfileCursor {
+export class UserProductCursor {
   constructor(
     private readonly secret: () => string | undefined = () =>
-      process.env.PUBLIC_PROFILE_CURSOR_KEY,
+      process.env.USER_PRODUCTS_CURSOR_KEY,
     private readonly now: () => number = Date.now,
   ) {}
 
   private key(): Buffer {
     const encoded = this.secret();
     if (!encoded || !/^[A-Za-z0-9+/]{43}=$/.test(encoded)) {
-      throw new Error('Public profile cursor key is not configured');
+      throw new Error('User products cursor key is not configured');
     }
     const key = Buffer.from(encoded, 'base64');
     if (key.length !== 32 || key.toString('base64') !== encoded) {
-      throw new Error('Public profile cursor key is not configured');
+      throw new Error('User products cursor key is not configured');
     }
     return key;
   }
@@ -36,7 +36,7 @@ export class PublicProfileCursor {
   }
 
   encode(
-    position: PublicProductPosition,
+    position: UserProductPosition,
     ownerId: string,
     viewerId: string,
   ): string {
@@ -60,7 +60,7 @@ export class PublicProfileCursor {
     token: string | undefined,
     ownerId: string,
     viewerId: string,
-  ): PublicProductPosition | undefined {
+  ): UserProductPosition | undefined {
     // Missing configuration remains an operational error, not a bad cursor.
     const key = this.key();
     if (token === undefined) return undefined;
@@ -107,7 +107,7 @@ export class PublicProfileCursor {
         id: payload.id,
       };
     } catch {
-      throw new InvalidPublicProfileCursor();
+      throw new InvalidUserProductCursor();
     }
   }
 }

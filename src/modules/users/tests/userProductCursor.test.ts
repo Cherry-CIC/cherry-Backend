@@ -1,8 +1,8 @@
 import { createCipheriv, randomBytes } from 'crypto';
 import {
-  InvalidPublicProfileCursor,
-  PublicProfileCursor,
-} from '../services/PublicProfileCursor';
+  InvalidUserProductCursor,
+  UserProductCursor,
+} from '../services/UserProductCursor';
 
 const key = Buffer.alloc(32, 7).toString('base64');
 const now = 1700000000000;
@@ -12,14 +12,14 @@ const position = {
   id: 'listing-id',
 };
 const codec = () =>
-  new PublicProfileCursor(
+  new UserProductCursor(
     () => key,
     () => now,
   );
 
 const encryptedPayload = (
   payload: object,
-  policy = 'public-profile:active-stock-permitted:v1',
+  policy = 'profile:active-stock-permitted:v1',
 ) => {
   const nonce = randomBytes(12);
   const cipher = createCipheriv(
@@ -37,7 +37,7 @@ const encryptedPayload = (
   );
 };
 
-describe('PublicProfileCursor', () => {
+describe('UserProductCursor', () => {
   it('round-trips an opaque position without losing nanoseconds', () => {
     const cursor = codec().encode(position, 'seller', 'viewer');
     expect(codec().decode(cursor, 'seller', 'viewer')).toEqual(position);
@@ -55,7 +55,7 @@ describe('PublicProfileCursor', () => {
     (owner, viewer) => {
       const token = codec().encode(position, 'seller', 'viewer');
       expect(() => codec().decode(token, owner, viewer)).toThrow(
-        InvalidPublicProfileCursor,
+        InvalidUserProductCursor,
       );
     },
   );
@@ -68,7 +68,7 @@ describe('PublicProfileCursor', () => {
     bytes[bytes.length - 2] ^= 1;
     expect(() =>
       codec().decode(bytes.toString('base64url'), 'seller', 'viewer'),
-    ).toThrow(InvalidPublicProfileCursor);
+    ).toThrow(InvalidUserProductCursor);
   });
 
   it('rejects cursors signed under an obsolete visibility policy', () => {
@@ -77,24 +77,24 @@ describe('PublicProfileCursor', () => {
       'old-policy',
     );
     expect(() => codec().decode(token, 'seller', 'viewer')).toThrow(
-      InvalidPublicProfileCursor,
+      InvalidUserProductCursor,
     );
   });
 
   it('rejects a cursor after expiry or key rotation', () => {
     const token = codec().encode(position, 'seller', 'viewer');
     expect(() =>
-      new PublicProfileCursor(
+      new UserProductCursor(
         () => key,
         () => now + 86400000,
       ).decode(token, 'seller', 'viewer'),
-    ).toThrow(InvalidPublicProfileCursor);
+    ).toThrow(InvalidUserProductCursor);
     expect(() =>
-      new PublicProfileCursor(
+      new UserProductCursor(
         () => Buffer.alloc(32, 8).toString('base64'),
         () => now,
       ).decode(token, 'seller', 'viewer'),
-    ).toThrow(InvalidPublicProfileCursor);
+    ).toThrow(InvalidUserProductCursor);
   });
 
   it.each([
@@ -106,7 +106,7 @@ describe('PublicProfileCursor', () => {
     'A'.repeat(100),
   ])('rejects malformed input', (token) => {
     expect(() => codec().decode(token, 'seller', 'viewer')).toThrow(
-      InvalidPublicProfileCursor,
+      InvalidUserProductCursor,
     );
   });
 
@@ -132,7 +132,7 @@ describe('PublicProfileCursor', () => {
       ...override,
     });
     expect(() => codec().decode(token, 'seller', 'viewer')).toThrow(
-      InvalidPublicProfileCursor,
+      InvalidUserProductCursor,
     );
   });
 
@@ -140,12 +140,12 @@ describe('PublicProfileCursor', () => {
     'fails operationally when the deployment key is missing or invalid',
     (secret) => {
       expect(() =>
-        new PublicProfileCursor(() => secret).decode(
+        new UserProductCursor(() => secret).decode(
           undefined,
           'seller',
           'viewer',
         ),
-      ).toThrow('Public profile cursor key is not configured');
+      ).toThrow('User products cursor key is not configured');
     },
   );
 

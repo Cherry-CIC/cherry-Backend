@@ -6,7 +6,7 @@ jest.mock('../../../shared/config/firebaseConfig', () => ({
   admin: { auth: jest.fn() },
 }));
 
-import { PublicUserRepository } from '../repositories/PublicUserRepository';
+import { UserProfileRepository } from '../repositories/UserProfileRepository';
 
 const UID = 'seller-firebase-uid';
 type Fixture = { documentId: string; fields: Record<string, unknown> };
@@ -48,7 +48,7 @@ const createRepository = (
   const db = { collection, getAll } as unknown as Firestore;
   const auth = { getUser } as Pick<Auth, 'getUser'>;
   return {
-    repository: new PublicUserRepository(db, auth),
+    repository: new UserProfileRepository(db, auth),
     getUser,
     collection,
     getAll,
@@ -58,8 +58,8 @@ const createRepository = (
   };
 };
 
-describe('PublicUserRepository', () => {
-  it('reads the canonical UID document and returns only the public allowlist', async () => {
+describe('UserProfileRepository', () => {
+  it('reads the canonical UID document and returns only the safe allowlist', async () => {
     const { repository, getUser, doc, getAll, query } = createRepository({
       id: UID,
       firebaseUid: UID,
@@ -144,7 +144,7 @@ describe('PublicUserRepository', () => {
     });
   });
 
-  it('fills missing canonical public values from an unambiguous legacy record', async () => {
+  it('fills missing canonical safe values from an unambiguous legacy record', async () => {
     const { repository } = createRepository({ username: '  ' }, [
       fixture('generated-document', {
         id: UID,

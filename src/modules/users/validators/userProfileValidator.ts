@@ -1,6 +1,6 @@
 import Joi from 'joi';
 
-export const publicProfileParamsSchema = Joi.object({
+export const userIdParamsSchema = Joi.object({
   userId: Joi.string()
     .custom((value: string, helpers) => {
       // Check before trimming so newline/control characters cannot disappear.
@@ -20,7 +20,7 @@ export const publicProfileParamsSchema = Joi.object({
     .required(),
 });
 
-export const publicProfileQuerySchema = Joi.object({
+export const userProductsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(50).default(20),
   cursor: Joi.string()
     .pattern(/^[A-Za-z0-9_-]+$/)
