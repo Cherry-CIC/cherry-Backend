@@ -14,7 +14,7 @@ export const swaggerOptions = {
                     type: 'http',
                     scheme: 'bearer',
                     bearerFormat: 'JWT',
-                    description: 'Enter your Firebase ID token or custom token'
+                    description: 'Enter a Firebase ID token. Custom tokens must first be exchanged for an ID token.'
                 }
             }
         },

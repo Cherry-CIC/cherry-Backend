@@ -106,6 +106,11 @@ These files are the main entry points for the checkout path:
 
 ## User-Facing Account APIs
 
+- `GET /api/users/:userId/profile`
+  Returns another user's authenticated safe profile fields.
+- `GET /api/users/:userId/products`
+  Returns another user's visible products with cursor pagination.
+
 The backend now exposes authenticated user-facing listing, likes, and order-tracking routes:
 
 - `DELETE /api/auth/account`

@@ -23,11 +23,11 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
             // For now, we'll accept that custom tokens need to be exchanged for ID tokens on client
             throw idTokenError;
         }
-        
+
         (req as any).user = decodedToken;
         next();
-    } catch (error) {
-        ResponseHandler.unauthorized(res, 'Invalid authentication token', error instanceof Error ? error.message : 'Token verification failed');
+    } catch {
+        ResponseHandler.unauthorized(res, 'Invalid authentication token', 'Token verification failed');
         return;
     }
 }

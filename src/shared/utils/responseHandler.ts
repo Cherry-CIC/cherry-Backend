@@ -9,6 +9,20 @@ export interface ApiResponse<T = any> {
 }
 
 export class ResponseHandler {
+    // Explicit envelope for APIs that return data without a message wrapper.
+    static data<T>(res: Response, data: T): Response {
+        return res.status(200).json({ success: true, data });
+    }
+
+    // Explicit envelope for APIs whose clients require top-level pagination.
+    static paginated<T>(
+        res: Response,
+        data: T,
+        meta: { limit: number; nextCursor: string | null; hasMore: boolean },
+    ): Response {
+        return res.status(200).json({ success: true, data, meta });
+    }
+
     private static createResponse<T>(
         success: boolean,
         message: string,
