@@ -1,3 +1,4 @@
+import { sendListingSafetyError } from '../../../shared/utils/listingSafety';
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { UserRepository } from '../../auth/repositories/UserRepository';
@@ -220,6 +221,7 @@ export const createOrder = async (
           paymentIntentId,
         );
     } catch (err) {
+      if (sendListingSafetyError(res, err)) return;
       ResponseHandler.badRequest(
         res,
         'Payment verification failed',
@@ -320,6 +322,7 @@ export const createOrder = async (
     let savedOrder;
     try {
       savedOrder = await orderRepo.createPaidOrderAndDecrementInventory({
+        listingReservationId: verifiedPayment.listingReservationId,
         userId: firebaseUid,
         email,
         productAmount: verifiedPayment.productAmount,
@@ -342,6 +345,7 @@ export const createOrder = async (
         status: 'paid',
       });
     } catch (err) {
+      if (sendListingSafetyError(res, err)) return;
       if (
         err instanceof Error &&
         err.message === 'PaymentIntent has already been used'
@@ -365,6 +369,24 @@ export const createOrder = async (
         return;
       }
       throw err;
+    }
+
+    if (savedOrder.alreadyCreated) {
+      const shipment = await new ShipmentRepository().getShipmentByOrderId(
+        savedOrder.id,
+      );
+      ResponseHandler.custom(
+        res,
+        shipment ? 200 : 202,
+        true,
+        shipment ? 'Order already exists' : 'Order exists, shipment pending',
+        {
+          orderId: savedOrder.id,
+          shipment: shipment ?? null,
+          shipmentStatus: shipment?.status ?? savedOrder.shipmentStatus,
+        },
+      );
+      return;
     }
 
     const shipmentService = new ShipmentService();

@@ -46,7 +46,10 @@ describe('productController listing status actions', () => {
 
     await unlistProduct(req, res);
 
-    expect(productService.unlistProduct).toHaveBeenCalledWith('product-1');
+    expect(productService.unlistProduct).toHaveBeenCalledWith(
+      'product-1',
+      'seller-1',
+    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -98,7 +101,10 @@ describe('productController listing status actions', () => {
 
     await relistProduct(req, res);
 
-    expect(productService.relistProduct).toHaveBeenCalledWith('product-1');
+    expect(productService.relistProduct).toHaveBeenCalledWith(
+      'product-1',
+      'seller-1',
+    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({

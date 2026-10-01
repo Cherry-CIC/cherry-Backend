@@ -1,3 +1,4 @@
+import { exposedListing } from '../../../shared/utils/listingSafety';
 import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
@@ -145,6 +146,7 @@ const mapUserProduct = (
     size,
     postageSize,
     status: 'active',
+    ...exposedListing({ editVersion: data.editVersion }),
   };
 
   const categoryId = safeIdentifier(data.categoryId);

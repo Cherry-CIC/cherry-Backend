@@ -42,6 +42,7 @@ const createPaymentIntent = async (
   currency: string,
   customerId: string,
   metadata: Stripe.MetadataParam,
+  idempotencyKey: string,
 ): Promise<Stripe.PaymentIntent> => {
   const paymentIntent = await stripe.paymentIntents.create({
     amount,
@@ -51,7 +52,7 @@ const createPaymentIntent = async (
     automatic_payment_methods: {
       enabled: true,
     },
-  });
+  }, { idempotencyKey });
 
   return paymentIntent
 }

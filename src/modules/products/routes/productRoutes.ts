@@ -99,6 +99,10 @@ const router = Router();
  *           type: number
  *           description: Product quantity/number
  *           example: 10
+ *         editVersion:
+ *           type: integer
+ *           minimum: 0
+ *           description: Committed listing version, exposed only after the safety release gate is enabled and this record has a valid version.
  *         status:
  *           type: string
  *           enum: [active, unlisted, sold]
@@ -520,115 +524,47 @@ router.post('/', authMiddleware, validateProduct, createProduct);
  * @swagger
  * /api/products/{id}:
  *   put:
- *     summary: Update a product by ID
+ *     summary: Edit descriptive fields of an owned, unsold listing
+ *     description: Requires the release gate, certified legacy data, no actionable payment and a matching version. Omitted fields are preserved. Unknown and forbidden fields are rejected. Photos require immutable approved Storage objects with verified ownership. Price, charity, quantity and lifecycle are not editable here.
  *     tags: [Products]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
- *         description: Product ID
- *         example: "dePrjBhBLclqdWE0m9SP"
+ *         schema: { type: string }
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               name:
- *                 type: string
- *                 example: "Updated Smartphone"
- *               description:
- *                 type: string
- *                 example: "Updated smartphone with new features"
- *               categoryId:
- *                 type: string
- *                 example: "KUnep4ttFUya4GNKx11T"
- *               charityId:
- *                 type: string
- *                 example: "z1fLMUjUWlmkJn8y8UhU"
- *               postageSize:
- *                 type: string
- *                 description: Postage size to assign to the product
- *                 example: "4bVq7OrLNbLvCvuQ128h"
- *               quality:
- *                 type: string
- *                 example: "Premium"
- *               size:
- *                 type: string
- *                 example: "Large"
- *               product_images:
- *                 type: array
- *                 items:
- *                   type: string
- *                 example: ["https://example.com/updated1.jpg"]
- *               donation:
- *                 type: number
- *                 example: 75.0
- *               price:
- *                 type: number
- *                 example: 699.99
- *               likes:
- *                 type: number
- *                 example: 5
- *               number:
- *                 type: number
- *                 example: 8
+ *             $ref: '#/components/schemas/ListingEdit'
  *     responses:
  *       200:
- *         description: Product updated successfully
+ *         description: Committed edit and incremented version. Fetch the canonical listing before showing success.
  *         content:
  *           application/json:
  *             schema:
  *               type: object
+ *               required: [success, data]
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Product updated successfully"
+ *                 success: { type: boolean, enum: [true] }
  *                 data:
- *                   $ref: '#/components/schemas/Product'
- *                 timestamp:
- *                   type: string
- *                   format: date-time
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/Product'
+ *                     - type: object
+ *                       required: [id, editVersion]
  *       400:
- *         description: Validation error or invalid references
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Category not found"
- *                 timestamp:
- *                   type: string
- *                   format: date-time
+ *         $ref: '#/components/responses/ListingValidationError'
+ *       401:
+ *         $ref: '#/components/responses/ListingAuthenticationError'
+ *       403:
+ *         $ref: '#/components/responses/ListingOwnershipError'
  *       404:
- *         description: Product not found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Product not found"
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *       500:
- *         description: Server error
+ *         $ref: '#/components/responses/ListingNotFoundError'
+ *       409:
+ *         $ref: '#/components/responses/ListingConflictError'
+ *       503:
+ *         $ref: '#/components/responses/ListingDisabledError'
  */
 router.put(
   '/:id',

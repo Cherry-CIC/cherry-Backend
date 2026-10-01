@@ -62,7 +62,7 @@ export class ResponseHandler {
 
     static unauthorized(res: Response, message: string = 'Unauthorized', error?: string): Response {
         const response = this.createResponse(false, message, undefined, error);
-        return res.status(401).json(response);
+        return res.status(401).json({ ...response, code: 'AUTHENTICATION_REQUIRED' });
     }
 
     static forbidden(res: Response, message: string = 'Forbidden', error?: string): Response {

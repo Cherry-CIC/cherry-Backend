@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Prototype: API/Admin SDK owns products, sales, reservations and deletion
+    // tombstones. Client users documents contain private profile data.
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function validProfile(d) {
+      return (!('id' in d) || d.id == request.auth.uid)
+        && (!('username' in d) || (d.username is string && d.username.size() <= 100))
+        && (!('firstname' in d) || (d.firstname is string && d.firstname.size() <= 100))
+        && (!('lastname' in d) || (d.lastname is string && d.lastname.size() <= 100))
+        && (!('photoUrl' in d) || (d.photoUrl is string && d.photoUrl.size() <= 4096));
+    }
+    match /users/{uid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && validProfile(request.resource.data)
+        && request.resource.data.keys().hasOnly(['id', 'username', 'firstname', 'lastname', 'photoUrl']);
+      allow update: if owner(uid) && validProfile(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username', 'firstname', 'lastname', 'photoUrl']);
+      allow delete: if false;
+    }
+    // Products contain internal payment state: all product reads go through the
+    // API projection. This also avoids exposing reservation identifiers directly.
+    match /products/{id} { allow read, write: if false; }
+    match /orders/{id} { allow read, write: if false; }
+    match /listing_payment_reservations/{id} { allow read, write: if false; }
+    match /listing_payment_states/{id} { allow read, write: if false; }
+    match /order_payment_intents/{id} { allow read, write: if false; }
+    match /account_deletions/{id} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

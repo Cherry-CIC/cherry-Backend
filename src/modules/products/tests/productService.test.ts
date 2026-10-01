@@ -502,105 +502,44 @@ describe('ProductService pagination', () => {
     expect(result.status).toBe('sold');
   });
 
-  it('marks a product sold when an update removes all stock', async () => {
-    const product = createProduct('product-1', '2026-07-13T10:00:00.000Z');
-    const getById = jest.fn().mockResolvedValue(product);
-    const update = jest.fn().mockResolvedValue({
-      ...product,
-      number: 0,
-      status: 'sold',
-    });
-
+  it('rejects stock changes through the descriptive edit service', async () => {
+    process.env.LISTING_EDIT_ENABLED = 'true';
     const service = new ProductService(
-      { getById, update } as any,
+      {} as any,
       productLikeRepo,
       categoryRepo,
       charityRepo,
       postageSizeRepo,
     );
-
-    const result = await service.updateProduct('product-1', {
-      number: 0,
-    });
-
-    expect(update).toHaveBeenCalledWith('product-1', {
-      number: 0,
-      status: 'sold',
-    });
-    expect(result?.status).toBe('sold');
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { number: 0, expectedEditVersion: 0 } as any,
+        'user-1',
+      ),
+    ).rejects.toMatchObject({ code: 'LISTING_VALIDATION_FAILED' });
+    delete process.env.LISTING_EDIT_ENABLED;
   });
 
-  it('unlists an active product', async () => {
-    const product = createProduct('product-1', '2026-07-13T10:00:00.000Z');
-    const getById = jest.fn().mockResolvedValue(product);
-    const update = jest.fn().mockResolvedValue({
-      ...product,
-      status: 'unlisted',
-    });
-
-    const service = new ProductService(
-      { getById, update } as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-    );
-
-    const result = await service.unlistProduct('product-1');
-
-    expect(update).toHaveBeenCalledWith('product-1', {
-      status: 'unlisted',
-    });
-    expect(result?.status).toBe('unlisted');
-  });
-
-  it('relist an unlisted product with stock', async () => {
-    const product = {
-      ...createProduct('product-1', '2026-07-13T10:00:00.000Z'),
-      status: 'unlisted' as const,
-    };
-    const getById = jest.fn().mockResolvedValue(product);
-    const update = jest.fn().mockResolvedValue({
-      ...product,
-      status: 'active',
-    });
-
-    const service = new ProductService(
-      { getById, update } as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-    );
-
-    const result = await service.relistProduct('product-1');
-
-    expect(update).toHaveBeenCalledWith('product-1', {
-      status: 'active',
-    });
-    expect(result?.status).toBe('active');
-  });
-
-  it('rejects relisting a product with no stock', async () => {
-    const product = {
-      ...createProduct('product-1', '2026-07-13T10:00:00.000Z'),
-      number: 0,
-      status: 'unlisted' as const,
-    };
-
-    const service = new ProductService(
-      {
-        getById: jest.fn().mockResolvedValue(product),
-        update: jest.fn(),
-      } as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-    );
-
-    await expect(service.relistProduct('product-1')).rejects.toThrow(
-      'Product must have stock before it can be relisted',
-    );
-  });
+  it.each(['active', 'unlisted'] as const)(
+    'delegates %s with the authenticated owner to the atomic repository',
+    async (status) => {
+      const changeAvailability = jest.fn().mockResolvedValue({ status });
+      const service = new ProductService(
+        { changeAvailability } as any,
+        productLikeRepo,
+        categoryRepo,
+        charityRepo,
+        postageSizeRepo,
+      );
+      await (status === 'active'
+        ? service.relistProduct('product-1', 'user-1')
+        : service.unlistProduct('product-1', 'user-1'));
+      expect(changeAvailability).toHaveBeenCalledWith(
+        'product-1',
+        'user-1',
+        status,
+      );
+    },
+  );
 });

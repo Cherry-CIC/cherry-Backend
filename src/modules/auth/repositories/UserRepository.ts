@@ -1,3 +1,9 @@
+import {
+  assertSafetyVerified,
+  assertUnreserved,
+  requireVersion,
+  ListingSafetyError,
+} from '../../../shared/utils/listingSafety';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
@@ -181,6 +187,40 @@ export class UserRepository {
     anonymisedShipments: number;
     deletedLikes: number;
   }> {
+    // The tombstone serialises deletion against new listings and checkout.
+    // It remains after deletion so already issued tokens cannot recreate data.
+    const tombstone = this.db.collection('account_deletions').doc(firebaseUid);
+    await this.db.runTransaction(async (tx) => {
+      const products = await tx.get(
+        this.db.collection('products').where('userId', '==', firebaseUid),
+      );
+      const reservations = await tx.get(
+        this.db
+          .collection('listing_payment_reservations')
+          .where('userId', '==', firebaseUid),
+      );
+      for (const doc of products.docs) {
+        assertUnreserved(doc.data());
+        assertSafetyVerified(doc.data());
+      }
+      if (
+        reservations.docs.some(
+          (doc) => !['completed', 'cancelled'].includes(doc.data().state),
+        )
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_PAYMENT_PENDING',
+          'Complete or cancel your checkout before deleting your account.',
+        );
+      }
+      tx.set(
+        tombstone,
+        { startedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    });
+
     const userProfilesSnapshot = await this.db
       .collection(this.collectionName)
       .where('id', '==', firebaseUid)
@@ -212,7 +252,7 @@ export class UserRepository {
         .limit(1)
         .get();
 
-      if (relatedOrders.empty) {
+      if (relatedOrders.empty && productDoc.data().hasSales !== true) {
         unsoldProductDocs.push(productDoc);
       } else {
         soldProductDocs.push(productDoc);
@@ -244,7 +284,6 @@ export class UserRepository {
 
     const deleteDocRefs = [
       ...userProfilesSnapshot.docs.map((doc) => doc.ref),
-      ...unsoldProductDocs.map((doc) => doc.ref),
       ...likesSnapshot.docs.map((doc) => doc.ref),
     ];
 
@@ -274,10 +313,29 @@ export class UserRepository {
       });
     }
 
-    for (const doc of soldProductDocs) {
-      await doc.ref.update({
-        userId: DELETED_USER_MARKER,
-        updatedAt: FieldValue.serverTimestamp(),
+    for (const doc of [...soldProductDocs, ...unsoldProductDocs]) {
+      await this.db.runTransaction(async (tx) => {
+        const current = await tx.get(doc.ref);
+        if (!current.exists) return;
+        const data = current.data()!;
+        assertUnreserved(data);
+        assertSafetyVerified(data);
+        const history = await tx.get(
+          this.db
+            .collection('orders')
+            .where('productId', '==', doc.id)
+            .limit(1),
+        );
+        if (data.hasSales === true || !history.empty) {
+          tx.update(doc.ref, {
+            userId: DELETED_USER_MARKER,
+            status: data.number > 0 ? 'unlisted' : 'sold',
+            editVersion: requireVersion(data) + 1,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          tx.delete(doc.ref);
+        }
       });
     }
 

@@ -1,3 +1,10 @@
+import { createHash } from 'crypto';
+import {
+  ListingReservation,
+  ListingReservationRepository,
+  SAFE_STRIPE_RETRY_MS,
+} from '../repositories/ListingReservationRepository';
+import { ListingSafetyError } from '../../../shared/utils/listingSafety';
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { stripe } from '../../../shared/config/stripeConfig';
@@ -9,6 +16,7 @@ import { gbpToPence } from '../../../shared/utils/money';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
 
 export interface CreatePaymentSelection {
+  expectedEditVersion?: number;
   productId: string;
   shippingMethodId: string;
   pickupPointId: string;
@@ -17,6 +25,7 @@ export interface CreatePaymentSelection {
 }
 
 export interface VerifiedCheckoutPayment {
+  listingReservationId?: string;
   paymentIntentId: string;
   firebaseUid: string;
   productId: string;
@@ -35,6 +44,7 @@ export interface VerifiedCheckoutPayment {
 }
 
 export class PaymentService {
+  private reservations = new ListingReservationRepository();
   private paymentRepo = new PaymentRepository();
   private userRepo = new UserRepository();
   private productRepo = new ProductRepository();
@@ -50,6 +60,55 @@ export class PaymentService {
       throw new Error('User not found');
     }
 
+    const selectionKey = createHash('sha256')
+      .update(
+        JSON.stringify({
+          productId: selection.productId,
+          shippingMethodId: selection.shippingMethodId,
+          pickupPointId: selection.pickupPointId,
+          country: selection.country,
+          postalCode: selection.postalCode,
+        }),
+      )
+      .digest('hex');
+    const existing = await this.reservations.activeForProduct(
+      selection.productId,
+    );
+    if (existing) {
+      if (
+        existing.expiresAtMs <= Date.now() &&
+        ['creating', 'active'].includes(existing.state)
+      ) {
+        await this.cancelReservation(existing);
+        throw new ListingSafetyError(
+          409,
+          'CHECKOUT_EXPIRED',
+          'The previous checkout has expired. Refresh this listing.',
+        );
+      }
+      if (
+        existing.userId !== firebaseUid ||
+        existing.selectionKey !== selectionKey
+      )
+        throw new ListingSafetyError(
+          409,
+          'LISTING_PAYMENT_PENDING',
+          'A payment is already in progress for this listing.',
+        );
+      if (
+        selection.expectedEditVersion !== undefined &&
+        ![existing.reviewedVersion, existing.reservedVersion].includes(
+          selection.expectedEditVersion,
+        )
+      )
+        throw new ListingSafetyError(
+          409,
+          'LISTING_VERSION_CONFLICT',
+          'Refresh this listing before paying.',
+        );
+      // Missing-version retries are permitted only for the same reservation.
+      return this.materialisePayment(existing);
+    }
     const product = await this.productRepo.getById(selection.productId);
     if (!product) {
       throw new Error('Product not found');
@@ -107,20 +166,114 @@ export class PaymentService {
       totalAmount: String(totalAmount),
     };
 
-    const payment = await this.paymentRepo.createPaymentIntentForUser(
-      user.email,
-      totalAmount,
+    const customerId = await this.paymentRepo.customerForEmail(user.email);
+    const reservation = await this.reservations.reserve({
+      productId: selection.productId,
+      userId: firebaseUid,
+      customerId,
+      expectedEditVersion: selection.expectedEditVersion,
+      quotedVersion: product.editVersion ?? 0,
+      selectionKey,
+      quotedPrice: product.price,
+      quotedPostageSize: product.postageSize,
       metadata,
-    );
+      totalAmount,
+    });
+    return this.materialisePayment(reservation);
+  }
 
+  private async intentForReservation(reservation: ListingReservation) {
+    if (reservation.paymentIntentId)
+      return stripe.paymentIntents.retrieve(reservation.paymentIntentId);
+    if (Date.now() - reservation.createdAtMs >= SAFE_STRIPE_RETRY_MS)
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_RECONCILIATION_REQUIRED',
+        'This checkout needs support review.',
+      );
+    const intent = await this.paymentRepo.createPaymentIntentForUser(
+      reservation.customerId,
+      reservation.totalAmount,
+      reservation.metadata,
+      `listing-reservation-${reservation.id}`,
+    );
+    await this.reservations.attachIntent(reservation, intent.id);
+    return intent;
+  }
+
+  private async materialisePayment(reservation: ListingReservation) {
+    if (!['creating', 'active'].includes(reservation.state))
+      throw new ListingSafetyError(
+        409,
+        'CHECKOUT_FINISHED',
+        'This checkout has already finished.',
+      );
+    const intent = await this.intentForReservation(reservation);
+    await this.reservations.applyStripeState(intent);
+    if (['succeeded', 'canceled'].includes(intent.status))
+      throw new ListingSafetyError(
+        409,
+        'CHECKOUT_FINISHED',
+        'This checkout has already finished.',
+      );
+    const payment = await this.paymentRepo.clientResponse(
+      reservation.customerId,
+      intent,
+    );
     return {
       ...payment,
-      productAmount,
-      shippingFee,
-      securityFee,
-      totalAmount,
+      productAmount: Number(reservation.metadata.productAmount),
+      shippingFee: Number(reservation.metadata.shippingFee),
+      securityFee: Number(reservation.metadata.securityFee),
+      totalAmount: reservation.totalAmount,
       currency: 'GBP',
     };
+  }
+
+  private async cancelReservation(
+    reservation: ListingReservation,
+  ): Promise<void> {
+    let intent = await this.intentForReservation(reservation);
+    if (!['succeeded', 'canceled'].includes(intent.status)) {
+      try {
+        intent = await stripe.paymentIntents.cancel(intent.id);
+      } catch {
+        intent = await stripe.paymentIntents.retrieve(intent.id);
+      }
+    }
+    await this.reservations.applyStripeState(intent);
+    if (intent.status !== 'canceled')
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_STILL_ACTIONABLE',
+        'This payment cannot yet be cancelled.',
+      );
+  }
+
+  async cancelPaymentForUser(
+    uid: string,
+    paymentIntentId: string,
+  ): Promise<void> {
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (intent.metadata.firebaseUid !== uid)
+      throw new ListingSafetyError(
+        403,
+        'PAYMENT_NOT_OWNER',
+        'This payment belongs to another account.',
+      );
+    const id = intent.metadata.listingReservationId;
+    const reservation = id ? await this.reservations.get(id) : null;
+    if (
+      !reservation ||
+      reservation.userId !== uid ||
+      reservation.paymentIntentId !== intent.id
+    )
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_RECONCILIATION_REQUIRED',
+        'This checkout needs support review.',
+      );
+    await this.cancelReservation(reservation);
   }
 
   async verifySucceededPaymentIntentForUser(
@@ -142,11 +295,26 @@ export class PaymentService {
       throw new Error('Payment does not belong to the authenticated user');
     }
 
-    const productAmount = this.parseMetadataInteger(metadata.productAmount, 'productAmount');
-    const shippingFee = this.parseMetadataInteger(metadata.shippingFee, 'shippingFee');
-    const securityFee = this.parseMetadataInteger(metadata.securityFee, 'securityFee');
-    const totalAmount = this.parseMetadataInteger(metadata.totalAmount, 'totalAmount');
-    const shippingWeight = this.parseMetadataInteger(metadata.shippingWeight, 'shippingWeight');
+    const productAmount = this.parseMetadataInteger(
+      metadata.productAmount,
+      'productAmount',
+    );
+    const shippingFee = this.parseMetadataInteger(
+      metadata.shippingFee,
+      'shippingFee',
+    );
+    const securityFee = this.parseMetadataInteger(
+      metadata.securityFee,
+      'securityFee',
+    );
+    const totalAmount = this.parseMetadataInteger(
+      metadata.totalAmount,
+      'totalAmount',
+    );
+    const shippingWeight = this.parseMetadataInteger(
+      metadata.shippingWeight,
+      'shippingWeight',
+    );
 
     if (productAmount + shippingFee + securityFee !== totalAmount) {
       throw new Error('Payment pricing metadata is inconsistent');
@@ -168,7 +336,9 @@ export class PaymentService {
       throw new Error('Payment checkout metadata is incomplete');
     }
 
+    await this.reservations.applyStripeState(paymentIntent);
     return {
+      listingReservationId: metadata.listingReservationId || undefined,
       paymentIntentId: paymentIntent.id,
       firebaseUid,
       productId: metadata.productId,
@@ -187,9 +357,12 @@ export class PaymentService {
     };
   }
 
-  private parseMetadataInteger(value: string | undefined, field: string): number {
+  private parseMetadataInteger(
+    value: string | undefined,
+    field: string,
+  ): number {
     const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < 0) {
+    if (!value || !Number.isSafeInteger(parsed) || parsed < 0) {
       throw new Error(`Payment metadata ${field} is invalid`);
     }
     return parsed;

@@ -1,0 +1,18 @@
+{
+  "score": 2,
+  "summary": "Protected listing and payment writes and immutable media rules passed local emulator checks. Production deployment is blocked by unverified live rules/IAM and known frontend compatibility work; this prototype is not a complete production policy.",
+  "findings": [
+    {
+      "check": "Business Logic vs. Rules",
+      "severity": "major",
+      "issue": "Legacy username queries, product reads, address/locker writes and first-name profile uploads need explicit compatible access policies or frontend/API changes.",
+      "recommendation": "Complete the documented frontend compatibility work and staging journeys before integrating these rules."
+    },
+    {
+      "check": "Authority Source",
+      "severity": "major",
+      "issue": "Previously permissive rules and live storage ownership are unverified.",
+      "recommendation": "Verify deployed rules and IAM, set an audited media policy start time, and certify legacy photos from server-owned generation-specific provenance only."
+    }
+  ]
+}

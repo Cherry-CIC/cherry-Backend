@@ -183,6 +183,29 @@ describe('orderController.createOrder', () => {
     });
   });
 
+  it('replays an existing order with orderId and without creating another shipment', async () => {
+    mockCreatePaidOrderAndDecrementInventory.mockResolvedValueOnce({
+      id: 'order-1',
+      alreadyCreated: true,
+      shipmentStatus: 'pending',
+    });
+    mockGetShipmentByOrderId.mockResolvedValueOnce(null);
+    const res = createResponse();
+    await createOrder({ user: { uid: 'user-1' }, body: payload } as any, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          orderId: 'order-1',
+          shipmentStatus: 'pending',
+        }),
+      }),
+    );
+    expect(mockCreateShipmentForPaidOrder).not.toHaveBeenCalled();
+    expect(mockSendSellerLabelEmail).not.toHaveBeenCalled();
+  });
+
   it('creates a paid order and shipment', async () => {
     mockCreatePaidOrderAndDecrementInventory.mockResolvedValue({
       id: 'order-1',
@@ -683,13 +706,13 @@ describe('orderController.confirmOrderReceived', () => {
     mockGetShipmentByOrderId.mockResolvedValue(null);
   });
 
-    it('lets the buyer confirm a delivered order as received', async () => {
-      const deliveredOrder = {
-        ...shippedOrder,
-        status: 'delivered',
-        shipmentStatus: 'delivered',
-      };
-      mockGetOrderById.mockResolvedValue(deliveredOrder);
+  it('lets the buyer confirm a delivered order as received', async () => {
+    const deliveredOrder = {
+      ...shippedOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+    };
+    mockGetOrderById.mockResolvedValue(deliveredOrder);
     const req: any = {
       user: {
         uid: 'user-1',
@@ -882,13 +905,13 @@ describe('orderController.submitOrderDispute', () => {
     mockGetShipmentByOrderId.mockResolvedValue(null);
   });
 
-    it('lets the buyer submit a dispute for a delivered order', async () => {
-      const deliveredOrder = {
-        ...disputableOrder,
-        status: 'delivered',
-        shipmentStatus: 'delivered',
-      };
-      mockGetOrderById.mockResolvedValue(deliveredOrder);
+  it('lets the buyer submit a dispute for a delivered order', async () => {
+    const deliveredOrder = {
+      ...disputableOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+    };
+    mockGetOrderById.mockResolvedValue(deliveredOrder);
     const req: any = {
       user: {
         uid: 'user-1',

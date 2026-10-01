@@ -1,3 +1,4 @@
+import { sendListingSafetyError } from '../../../shared/utils/listingSafety';
 import { Request, Response } from 'express';
 import { admin, clientAuth } from '../../../shared/config/firebaseConfig';
 import { UserRepository } from '../repositories/UserRepository';
@@ -190,6 +191,7 @@ export const deleteAccount = async (req: Request, res: Response): Promise<void> 
             'Account deleted successfully',
         );
     } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
         ResponseHandler.internalServerError(
             res,
             'Failed to delete account',
