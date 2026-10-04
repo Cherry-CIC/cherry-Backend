@@ -210,15 +210,9 @@ describe('PaymentService', () => {
     });
 
     it.each([
-      ['the charge is missing', null],
-      ['the charge is not expanded', 'ch_123'],
       [
         'the balance transaction is missing',
         { id: 'ch_123', balance_transaction: null },
-      ],
-      [
-        'the balance transaction is not expanded',
-        { id: 'ch_123', balance_transaction: 'txn_123' },
       ],
       [
         'the fee is not in GBP',

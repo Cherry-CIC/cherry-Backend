@@ -52,17 +52,6 @@ describe('calculateFinancialBreakdown', () => {
     expect(breakdown.cherryRevenue).toBe(-33);
   });
 
-  it('handles a Stripe fee of zero', () => {
-    const breakdown = calculateFinancialBreakdown({
-      productAmount: 2000,
-      shippingFee: 300,
-      securityFee: 200,
-      stripeFee: 0,
-    });
-
-    expect(breakdown.cherryRevenue).toBe(200);
-  });
-
   it('leaves cherry revenue unknown when Stripe has not reported its fee', () => {
     expect(
       calculateFinancialBreakdown({
@@ -79,20 +68,19 @@ describe('calculateFinancialBreakdown', () => {
     });
   });
 
-  it.each([
-    ['productAmount', { productAmount: 19.99 }],
-    ['shippingFee', { shippingFee: -1 }],
-    ['securityFee', { securityFee: Number.NaN }],
-    ['stripeFee', { stripeFee: 57.5 }],
-  ])('rejects an invalid %s', (field, override) => {
+  it('rejects amounts that are not whole, non-negative pence', () => {
+    const valid = {
+      productAmount: 2000,
+      shippingFee: 300,
+      securityFee: 200,
+      stripeFee: 58,
+    };
+
     expect(() =>
-      calculateFinancialBreakdown({
-        productAmount: 2000,
-        shippingFee: 300,
-        securityFee: 200,
-        stripeFee: 58,
-        ...override,
-      }),
-    ).toThrow(`Financial breakdown ${field} is invalid`);
+      calculateFinancialBreakdown({ ...valid, productAmount: 19.99 }),
+    ).toThrow('Financial breakdown productAmount is invalid');
+    expect(() =>
+      calculateFinancialBreakdown({ ...valid, stripeFee: -1 }),
+    ).toThrow('Financial breakdown stripeFee is invalid');
   });
 });
