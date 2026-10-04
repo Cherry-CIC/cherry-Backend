@@ -63,9 +63,9 @@ export const listingSafetyResponses = {
   ListingValidationError: response(
     'LISTING_VALIDATION_FAILED, LISTING_INVALID_CATEGORY or LISTING_INVALID_MEDIA. No changes committed.',
   ),
-  ListingAuthenticationError: response(
-    'AUTHENTICATION_REQUIRED. A valid Firebase ID token is required.',
-  ),
+  ListingAuthenticationError: {
+    description: 'A valid Firebase ID token is required. Uses the existing authentication error envelope (success, message, error, timestamp).',
+  },
   ListingOwnershipError: response(
     'LISTING_NOT_OWNER or PAYMENT_NOT_OWNER. The authenticated user does not own the resource.',
   ),

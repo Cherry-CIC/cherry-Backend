@@ -7,7 +7,7 @@ import {
   assertSucceeds,
   RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import {
   ref,
   uploadBytes,
@@ -267,6 +267,16 @@ test('expiry and failure do not release actionable payments; cancellation does',
     editVersion: 3,
   });
 });
+test('a repeated cancellation is harmless after the seller deletes the listing', async () => {
+  const reservation = await reserve();
+  await reservations.attachIntent(reservation, 'pi_test');
+  const intent = { id: 'pi_test', status: 'canceled', metadata: reservation.metadata };
+  await reservations.applyStripeState(intent);
+  await repo.changeAvailability('listing', 'seller', 'delete');
+  await expect(reservations.applyStripeState(intent)).resolves.toBeUndefined();
+  expect((await firestore.doc('products/listing').get()).exists).toBe(false);
+  expect((await reservations.get(reservation.id))?.state).toBe('cancelled');
+});
 test('success and duplicate or delayed events keep purchased details frozen', async () => {
   const reservation = await reserve();
   await reservations.attachIntent(reservation, 'pi_test');
@@ -418,16 +428,6 @@ test.each([
       }),
     );
   }
-});
-test('users cannot access or promote another account', async () => {
-  const own = env.authenticatedContext('seller').firestore();
-  await assertSucceeds(
-    setDoc(doc(own, 'users/seller'), { id: 'seller', username: 'seller' }),
-  );
-  await assertFails(updateDoc(doc(own, 'users/seller'), { admin: true }));
-  await assertFails(
-    getDoc(doc(env.authenticatedContext('buyer').firestore(), 'users/seller')),
-  );
 });
 test('Storage enforces ownership, limits and permanent object immutability', async () => {
   const context = env.authenticatedContext('seller');

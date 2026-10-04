@@ -179,21 +179,21 @@ transactional media-claim protocol). A grace period and one reference scan alone
 are insufficient. There is deliberately no unattended deletion job in this PR.
 Disable bucket lifecycle rules that can delete referenced media.
 
-## Firebase rule prototype and compatibility
+## Firebase emulator fixtures and production compatibility
 
-`security/firestore.rules` and `security/storage.rules` are tested prototypes,
-not a claim about what is deployed. `firebase.listing-test.json` is an explicit
+`security/firestore.rules` and `security/storage.rules` are listing-only emulator fixtures,
+not deployable app policies or evidence of what is deployed. `firebase.listing-test.json` is an explicit
 emulator configuration, not production configuration. Never deploy it blindly.
 
-Firestore denies direct access to server-owned product/payment/order state and
-allows narrowly constrained own-profile access. Backend Admin SDK uses IAM and
+The Firestore fixture denies direct access to server-owned product/payment/order
+state. It deliberately does not define unrelated profile, address or locker policies. Backend Admin SDK uses IAM and
 bypasses these rules. Remove ALL broader overlapping grants when integrating;
 adding a restrictive match beside an existing permissive wildcard does not help.
 Storage prevents product overwrite/deletion even by the original uploader.
 Rules checks passed for ownership, missing metadata, object size, overwrite,
 metadata alteration and deletion. Backend byte validation remains essential.
 
-Known frontend compatibility work before deploying the prototype:
+Required compatibility review when integrating equivalent protections into live rules:
 
 - `UsernameService.getUsername` reads other users' private users documents and
   `isUsernameTaken` queries them. Route public-profile reads through the existing
@@ -202,11 +202,11 @@ Known frontend compatibility work before deploying the prototype:
 - `FirestoreService` directly queries products and has user/locker/address write
   paths. Route product reads through the existing API; audit and explicitly
   preserve validated owner-only address/locker/profile fields in production
-  rules, or move these paths behind authenticated endpoints. The prototype does
-  not silently allow unreviewed fields or collections.
+  rules, or move these paths behind authenticated endpoints. Preserve unrelated
+  working access policies; these fixtures are not a replacement for them.
 - Profile uploads currently use a first-name-derived shared `user_images` path.
-  Design a separate UID-scoped policy before deploying the default-deny Storage
-  prototype. Do not weaken the product-media namespace to support it.
+  Review its access policy separately; do not replace it with the default-deny
+  Storage fixture. Do not weaken the product-media namespace to support it.
 - Both new-listing uploads and editing uploads must adopt the protected namespace,
   content type and metadata. Current PR #525 uploads `products/{uid}/edit_*`
   without ownership metadata and can retain HEIC/HEIF. Convert these to supported
@@ -258,6 +258,39 @@ provenance and immutable media rules. Never roll back to the original unguarded
 writer while new intents can succeed. Drain or cancel actionable payments and
 reconcile orders before a code rollback that changes reservation semantics.
 Do not reset versions, remove locks or restore permissive Firebase rules.
+
+## Scope audit (4 October 2026)
+
+The audit reduced the change from 41 to 39 files. It removed the unrelated global
+401 response change, unused Firebase initialisation branch, profile-access policy
+and incidental order-test formatting. Authentication retains the existing 401
+envelope; listing validation, ownership and conflict errors retain their codes.
+The rule files are emulator fixtures only. Production integration must preserve
+unrelated app access and remove any overlapping grants that bypass listing safety.
+
+The remaining changes serve these requirements:
+
+| Area | Reason retained |
+| --- | --- |
+| Product validation, transactions and projections | Sparse edits, ownership, version conflicts and consistent reads |
+| Media validation and immutable Storage tests | Ownership, valid images and historical photo retention |
+| Payment reservations, cancellation and webhooks | Prevent edits while a payment can still succeed |
+| Order transaction and replay response | Prevent duplicate sales and inventory decrements |
+| Lifecycle and account deletion | Prevent deletion or availability changes bypassing payment locks |
+| Swagger, configuration, tests and release guide | Document and verify the contract and deployment prerequisites |
+
+A repeated cancellation after legitimate listing deletion now returns successfully
+using the recorded terminal payment state. A regression test covers this sequence.
+No safety check was removed to reduce the file count.
+
+Deployment remains blocked. With editing disabled, checkout still uses reservations
+and uncertified legacy listings cannot be unlisted, deleted or removed through
+account deletion. This requires a planned cutover, not an ordinary flag-off deploy.
+Abandoned reservations need cancellation, a later checkout attempt or operator
+reconciliation; there is no background expiry worker. Completed payments with
+missing orders/shipments require recovery, never another charge. Existing order
+retries also depend on the retained product/postage configuration, so changing
+postage configuration during reconciliation needs an operational review.
 
 ## Review evidence and limitations
 

@@ -1,6 +1,7 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Emulator fixture only. Do not deploy as a complete app policy.
     // New namespace must be empty or completely audited before activation.
     // ownerUid/mediaPolicy are only trustworthy after these rules are deployed.
     match /listing-media-v1/{uid}/{filename} {

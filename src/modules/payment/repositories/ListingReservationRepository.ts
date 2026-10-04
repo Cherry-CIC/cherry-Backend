@@ -236,6 +236,13 @@ export class ListingReservationRepository {
         tx.get(productRef),
         tx.get(eventRef),
       ]);
+      // A cancelled listing may legitimately be deleted before webhook retries.
+      // Already applied terminal events need no surviving product document.
+      if (
+        eventDoc.data()?.status === 'succeeded' ||
+        eventDoc.data()?.status === intent.status
+      )
+        return;
       if (!productDoc.exists)
         throw new Error('Payment listing is missing; reconciliation required');
       const product = productDoc.data()!;
@@ -258,11 +265,6 @@ export class ListingReservationRepository {
           'Payment reservation mismatch; reconciliation required',
         );
       }
-      if (
-        eventDoc.data()?.status === 'succeeded' ||
-        eventDoc.data()?.status === intent.status
-      )
-        return;
       if (
         reservation?.state === 'completed' ||
         reservation?.state === 'succeeded'
