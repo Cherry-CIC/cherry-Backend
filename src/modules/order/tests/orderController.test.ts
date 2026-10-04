@@ -599,6 +599,9 @@ describe('orderController order retrieval', () => {
       shippingFee: 399,
       securityFee: 200,
       totalAmount: 2599,
+      charityProceeds: 2000,
+      stripeFee: 59,
+      cherryRevenue: 141,
       currency: 'GBP',
       productId: 'product-1',
       productName: 'Winter Coat',
@@ -676,6 +679,12 @@ describe('orderController order retrieval', () => {
         },
       }),
     );
+
+    const returnedOrder = res.json.mock.calls[0][0].data.order;
+    expect(returnedOrder.totalAmount).toBe(2599);
+    expect(returnedOrder).not.toHaveProperty('charityProceeds');
+    expect(returnedOrder).not.toHaveProperty('stripeFee');
+    expect(returnedOrder).not.toHaveProperty('cherryRevenue');
   });
 
   it('forbids access to another user’s order', async () => {

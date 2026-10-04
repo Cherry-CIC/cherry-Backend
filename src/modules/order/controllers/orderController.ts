@@ -152,9 +152,12 @@ const parseDisputeReason = (value: unknown): OrderDisputeReason | null => {
 
 const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
   const deliveryState = getDeliveryState(order, shipment);
+  // The financial breakdown is internal bookkeeping, not part of the client
+  // order contract.
+  const { charityProceeds, stripeFee, cherryRevenue, ...clientOrder } = order;
 
   return {
-    ...order,
+    ...clientOrder,
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
