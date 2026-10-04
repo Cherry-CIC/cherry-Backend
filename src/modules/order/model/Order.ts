@@ -42,6 +42,11 @@ export interface Order {
   shippingFee: number;
   securityFee: number;
   totalAmount: number;
+  // Financial breakdown in pence. Absent on orders created before it was
+  // recorded; stripeFee and cherryRevenue are null until Stripe reports its fee.
+  charityProceeds?: number;
+  stripeFee?: number | null;
+  cherryRevenue?: number | null;
   currency: 'GBP';
   productId: string;
   productName: string;

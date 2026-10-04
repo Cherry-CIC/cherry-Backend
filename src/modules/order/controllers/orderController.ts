@@ -4,6 +4,7 @@ import { UserRepository } from '../../auth/repositories/UserRepository';
 import { OrderRepository } from '../repositories/OrderRepository';
 import { ShipmentService } from '../../shipping/services/ShipmentService';
 import { PaymentService } from '../../payment/services/PaymentService';
+import { calculateFinancialBreakdown } from '../../payment/services/financialBreakdown';
 import { sendcloudConfig } from '../../../shared/config/sendcloudConfig';
 import { ProductRepository } from '../../products/repositories/ProductRepository';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
@@ -316,6 +317,18 @@ export const createOrder = async (
       return;
     }
 
+    const financialBreakdown = calculateFinancialBreakdown({
+      productAmount: verifiedPayment.productAmount,
+      shippingFee: verifiedPayment.shippingFee,
+      securityFee: verifiedPayment.securityFee,
+      stripeFee: verifiedPayment.stripeFee,
+    });
+    if (financialBreakdown.stripeFee === null) {
+      console.warn(
+        `Stripe fee not yet available for payment ${paymentIntentId}; order saved without cherry revenue`,
+      );
+    }
+
     const orderRepo = new OrderRepository();
     let savedOrder;
     try {
@@ -326,6 +339,9 @@ export const createOrder = async (
         shippingFee: verifiedPayment.shippingFee,
         securityFee: verifiedPayment.securityFee,
         totalAmount: verifiedPayment.totalAmount,
+        charityProceeds: financialBreakdown.charityProceeds,
+        stripeFee: financialBreakdown.stripeFee,
+        cherryRevenue: financialBreakdown.cherryRevenue,
         currency: verifiedPayment.currency,
         productId: verifiedPayment.productId,
         productName: product.name,
