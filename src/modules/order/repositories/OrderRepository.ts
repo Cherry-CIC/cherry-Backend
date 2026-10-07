@@ -42,11 +42,16 @@ export class OrderRepository {
       .collection('order_payment_intents')
       .doc(input.paymentIntentId);
     const productRef = firestore.collection('products').doc(input.productId);
+    // Written by the Stripe webhook, which may arrive before this call
+    const paymentRecordRef = firestore
+      .collection('payments')
+      .doc(input.paymentIntentId);
 
     return firestore.runTransaction(async (transaction) => {
-      const [paymentLock, productDoc] = await Promise.all([
+      const [paymentLock, productDoc, paymentRecord] = await Promise.all([
         transaction.get(paymentLockRef),
         transaction.get(productRef),
+        transaction.get(paymentRecordRef),
       ]);
 
       if (paymentLock.exists) {
@@ -77,7 +82,24 @@ export class OrderRepository {
         throw new Error('Product price changed');
       }
 
-      const orderData = this.buildOrderData(input);
+      const confirmedPayment =
+        paymentRecord.exists && paymentRecord.data()!.status === 'paid'
+          ? paymentRecord.data()!
+          : null;
+      const orderData = {
+        ...this.buildOrderData(input),
+        ...(confirmedPayment
+          ? {
+              stripeChargeId: confirmedPayment.stripeChargeId ?? null,
+              stripeBalanceTransactionId:
+                confirmedPayment.stripeBalanceTransactionId ?? null,
+              paidAt:
+                typeof confirmedPayment.paidAt?.toDate === 'function'
+                  ? confirmedPayment.paidAt.toDate()
+                  : confirmedPayment.paidAt,
+            }
+          : {}),
+      };
       transaction.set(orderRef, {
         ...orderData,
         email: input.email,
@@ -92,6 +114,12 @@ export class OrderRepository {
         userId: input.userId,
         createdAt: new Date(),
       });
+      if (paymentRecord.exists) {
+        transaction.update(paymentRecordRef, {
+          orderId: orderRef.id,
+          updatedAt: new Date(),
+        });
+      }
 
       return {
         id: orderRef.id,
@@ -200,6 +228,7 @@ export class OrderRepository {
       ),
       buyerDeliveryEmailSentAt: toDate(data.buyerDeliveryEmailSentAt),
       buyerDisputedAt: toDate(data.buyerDisputedAt),
+      paidAt: toDate(data.paidAt),
     } as Order;
   }
 }
