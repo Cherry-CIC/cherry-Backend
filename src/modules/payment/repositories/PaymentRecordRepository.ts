@@ -42,9 +42,18 @@ export class PaymentRecordRepository {
         : null;
       const orderDoc = orderRef ? await transaction.get(orderRef) : null;
 
+      const stripeChargeId =
+        input.stripeChargeId ?? existing?.stripeChargeId ?? null;
+      const stripeBalanceTransactionId =
+        input.stripeBalanceTransactionId ??
+        existing?.stripeBalanceTransactionId ??
+        null;
+
       const now = new Date();
       transaction.set(paymentRef, {
         ...input,
+        stripeChargeId,
+        stripeBalanceTransactionId,
         orderId,
         firstReceivedAt: existing?.firstReceivedAt ?? now,
         updatedAt: now,
@@ -53,8 +62,8 @@ export class PaymentRecordRepository {
       if (input.status === 'paid' && orderRef && orderDoc?.exists) {
         transaction.update(orderRef, {
           paymentStatus: 'succeeded',
-          stripeChargeId: input.stripeChargeId,
-          stripeBalanceTransactionId: input.stripeBalanceTransactionId,
+          stripeChargeId,
+          stripeBalanceTransactionId,
           paidAt: input.paidAt,
         });
       }

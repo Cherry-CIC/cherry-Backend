@@ -78,6 +78,27 @@ describe('PaymentRecordRepository.recordPayment', () => {
     expect(fake.store.size).toBe(1);
   });
 
+  it('keeps saved Stripe IDs when a retry arrives without them', async () => {
+    fake.store.set('order_payment_intents/pi_123', { orderId: 'order-1' });
+    fake.store.set('orders/order-1', { status: 'paid' });
+    await repo.recordPayment(paidInput());
+
+    await repo.recordPayment(
+      paidInput({
+        stripeChargeId: null,
+        stripeBalanceTransactionId: null,
+        lastStripeEventId: 'evt_2',
+      }),
+    );
+
+    for (const path of ['payments/pi_123', 'orders/order-1']) {
+      expect(fake.store.get(path)).toMatchObject({
+        stripeChargeId: 'ch_123',
+        stripeBalanceTransactionId: 'txn_123',
+      });
+    }
+  });
+
   it('never downgrades a paid payment to flagged', async () => {
     await repo.recordPayment(paidInput());
 
