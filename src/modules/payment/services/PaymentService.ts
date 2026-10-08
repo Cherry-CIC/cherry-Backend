@@ -1,3 +1,4 @@
+import { CheckoutContextRepository } from '../CheckoutContextRepository';
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { stripe } from '../../../shared/config/stripeConfig';
@@ -17,6 +18,7 @@ export interface CreatePaymentSelection {
 }
 
 export interface VerifiedCheckoutPayment {
+  checkoutSessionId?: string;
   paymentIntentId: string;
   firebaseUid: string;
   productId: string;
@@ -36,6 +38,7 @@ export interface VerifiedCheckoutPayment {
 
 export class PaymentService {
   private paymentRepo = new PaymentRepository();
+  private checkoutRepo = new CheckoutContextRepository();
   private userRepo = new UserRepository();
   private productRepo = new ProductRepository();
   private postageSizeRepo = new PostageSizeRepository();
@@ -107,14 +110,36 @@ export class PaymentService {
       totalAmount: String(totalAmount),
     };
 
-    const payment = await this.paymentRepo.createPaymentIntentForUser(
-      user.email,
-      totalAmount,
+    const checkoutSessionId = await this.checkoutRepo.start({
+      buyerUid: firebaseUid,
+      sellerUid: product.userId,
+      productId: selection.productId,
+      productName: product.name,
+      buyerEmail: user.email,
       metadata,
-    );
+    });
+    let payment;
+    try {
+      payment = await this.paymentRepo.createPaymentIntentForUser(
+        user.email,
+        totalAmount,
+        { ...metadata, checkoutSessionId },
+      );
+      await this.checkoutRepo.attachPayment(
+        checkoutSessionId,
+        payment.paymentIntentId,
+        payment.customer,
+      );
+    } catch (error) {
+      // An HTTP timeout is not proof that Stripe did not create/capture payment.
+      // Preserve context for reconciliation; deletion must not cancel or refund.
+      await this.checkoutRepo.flagUncertain(checkoutSessionId);
+      throw error;
+    }
 
     return {
       ...payment,
+      checkoutSessionId,
       productAmount,
       shippingFee,
       securityFee,
@@ -142,11 +167,26 @@ export class PaymentService {
       throw new Error('Payment does not belong to the authenticated user');
     }
 
-    const productAmount = this.parseMetadataInteger(metadata.productAmount, 'productAmount');
-    const shippingFee = this.parseMetadataInteger(metadata.shippingFee, 'shippingFee');
-    const securityFee = this.parseMetadataInteger(metadata.securityFee, 'securityFee');
-    const totalAmount = this.parseMetadataInteger(metadata.totalAmount, 'totalAmount');
-    const shippingWeight = this.parseMetadataInteger(metadata.shippingWeight, 'shippingWeight');
+    const productAmount = this.parseMetadataInteger(
+      metadata.productAmount,
+      'productAmount',
+    );
+    const shippingFee = this.parseMetadataInteger(
+      metadata.shippingFee,
+      'shippingFee',
+    );
+    const securityFee = this.parseMetadataInteger(
+      metadata.securityFee,
+      'securityFee',
+    );
+    const totalAmount = this.parseMetadataInteger(
+      metadata.totalAmount,
+      'totalAmount',
+    );
+    const shippingWeight = this.parseMetadataInteger(
+      metadata.shippingWeight,
+      'shippingWeight',
+    );
 
     if (productAmount + shippingFee + securityFee !== totalAmount) {
       throw new Error('Payment pricing metadata is inconsistent');
@@ -169,6 +209,7 @@ export class PaymentService {
     }
 
     return {
+      checkoutSessionId: metadata.checkoutSessionId || undefined,
       paymentIntentId: paymentIntent.id,
       firebaseUid,
       productId: metadata.productId,
@@ -187,7 +228,10 @@ export class PaymentService {
     };
   }
 
-  private parseMetadataInteger(value: string | undefined, field: string): number {
+  private parseMetadataInteger(
+    value: string | undefined,
+    field: string,
+  ): number {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 0) {
       throw new Error(`Payment metadata ${field} is invalid`);

@@ -1,33 +1,47 @@
 import { Request, Response, NextFunction } from 'express';
 import { admin } from '../config/firebaseConfig';
 import { ResponseHandler } from '../utils/responseHandler';
+import { isAccountRestricted } from '../../modules/account-deletion/access';
 
-export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const authHeader = req.headers.authorization;
+export async function authMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    ResponseHandler.unauthorized(res, 'Authorisation header is required');
+    return;
+  }
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        ResponseHandler.unauthorized(res, 'Authorization header is required', 'Missing or invalid Bearer token');
-        return;
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(authHeader.slice(7), true);
+    if (typeof decodedToken.uid !== 'string' || !decodedToken.uid) {
+      throw new Error('Missing account identity');
     }
-
-    const token = authHeader.split(' ')[1];
-
-    try {
-        // Try to verify as ID token first
-        let decodedToken;
-        try {
-            decodedToken = await admin.auth().verifyIdToken(token);
-        } catch (idTokenError) {
-            // If ID token verification fails, try custom token verification
-            // Note: Custom tokens can't be directly verified, but we can create a session
-            // For now, we'll accept that custom tokens need to be exchanged for ID tokens on client
-            throw idTokenError;
-        }
-
-        (req as any).user = decodedToken;
-        next();
-    } catch {
-        ResponseHandler.unauthorized(res, 'Invalid authentication token', 'Token verification failed');
-        return;
+  } catch {
+    ResponseHandler.unauthorized(res, 'Invalid authentication token');
+    return;
+  }
+  try {
+    if (await isAccountRestricted(decodedToken.uid)) {
+      ResponseHandler.forbidden(
+        res,
+        'Account deletion has been requested',
+        'ACCOUNT_DELETION_PENDING',
+      );
+      return;
     }
+  } catch {
+    ResponseHandler.custom(
+      res,
+      503,
+      false,
+      'Account access could not be verified',
+    );
+    return;
+  }
+  (req as any).user = decodedToken;
+  next();
 }

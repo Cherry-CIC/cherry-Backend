@@ -61,6 +61,9 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
   const createService = () => {
     const shipmentRepository = {
       getShipmentByOrderId: jest.fn().mockResolvedValue(null),
+      beginShipmentCreation: jest
+        .fn()
+        .mockResolvedValue({ order, attemptId: 'attempt-1' }),
       createShipment: jest.fn(async (shipment) => ({
         id: 'shipment-1',
         ...shipment,
@@ -119,6 +122,7 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
         trackingNumber: 'TRACK123',
         trackingUrl: 'https://track.example/123',
       }),
+      'attempt-1',
     );
   });
 
@@ -138,5 +142,15 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
         to_service_point: 999,
       }),
     );
+  });
+  it('does not contact Sendcloud if the current order cannot be claimed', async () => {
+    const { service, sendcloudService, shipmentRepository } = createService();
+    shipmentRepository.beginShipmentCreation.mockRejectedValueOnce(
+      new Error('Order is no longer available for shipment'),
+    );
+    await expect(service.createShipmentForPaidOrder(order)).rejects.toThrow(
+      'no longer available',
+    );
+    expect(sendcloudService.createParcel).not.toHaveBeenCalled();
   });
 });

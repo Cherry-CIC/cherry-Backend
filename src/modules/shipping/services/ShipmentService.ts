@@ -25,6 +25,8 @@ export class ShipmentService {
       return { shipment: existingShipment, sendcloudParcel: null };
     }
 
+    const claim = await this.shipmentRepository.beginShipmentCreation(order.id);
+    order = claim.order;
     const labelMode = sendcloudConfig.labelMode;
     const requestLabel = labelMode !== 'off';
     const shipmentMethod =
@@ -68,26 +70,29 @@ export class ShipmentService {
     const sendcloudParcel =
       await this.sendcloudService.createParcel(parcelData);
 
-    const shipment = await this.shipmentRepository.createShipment({
-      orderId: order.id,
-      deliveryType: order.deliveryType,
-      shippingOptionId: order.shippingOptionId,
-      provider: 'sendcloud',
-      checkoutIdentifier: order.shippingOptionId,
-      pickupPoint: order.pickupPoint,
-      sendcloudId: sendcloudParcel.id,
-      trackingNumber: sendcloudParcel.tracking_number ?? null,
-      trackingUrl: sendcloudParcel.tracking_url ?? null,
-      carrier: sendcloudParcel.carrier?.name ?? order.shippingCarrier ?? null,
-      status: 'announced',
-      labelUrl:
-        sendcloudParcel.label?.normal_printer?.[0] ??
-        sendcloudParcel.label?.label_printer ??
-        null,
-      parcel: parcelData,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    const shipment = await this.shipmentRepository.createShipment(
+      {
+        orderId: order.id,
+        deliveryType: order.deliveryType,
+        shippingOptionId: order.shippingOptionId,
+        provider: 'sendcloud',
+        checkoutIdentifier: order.shippingOptionId,
+        pickupPoint: order.pickupPoint,
+        sendcloudId: sendcloudParcel.id,
+        trackingNumber: sendcloudParcel.tracking_number ?? null,
+        trackingUrl: sendcloudParcel.tracking_url ?? null,
+        carrier: sendcloudParcel.carrier?.name ?? order.shippingCarrier ?? null,
+        status: 'announced',
+        labelUrl:
+          sendcloudParcel.label?.normal_printer?.[0] ??
+          sendcloudParcel.label?.label_printer ??
+          null,
+        parcel: parcelData,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      claim.attemptId,
+    );
 
     return { shipment, sendcloudParcel };
   }

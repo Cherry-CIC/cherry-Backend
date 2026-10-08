@@ -242,6 +242,9 @@ export const handleSendcloudWebhook = async (
         if (
           status === 'delivered' &&
           order &&
+          !order.deletionMinimised &&
+          typeof order.email === 'string' &&
+          order.email.length > 0 &&
           !order.buyerDeliveryEmailSentAt
         ) {
           try {

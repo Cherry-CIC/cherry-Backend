@@ -1,0 +1,57 @@
+rules_version = '2';
+// Prototype complete replacement for emulator verification. Never append to an
+// allow-all rule: matching allows are additive. Review frontend compatibility.
+// users/{uid}: private self-owned profile. id immutable, no privilege fields.
+// products: server-written; direct GET is authenticated and guard-aware.
+// orders: server-written; buyer-only GET. Private deletion/retention data denied.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function active(uid) {
+      return !exists(/databases/$(database)/documents/account_deletion_guards/$(uid));
+    }
+    function self(uid) {
+      return request.auth != null && request.auth.uid == uid && active(uid);
+    }
+    function validProfile(data, uid) {
+      return data.keys().hasAll(['id', 'email']) &&
+        data.keys().hasOnly(['id', 'email', 'displayName', 'firstname', 'username', 'phone', 'photoURL', 'photoUrl', 'createdAt', 'updatedAt']) &&
+        data.id == uid && data.email is string && data.email.size() <= 254 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+        (!('firstname' in data) || (data.firstname is string && data.firstname.size() <= 100)) &&
+        (!('username' in data) || (data.username is string && data.username.size() <= 50)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 2048)) &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2048)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+    function validAddress(data) {
+      return data.keys().hasAll(['addressLine1', 'city', 'postcode', 'country', 'updatedAt']) &&
+        data.keys().hasOnly(['addressLine1', 'addressLine2', 'city', 'postcode', 'country', 'formattedAddress', 'updatedAt']) &&
+        data.addressLine1 is string && data.addressLine1.size() <= 200 &&
+        data.city is string && data.city.size() <= 100 &&
+        data.postcode is string && data.postcode.size() <= 20 &&
+        data.country is string && data.country.size() <= 100 && data.updatedAt is timestamp &&
+        (!('addressLine2' in data) || (data.addressLine2 is string && data.addressLine2.size() <= 200)) &&
+        (!('formattedAddress' in data) || (data.formattedAddress is string && data.formattedAddress.size() <= 500));
+    }
+    match /users/{uid} {
+      allow get: if self(uid);
+      allow create: if self(uid) && validProfile(request.resource.data, uid);
+      allow update: if self(uid) && validProfile(request.resource.data, uid) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['id', 'createdAt']);
+      match /address/{id} {
+        allow read, delete: if self(uid);
+        allow create, update: if self(uid) && validAddress(request.resource.data);
+      }
+    }
+    match /products/{id} {
+      allow get: if request.auth != null && active(request.auth.uid) &&
+        resource.data.userId is string && active(resource.data.userId);
+    }
+    match /orders/{id} {
+      allow get: if request.auth != null && self(resource.data.userId);
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

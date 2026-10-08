@@ -89,17 +89,45 @@ const database = (records: RecordFixture[], ignoreFilters = false) => {
       };
     },
   });
-  const collection = jest.fn(() => query());
+  const guardGet = jest.fn().mockResolvedValue({ exists: false });
+  const collection = jest.fn((name: string) =>
+    name === 'account_deletion_guards'
+      ? { doc: jest.fn().mockReturnValue({ get: guardGet }) }
+      : query(),
+  );
   return {
     db: { collection } as unknown as FirebaseFirestore.Firestore,
     collection,
     where,
     orderBy,
     read,
+    guardGet,
   };
 };
 
 describe('UserProductRepository', () => {
+  it('hides guarded sellers without reading their remaining listings', async () => {
+    const source = database([fixture('remaining-listing')]);
+    source.guardGet.mockResolvedValueOnce({ exists: true });
+
+    await expect(
+      new UserProductRepository(source.db).getPage('seller-uid', 20),
+    ).resolves.toEqual({ products: [], nextPosition: null });
+    expect(source.read).not.toHaveBeenCalled();
+    expect(source.collection).not.toHaveBeenCalledWith('products');
+  });
+
+  it('fails closed if the injected database cannot read the seller guard', async () => {
+    const source = database([fixture('remaining-listing')]);
+    const failure = new Error('Guard unavailable');
+    source.guardGet.mockRejectedValueOnce(failure);
+
+    await expect(
+      new UserProductRepository(source.db).getPage('seller-uid', 20),
+    ).rejects.toBe(failure);
+    expect(source.read).not.toHaveBeenCalled();
+  });
+
   it.each([' padded ', 'control\u0085id'])(
     'excludes document IDs that cannot safely round-trip through detail URLs and cursors',
     async (id) => {
@@ -170,9 +198,7 @@ describe('UserProductRepository', () => {
     };
     inspectKeys(result);
     expect(source.collection).toHaveBeenCalledWith('products');
-    expect(source.where.mock.calls).toEqual([
-      ['userId', '==', 'seller-uid'],
-    ]);
+    expect(source.where.mock.calls).toEqual([['userId', '==', 'seller-uid']]);
     expect(source.orderBy.mock.calls[0]).toEqual(['createdAt', 'desc']);
     expect(source.orderBy.mock.calls[1][1]).toBe('desc');
   });
@@ -272,12 +298,10 @@ describe('UserProductRepository', () => {
       nextPosition: null,
     });
     source.collection.mockClear();
-    await expect(repository.getPage('deleted_user', 20)).resolves.toEqual(
-      {
-        products: [],
-        nextPosition: null,
-      },
-    );
+    await expect(repository.getPage('deleted_user', 20)).resolves.toEqual({
+      products: [],
+      nextPosition: null,
+    });
     expect(source.collection).not.toHaveBeenCalled();
   });
 
@@ -418,11 +442,7 @@ describe('UserProductRepository', () => {
     const first = await repository.getPage('seller-uid', 50);
     expect(first.products).toHaveLength(50);
     expect(first.nextPosition?.id).toBe(first.products[49].id);
-    const last = await repository.getPage(
-      'seller-uid',
-      1,
-      first.nextPosition!,
-    );
+    const last = await repository.getPage('seller-uid', 1, first.nextPosition!);
     expect(last.products).toHaveLength(1);
     expect(last.nextPosition).toBeNull();
   });

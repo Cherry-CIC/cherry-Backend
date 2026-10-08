@@ -250,4 +250,36 @@ describe('shippingController', () => {
     expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });
+
+  it.each([
+    { deletionMinimised: true, email: 'retained-buyer@example.test' },
+    { deletionMinimised: false, email: undefined },
+  ])(
+    'does not send a late delivery notification using erased or minimised contact context',
+    async (privacy) => {
+      mockGetShipmentBySendcloudId.mockResolvedValue({
+        id: 'shipment-1',
+        orderId: 'order-1',
+        status: 'delivered',
+      });
+      mockGetOrderById.mockResolvedValue({
+        id: 'order-1',
+        userId: 'user-1',
+        productName: 'Removed listing',
+        ...privacy,
+      });
+      const res = createResponse();
+      await handleSendcloudWebhook(
+        {
+          body: {
+            action: 'parcel_status_changed',
+            parcel: { id: 123, status: { message: 'Delivered' } },
+          },
+        } as any,
+        res,
+      );
+      expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    },
+  );
 });

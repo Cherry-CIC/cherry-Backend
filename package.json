@@ -21,12 +21,14 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.0",
     "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
+    "@typescript-eslint/parser": "^8.71.0",
     "eslint": "^9.29.0",
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-prettier": "^5.5.0",
@@ -46,6 +48,11 @@
     "lint": "eslint 'src/**/*.{ts,js}' --fix",
     "format": "prettier --write .",
     "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",
-    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list"
+    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list",
+    "deletion:dry-run": "npm run build && node dist/scripts/accountDeletion.js dry-run",
+    "deletion:worker": "node dist/scripts/accountDeletion.js run --apply",
+    "test:deletion": "jest --runInBand src/modules/account-deletion",
+    "lint:check": "eslint src --no-fix",
+    "test:deletion:emulator": "jest --config jest.deletion-emulator.config.js --runInBand"
   }
 }

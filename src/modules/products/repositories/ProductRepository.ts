@@ -1,6 +1,12 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Product, ProductStatus } from '../model/Product';
 import { FieldPath, Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { assertNoUnresolvedCheckouts } from '../../payment/CheckoutContextRepository';
+import {
+  assertAccountsActive,
+  filterActiveOwners,
+  isAccountRestricted,
+} from '../../account-deletion/access';
 
 export interface ProductListFilters {
   userId?: string;
@@ -22,35 +28,51 @@ export interface ProductQueryPage {
   items: Product[];
   hasMore: boolean;
 }
-
 export class ProductRepository {
-  private db = firestore;
+  constructor(private readonly db: FirebaseFirestore.Firestore = firestore) {}
   private collectionName = 'products';
 
+  private async visible(query: FirebaseFirestore.Query): Promise<Product[]> {
+    const snapshot = await query.get();
+    return filterActiveOwners(
+      snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()!)),
+      (product) => product.userId,
+      this.db,
+    );
+  }
+
   async getAll(): Promise<Product[]> {
-    const snapshot = await this.db.collection(this.collectionName).get();
-    return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
+    return this.visible(this.db.collection(this.collectionName));
   }
 
   async getById(id: string): Promise<Product | null> {
     const doc = await this.db.collection(this.collectionName).doc(id).get();
-    if (!doc.exists) {
+    if (!doc.exists) return null;
+    const product = this.mapToProduct(doc.id, doc.data()!);
+    if (!product.userId || (await isAccountRestricted(product.userId, this.db)))
       return null;
-    }
-    const data = doc.data()!;
-    return this.mapToProduct(doc.id, data);
+    return product;
+  }
+
+  /** Server-only fulfilment lookup. The caller must first verify a succeeded payment. */
+  async getForPaidOrder(id: string): Promise<Product | null> {
+    const doc = await this.db.collection(this.collectionName).doc(id).get();
+    return doc.exists ? this.mapToProduct(doc.id, doc.data()!) : null;
   }
 
   async create(product: Product): Promise<Product> {
-    const docRef = await this.db.collection(this.collectionName).add({
-      ...product,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+    const docRef = this.db.collection(this.collectionName).doc();
+    await this.db.runTransaction(async (transaction) => {
+      await assertAccountsActive(transaction, [product.userId], this.db);
+      transaction.create(docRef, {
+        ...product,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     });
-
     return {
-      id: docRef.id,
       ...product,
+      id: docRef.id,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -61,57 +83,70 @@ export class ProductRepository {
     product: Partial<Omit<Product, 'id' | 'createdAt' | 'updatedAt'>>,
   ): Promise<Product | null> {
     const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    await docRef.update({
-      ...product,
-      updatedAt: FieldValue.serverTimestamp(),
+    const exists = await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) return false;
+      const owner = doc.data()!.userId;
+      if (product.userId !== undefined && product.userId !== owner)
+        throw new Error('Product ownership cannot be changed');
+      await assertAccountsActive(transaction, [owner], this.db);
+      const financialFields: (keyof typeof product)[] = [
+        'price',
+        'number',
+        'postageSize',
+        'charityId',
+        'donation',
+        'status',
+      ];
+      if (
+        financialFields.some(
+          (key) => product[key] !== undefined && product[key] !== doc.get(key),
+        )
+      ) {
+        await assertNoUnresolvedCheckouts(transaction, id, this.db);
+      }
+      transaction.update(docRef, {
+        ...product,
+        userId: owner,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
     });
-
-    return this.getById(id);
+    return exists ? this.getById(id) : null;
   }
 
   async delete(id: string): Promise<boolean> {
     const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
-      return false;
-    }
-
-    await docRef.delete();
-    return true;
+    return this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) return false;
+      await assertAccountsActive(transaction, [doc.data()!.userId], this.db);
+      await assertNoUnresolvedCheckouts(transaction, id, this.db);
+      transaction.delete(docRef);
+      return true;
+    });
   }
 
   async getProductsByCategory(categoryId: string): Promise<Product[]> {
-    const snapshot = await this.db
-      .collection(this.collectionName)
-      .where('categoryId', '==', categoryId)
-      .get();
-
-    return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
+    return this.visible(
+      this.db
+        .collection(this.collectionName)
+        .where('categoryId', '==', categoryId),
+    );
   }
 
   async getByUserId(userId: string): Promise<Product[]> {
-    const snapshot = await this.db
-      .collection(this.collectionName)
-      .where('userId', '==', userId)
-      .get();
-
-    return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
+    return this.visible(
+      this.db.collection(this.collectionName).where('userId', '==', userId),
+    );
   }
 
   async getProductsByCharity(charityId: string): Promise<Product[]> {
-    const snapshot = await this.db
-      .collection(this.collectionName)
-      .where('charityId', '==', charityId)
-      .get();
-
-    return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
+    return this.visible(
+      this.db
+        .collection(this.collectionName)
+        .where('charityId', '==', charityId),
+    );
   }
 
   async getPageByFilters(
@@ -119,6 +154,15 @@ export class ProductRepository {
     limit: number,
     cursor?: ProductQueryCursor,
   ): Promise<ProductQueryPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw new Error('Invalid product page size');
+    }
+    if (
+      filters.userId &&
+      (await isAccountRestricted(filters.userId, this.db))
+    ) {
+      return { items: [], hasMore: false };
+    }
     let query: FirebaseFirestore.Query = this.db.collection(
       this.collectionName,
     );
@@ -163,36 +207,44 @@ export class ProductRepository {
       query = query.startAfter(cursor.createdAt, cursor.id);
     }
 
-    const snapshot = await query.limit(limit + 1).get();
-    const docs = snapshot.docs.slice(0, limit);
-
-    return {
-      items: docs.map((doc) => this.mapToProduct(doc.id, doc.data())),
-      hasMore: snapshot.docs.length > limit,
-    };
-  }
-  /**
-   * Adjust the likes count by a signed delta.
-   * Guarantees the likes never go below zero.
-   */
-  async adjustLikes(id: string, delta: number): Promise<Product | null> {
-    const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
-      return null;
+    // Deleting owners may still have source documents until cleanup runs.
+    // Scan past those documents before deciding the visible page boundary.
+    const visible: Product[] = [];
+    let scanned = 0;
+    while (visible.length <= limit) {
+      if (scanned >= 5000) throw new Error('Product scan limit exceeded');
+      const count = Math.min(scanned === 0 ? limit + 1 : 100, 5000 - scanned);
+      const snapshot = await query.limit(count).get();
+      scanned += snapshot.docs.length;
+      visible.push(
+        ...(await filterActiveOwners(
+          snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data())),
+          (product) => product.userId,
+          this.db,
+        )),
+      );
+      if (visible.length > limit || snapshot.docs.length < count) break;
+      query = query.startAfter(snapshot.docs[snapshot.docs.length - 1]);
     }
 
-    const data = doc.data() as Product;
-    const currentLikes = typeof data.likes === 'number' ? data.likes : 0;
-    const newLikes = Math.max(0, currentLikes + delta);
+    return { items: visible.slice(0, limit), hasMore: visible.length > limit };
+  }
 
-    await docRef.update({
-      likes: newLikes,
-      updatedAt: FieldValue.serverTimestamp(),
+  async adjustLikes(id: string, delta: number): Promise<Product | null> {
+    const docRef = this.db.collection(this.collectionName).doc(id);
+    const exists = await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) return false;
+      const data = doc.data()!;
+      await assertAccountsActive(transaction, [data.userId], this.db);
+      const currentLikes = typeof data.likes === 'number' ? data.likes : 0;
+      transaction.update(docRef, {
+        likes: Math.max(0, currentLikes + delta),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
     });
-
-    return this.getById(id);
+    return exists ? this.getById(id) : null;
   }
 
   private mapToProduct(
@@ -200,8 +252,8 @@ export class ProductRepository {
     data: FirebaseFirestore.DocumentData,
   ): Product {
     return {
-      id,
       ...data,
+      id,
       status: this.resolveProductStatus(data),
       createdAt:
         data.createdAt instanceof Timestamp

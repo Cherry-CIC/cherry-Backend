@@ -1,0 +1,24 @@
+{
+  "score": 2,
+  "summary": "Prototype rules passed the historical archive emulator attack cases. Current checkout validation is recorded in verification.md. The rules deliberately deny unsupported direct queries and legacy upload paths; full application compatibility and deployed IAM remain release gates.",
+  "findings": [
+    {
+      "check": "Business Logic vs. Rules",
+      "severity": "major",
+      "issue": "The existing frontend performs direct product/user collection queries and first-name profile uploads. The prototype denies these to avoid private profile exposure and ambiguous ownership.",
+      "recommendation": "Migrate these frontend flows to reviewed API/public projections and UID-scoped uploads, then test the entire app before deploying the replacement rules. Do not reintroduce an allow-all rule."
+    },
+    {
+      "check": "Authority Source",
+      "severity": "minor",
+      "issue": "Server SDK access bypasses Security Rules and actual service-account IAM is unverified.",
+      "recommendation": "Verify least-privilege runtime and operator identities in the authorised staging project. Never grant clients deletion-job or retained-evidence access."
+    },
+    {
+      "check": "Storage access and recovery copies",
+      "severity": "moderate",
+      "issue": "Rules do not revoke existing download tokens or erase object versions, soft-deleted copies or external exports.",
+      "recommendation": "Verify the worker's live object cleanup, ownership remediation, approved bucket lifecycle and recovery-copy isolation. Test stale download URLs in staging."
+    }
+  ]
+}
