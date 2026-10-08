@@ -2,6 +2,7 @@ import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
 import { admin, firestore } from '../../../shared/config/firebaseConfig';
 import { UserProfile } from '../model/UserProfile';
+import { isAccountRestricted } from '../../account-deletion/access';
 
 const MAX_LINKED_PROFILES = 20;
 const PROFILE_FIELDS = [
@@ -78,6 +79,9 @@ export class UserProfileRepository {
       throw error;
     }
 
+    // Acceptance hides the public profile before asynchronous Auth deletion.
+    if (await isAccountRestricted(uid, this.db)) return null;
+
     const users = this.db.collection('users');
     const [[canonicalDoc], linkedSnapshot] = await Promise.all([
       this.db.getAll(users.doc(uid), { fieldMask: PROFILE_FIELDS }),
@@ -115,9 +119,7 @@ export class UserProfileRepository {
         .filter((value): value is string => value !== null),
     );
     const legacyImages = new Set(
-      legacy
-        .map(safeImage)
-        .filter((value): value is string => value !== null),
+      legacy.map(safeImage).filter((value): value is string => value !== null),
     );
     if (legacyNames.size > 1 || legacyImages.size > 1) {
       return null;

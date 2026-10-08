@@ -107,16 +107,17 @@ const getDeliveryLabel = (
 
 const buildDeliveryAddressSummary = (order: Order): string =>
   [
-    order.shipping.address.line1,
-    order.shipping.address.line2,
-    order.shipping.address.city,
-    order.shipping.address.postal_code,
-    order.shipping.address.country,
+    order.shipping?.address?.line1,
+    order.shipping?.address?.line2,
+    order.shipping?.address?.city,
+    order.shipping?.address?.postal_code,
+    order.shipping?.address?.country,
   ]
     .filter(Boolean)
     .join(', ');
 
 const canBuyerConfirmReceived = (order: Order): boolean => {
+  if (order.retentionExpired) return false;
   if (order.buyerConfirmedReceived) {
     return false;
   }
@@ -132,6 +133,7 @@ const DISPUTE_REASONS: OrderDisputeReason[] = [
 ];
 
 const canBuyerSubmitDispute = (order: Order): boolean => {
+  if (order.retentionExpired) return false;
   if (order.buyerDisputeStatus) {
     return false;
   }
@@ -260,7 +262,7 @@ export const createOrder = async (
     }
 
     const productRepo = new ProductRepository();
-    const product = await productRepo.getById(productId);
+    const product = await productRepo.getForPaidOrder(productId);
 
     if (!product) {
       ResponseHandler.notFound(
@@ -320,6 +322,7 @@ export const createOrder = async (
     let savedOrder;
     try {
       savedOrder = await orderRepo.createPaidOrderAndDecrementInventory({
+        checkoutSessionId: verifiedPayment.checkoutSessionId,
         userId: firebaseUid,
         email,
         productAmount: verifiedPayment.productAmount,
@@ -626,11 +629,23 @@ export const confirmOrderReceived = async (
     }
 
     const buyerConfirmedReceivedAt = new Date();
-    await orderRepo.updateOrder(order.id, {
-      buyerConfirmedReceived: true,
-      buyerConfirmedReceivedAt,
-      status: 'delivered',
-    });
+    const updated = await orderRepo.updateOrder(
+      order.id,
+      {
+        buyerConfirmedReceived: true,
+        buyerConfirmedReceivedAt,
+        status: 'delivered',
+      },
+      firebaseUid,
+    );
+    if (updated === false) {
+      ResponseHandler.conflict(
+        res,
+        'Order cannot be confirmed received',
+        'The order changed or its retained information has expired',
+      );
+      return;
+    }
 
     const updatedOrder = {
       ...order,
@@ -646,6 +661,18 @@ export const confirmOrderReceived = async (
       'Order receipt confirmed',
     );
   } catch (err) {
+    if (
+      err instanceof Error &&
+      'code' in err &&
+      err.code === 'ACCOUNT_DELETION_PENDING'
+    ) {
+      ResponseHandler.forbidden(
+        res,
+        'Account closed for deletion',
+        'Contact support for help with an existing order',
+      );
+      return;
+    }
     console.error('Error confirming order receipt:', err);
     ResponseHandler.internalServerError(
       res,
@@ -731,12 +758,24 @@ export const submitOrderDispute = async (
     }
 
     const buyerDisputedAt = new Date();
-    await orderRepo.updateOrder(order.id, {
-      buyerDisputeReason: reason,
-      buyerDisputeStatus: 'under_review',
-      buyerDisputeMessage: message || undefined,
-      buyerDisputedAt,
-    });
+    const updated = await orderRepo.updateOrder(
+      order.id,
+      {
+        buyerDisputeReason: reason,
+        buyerDisputeStatus: 'under_review',
+        buyerDisputeMessage: message || undefined,
+        buyerDisputedAt,
+      },
+      firebaseUid,
+    );
+    if (updated === false) {
+      ResponseHandler.conflict(
+        res,
+        'Order cannot be disputed',
+        'The order changed or its retained information has expired; contact support',
+      );
+      return;
+    }
 
     const updatedOrder = {
       ...order,
@@ -753,6 +792,18 @@ export const submitOrderDispute = async (
       'Order dispute submitted',
     );
   } catch (err) {
+    if (
+      err instanceof Error &&
+      'code' in err &&
+      err.code === 'ACCOUNT_DELETION_PENDING'
+    ) {
+      ResponseHandler.forbidden(
+        res,
+        'Account closed for deletion',
+        'Contact support for help with an existing order',
+      );
+      return;
+    }
     console.error('Error submitting order dispute:', err);
     ResponseHandler.internalServerError(
       res,

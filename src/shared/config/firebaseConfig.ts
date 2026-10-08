@@ -16,17 +16,30 @@ const firebaseClientConfig = {
 
 // Initialise client app (for client‑side Auth utilities)
 const clientApp = initializeClientApp(firebaseClientConfig);
-if (process.env.NODE_ENV === 'production') {
+if (
+  process.env.FIRESTORE_EMULATOR_HOST &&
+  process.env.FIREBASE_AUTH_EMULATOR_HOST
+) {
+  if (!process.env.FIREBASE_PROJECT_ID?.startsWith('demo-'))
+    throw new Error('Emulators require a demo project');
+  if (!admin.apps.length)
+    initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
+} else if (process.env.NODE_ENV === 'production') {
   // In Cloud Run, use Application Default Credentials (ADC)
   initializeApp({
-    projectId:process.env.FIREBASE_PROJECT_ID,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
   });
-}else{
+} else {
   // Initialise Admin SDK (for server‑side Firestore & Auth)
   // Use full service‑account credentials from .env. Cast to any to avoid strict type errors.
   if (!admin.apps.length) {
     // @ts-ignore
     initializeApp({
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
       credential: cert({
         type: process.env.FIREBASE_TYPE,
         project_id: process.env.FIREBASE_PROJECT_ID,

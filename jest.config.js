@@ -11,6 +11,7 @@ module.exports = {
   testPathIgnorePatterns: [
     "/node_modules/",
     "/dist/",
+    ".emulator.test.ts",
     "src/modules/order/tests/exportRoutes.test.ts",
     "src/modules/products/tests/productRoutes.test.ts",
   ],

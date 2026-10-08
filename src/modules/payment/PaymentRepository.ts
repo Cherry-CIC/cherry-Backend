@@ -1,50 +1,43 @@
-const StripeService = require('../../shared/config/stripeConfig');
+import { stripe } from '../../shared/config/stripeConfig';
+import Stripe from 'stripe';
 
 export class PaymentRepository {
-  /**
-   * Creates a Stripe PaymentIntent for the given user.
-   * Checks if a Stripe customer already exists for the provided email.
-   * If found, reuses that customer; otherwise creates a new one.
-   *
-   * @param email - Customer email address.
-   * @param amount - Amount in pence (e.g., 3000 = £30.00).
-   * @param currency - Currency code (e.g., usd).
-   * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
-   */
   async createPaymentIntentForUser(
     email: string,
     totalAmount: number,
     metadata: Record<string, string>,
   ) {
-    // Attempt to find an existing customer by email
-    let customer: any;
-    try {
-      const listResult = await StripeService.stripe.customers.list({
-        email,
-        limit: 1,
-      });
-      if (listResult.data && listResult.data.length > 0) {
-        customer = listResult.data[0];
-      }
-    } catch (err) {
-      // If listing fails, fallback to creating a new customer
-    }
-
-    // If no existing customer, create a new one
-    if (!customer) {
-      customer = await StripeService.addNewCustomer(email);
-    }
-
-    // Create an Ephemeral Key (useful for mobile SDKs)
-    const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
-
-    const paymentIntent = await StripeService.createPaymentIntent(
-      totalAmount,
-      'gbp',
-      customer.id,
-      metadata,
+    if (!metadata.firebaseUid || !metadata.checkoutSessionId)
+      throw new Error('Verified checkout context is required');
+    // Email is a contact attribute, never an ownership credential. A new Firebase
+    // UID using the same address must not inherit an old customer's payment data.
+    const candidates = await stripe.customers.list({ email, limit: 100 });
+    let customer: Stripe.Customer | undefined = candidates.data.find(
+      (entry) => entry.metadata.firebaseUid === metadata.firebaseUid,
     );
-
+    if (!customer) {
+      customer = await stripe.customers.create(
+        {
+          email,
+          metadata: { firebaseUid: metadata.firebaseUid },
+        },
+        { idempotencyKey: `checkout:${metadata.checkoutSessionId}:customer` },
+      );
+    }
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: totalAmount,
+        currency: 'gbp',
+        customer: customer.id,
+        metadata,
+        automatic_payment_methods: { enabled: true },
+      },
+      { idempotencyKey: `checkout:${metadata.checkoutSessionId}:payment` },
+    );
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customer.id },
+      { apiVersion: '2022-08-01' },
+    );
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,

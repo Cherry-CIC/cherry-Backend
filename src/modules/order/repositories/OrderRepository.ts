@@ -1,6 +1,7 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { Order } from '../model/Order';
+import { assertAccountsActive } from '../../account-deletion/access';
 
 const removeUndefinedValues = <T extends Record<string, unknown>>(
   value: T,
@@ -10,6 +11,8 @@ const removeUndefinedValues = <T extends Record<string, unknown>>(
   ) as T;
 
 export interface CreateOrderInput {
+  checkoutSessionId?: string;
+  supportReview?: { reviewer: string; evidenceReference: string };
   userId: string;
   email: string;
   productAmount: number;
@@ -58,6 +61,44 @@ export class OrderRepository {
       }
 
       const productData = productDoc.data()!;
+      const sellerId = productData.userId;
+      const contextRef = input.checkoutSessionId
+        ? firestore
+            .collection('account_checkout_contexts')
+            .doc(input.checkoutSessionId)
+        : null;
+      const context = contextRef ? await transaction.get(contextRef) : null;
+      const checkout = context?.data();
+      if (contextRef) {
+        const data = checkout;
+        if (
+          !data ||
+          data.buyerUid !== input.userId ||
+          data.sellerUid !== sellerId ||
+          data.productId !== input.productId ||
+          data.paymentIntentId !== input.paymentIntentId ||
+          !['open', 'succeeded', 'needs_review'].includes(data.state)
+        )
+          throw new Error('Checkout context is invalid');
+        for (const key of [
+          'productAmount',
+          'shippingFee',
+          'securityFee',
+          'totalAmount',
+          'shippingWeight',
+        ] as const) {
+          if (Number(data.metadata?.[key]) !== input[key])
+            throw new Error('Paid selection does not match checkout context');
+        }
+        if (
+          data.snapshotVersion !== 1 ||
+          !Object.prototype.hasOwnProperty.call(data, 'charityId')
+        ) {
+          throw new Error('Checkout allocation requires review');
+        }
+      } else {
+        await assertAccountsActive(transaction, [input.userId, sellerId]);
+      }
       const quantity =
         typeof productData.number === 'number' ? productData.number : 0;
       const productStatus =
@@ -71,15 +112,34 @@ export class OrderRepository {
       }
 
       if (
-        typeof productData.price !== 'number' ||
-        gbpToPence(productData.price) !== input.productAmount
+        !checkout &&
+        (typeof productData.price !== 'number' ||
+          gbpToPence(productData.price) !== input.productAmount)
       ) {
         throw new Error('Product price changed');
       }
 
-      const orderData = this.buildOrderData(input);
+      if (
+        input.supportReview &&
+        (typeof input.supportReview.reviewer !== 'string' ||
+          input.supportReview.reviewer.trim().length < 3 ||
+          input.supportReview.reviewer.length > 200 ||
+          typeof input.supportReview.evidenceReference !== 'string' ||
+          input.supportReview.evidenceReference.trim().length < 8 ||
+          input.supportReview.evidenceReference.length > 500 ||
+          !contextRef)
+      )
+        throw new Error('Verified support evidence is required');
+      const orderData = this.buildOrderData({
+        ...input,
+        productName: checkout?.productName || input.productName,
+      });
       transaction.set(orderRef, {
         ...orderData,
+        sellerId,
+        charityId: checkout
+          ? checkout.charityId
+          : productData.charityId || null,
         email: input.email,
       });
       transaction.update(productRef, {
@@ -92,6 +152,19 @@ export class OrderRepository {
         userId: input.userId,
         createdAt: new Date(),
       });
+      if (contextRef)
+        transaction.update(contextRef, {
+          state: 'fulfilled',
+          orderId: orderRef.id,
+          ...(input.supportReview
+            ? {
+                supportReviewer: input.supportReview.reviewer,
+                supportEvidence: input.supportReview.evidenceReference,
+                supportReviewedAt: new Date(),
+              }
+            : {}),
+          updatedAt: new Date(),
+        });
 
       return {
         id: orderRef.id,
@@ -135,11 +208,74 @@ export class OrderRepository {
     return this.mapToOrder(doc.id, doc.data()!);
   }
 
-  async updateOrder(id: string, updates: Partial<Order>): Promise<void> {
-    await firestore
-      .collection('orders')
-      .doc(id)
-      .update(removeUndefinedValues(updates as Record<string, unknown>));
+  async updateOrder(
+    id: string,
+    updates: Partial<Order>,
+    buyerUid?: string,
+  ): Promise<boolean> {
+    const ref = firestore.collection('orders').doc(id);
+    return firestore.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists) return false;
+      if (buyerUid) {
+        // The continuing buyer may still exercise receipt and dispute rights
+        // after seller deletion. Serialise with closure and retention expiry.
+        await assertAccountsActive(transaction, [buyerUid]);
+        if (
+          doc.get('userId') !== buyerUid ||
+          doc.get('retentionExpired') === true
+        )
+          return false;
+        const keys = Object.keys(
+          removeUndefinedValues(updates as Record<string, unknown>),
+        );
+        const delivered =
+          doc.get('status') === 'delivered' ||
+          doc.get('shipmentStatus') === 'delivered';
+        const confirmation =
+          updates.buyerConfirmedReceived === true &&
+          updates.buyerConfirmedReceivedAt instanceof Date &&
+          updates.status === 'delivered' &&
+          !doc.get('buyerConfirmedReceived') &&
+          keys.every((key) =>
+            [
+              'buyerConfirmedReceived',
+              'buyerConfirmedReceivedAt',
+              'status',
+            ].includes(key),
+          );
+        const dispute =
+          updates.buyerDisputeStatus === 'under_review' &&
+          updates.buyerDisputedAt instanceof Date &&
+          [
+            'wrong_item',
+            'item_not_as_described',
+            'item_arrived_damaged',
+            'something_else',
+          ].includes(updates.buyerDisputeReason || '') &&
+          (updates.buyerDisputeMessage === undefined ||
+            (typeof updates.buyerDisputeMessage === 'string' &&
+              updates.buyerDisputeMessage.length <= 1000)) &&
+          !doc.get('buyerDisputeStatus') &&
+          keys.every((key) =>
+            [
+              'buyerDisputeReason',
+              'buyerDisputeStatus',
+              'buyerDisputeMessage',
+              'buyerDisputedAt',
+            ].includes(key),
+          );
+        if (!delivered || (!confirmation && !dispute)) return false;
+      } else if (doc.get('deletionMinimised') === true) {
+        // Delayed provider writes cannot restore fields after minimisation.
+        return false;
+      }
+      transaction.update(
+        ref,
+        removeUndefinedValues(updates as Record<string, unknown>),
+      );
+      return true;
+    });
   }
 
   async getAllOrders(): Promise<Order[]> {

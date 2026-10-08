@@ -1,0 +1,26 @@
+rules_version = '2';
+// Prototype: future uploads use verified UID prefixes. Legacy firstname paths
+// are server-only pending ownership review. Download tokens need separate cleanup.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function active(uid) {
+      return !firestore.exists(/databases/(default)/documents/account_deletion_guards/$(uid));
+    }
+    function owner(uid) { return request.auth != null && request.auth.uid == uid && active(uid); }
+    function validImage() {
+      return request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+    match /products/{uid}/{file=**} {
+      allow read: if request.auth != null && active(request.auth.uid) && active(uid);
+      allow create, update: if owner(uid) && validImage();
+      allow delete: if owner(uid);
+    }
+    match /user_images/{uid}/{file=**} {
+      allow read: if request.auth != null && active(request.auth.uid) && active(uid);
+      allow create, update: if owner(uid) && validImage();
+      allow delete: if owner(uid);
+    }
+    match /{file=**} { allow read, write: if false; }
+  }
+}

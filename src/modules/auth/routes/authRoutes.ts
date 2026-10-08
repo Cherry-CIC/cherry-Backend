@@ -4,7 +4,6 @@ import {
     login,
     getProfile,
     updateProfile,
-    deleteAccount,
 } from '../controllers/authController';
 import {
     validateRegister,
@@ -14,7 +13,10 @@ import {
 import { validateRequest } from '../../../shared/middleware/validateRequest';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
+import { deletionRouter } from '../../account-deletion/routes';
+
 const router = Router();
+router.use(deletionRouter);
 
 /**
  * @swagger
@@ -63,7 +65,7 @@ const router = Router();
  *         photoURL: "https://example.com/photo.jpg"
  *         createdAt: "2023-01-01T00:00:00.000Z"
  *         updatedAt: "2023-01-01T00:00:00.000Z"
- *     
+ *
  *     AuthResponse:
  *       type: object
  *       properties:
@@ -269,23 +271,5 @@ router.get('/profile', authMiddleware, getProfile);
  *         description: User profile not found
  */
 router.put('/profile', authMiddleware, validateRequest(updateProfileSchema), updateProfile);
-
-/**
- * @swagger
- * /api/auth/account:
- *   delete:
- *     summary: Delete the authenticated user account
- *     tags: [Authentication]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Account deleted successfully
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
- */
-router.delete('/account', authMiddleware, deleteAccount);
 
 export default router;

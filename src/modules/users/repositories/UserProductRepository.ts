@@ -2,6 +2,7 @@ import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
 import { gbpToPence } from '../../../shared/utils/money';
+import { isAccountRestricted } from '../../account-deletion/access';
 import {
   UserProduct,
   UserProductPage,
@@ -165,7 +166,10 @@ export class UserProductRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
       throw new Error('Invalid user product page size');
     }
-    if (ownerId === 'deleted_user') {
+    if (
+      ownerId === 'deleted_user' ||
+      (await isAccountRestricted(ownerId, this.db))
+    ) {
       return { products: [], nextPosition: null };
     }
 

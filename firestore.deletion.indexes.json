@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "account_checkout_contexts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "productId", "order": "ASCENDING" },
+        { "fieldPath": "state", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

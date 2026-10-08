@@ -38,7 +38,12 @@ const createRepository = (
     get: queryGet,
     doc,
   };
-  const collection = jest.fn().mockReturnValue(query);
+  const guardGet = jest.fn().mockResolvedValue({ exists: false });
+  const collection = jest.fn((name: string) =>
+    name === 'account_deletion_guards'
+      ? { doc: jest.fn().mockReturnValue({ get: guardGet }) }
+      : query,
+  );
   const getAll = jest.fn().mockResolvedValue([
     {
       exists: canonical !== undefined,
@@ -55,10 +60,33 @@ const createRepository = (
     queryGet,
     query,
     doc,
+    guardGet,
   };
 };
 
 describe('UserProfileRepository', () => {
+  it('hides a guarded profile before Auth and profile records are removed', async () => {
+    const { repository, guardGet, getUser, getAll, queryGet } =
+      createRepository({ username: 'Alex' });
+    guardGet.mockResolvedValueOnce({ exists: true });
+
+    await expect(repository.getByFirebaseUid(UID)).resolves.toBeNull();
+    expect(getUser).toHaveBeenCalledWith(UID);
+    expect(getAll).not.toHaveBeenCalled();
+    expect(queryGet).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the injected database cannot read the guard', async () => {
+    const { repository, guardGet, getAll } = createRepository({
+      username: 'Alex',
+    });
+    const failure = new Error('Guard unavailable');
+    guardGet.mockRejectedValueOnce(failure);
+
+    await expect(repository.getByFirebaseUid(UID)).rejects.toBe(failure);
+    expect(getAll).not.toHaveBeenCalled();
+  });
+
   it('reads the canonical UID document and returns only the safe allowlist', async () => {
     const { repository, getUser, doc, getAll, query } = createRepository({
       id: UID,

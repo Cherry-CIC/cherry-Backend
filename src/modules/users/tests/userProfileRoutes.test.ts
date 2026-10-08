@@ -1,7 +1,7 @@
 import request from 'supertest';
 import swaggerJsdoc from 'swagger-jsdoc';
 import app from '../../../app';
-import { admin } from '../../../shared/config/firebaseConfig';
+import { admin, firestore } from '../../../shared/config/firebaseConfig';
 import { swaggerOptions } from '../../../shared/config/swaggerConfig';
 import { UserProduct } from '../model/UserProfile';
 import { UserProductRepository } from '../repositories/UserProductRepository';
@@ -9,7 +9,13 @@ import { UserProfileRepository } from '../repositories/UserProfileRepository';
 
 jest.mock('../../../shared/config/firebaseConfig', () => {
   const auth = { verifyIdToken: jest.fn() };
-  return { firestore: {}, admin: { auth: () => auth } };
+  const getGuard = jest.fn();
+  return {
+    firestore: {
+      collection: () => ({ doc: () => ({ get: getGuard }) }),
+    },
+    admin: { auth: () => auth },
+  };
 });
 jest.mock('../../products/routes/productRoutes', () =>
   require('express').Router(),
@@ -66,6 +72,9 @@ const product: UserProduct = {
 const profilePath = '/api/users/seller-uid/profile';
 const productsPath = '/api/users/seller-uid/products';
 const verifyToken = admin.auth().verifyIdToken as jest.Mock;
+const getGuard = firestore
+  .collection('account_deletion_guards')
+  .doc('viewer-uid').get as jest.Mock;
 const getUser = jest.spyOn(UserProfileRepository.prototype, 'getByFirebaseUid');
 const getProducts = jest.spyOn(UserProductRepository.prototype, 'getPage');
 const errorLog = jest
@@ -77,10 +86,9 @@ const authenticated = (path: string) =>
   request(app).get(path).set('Authorization', 'Bearer approved-test-token');
 
 beforeEach(() => {
-  process.env.USER_PRODUCTS_CURSOR_KEY = Buffer.alloc(32, 7).toString(
-    'base64',
-  );
+  process.env.USER_PRODUCTS_CURSOR_KEY = Buffer.alloc(32, 7).toString('base64');
   verifyToken.mockReset().mockResolvedValue({ uid: 'viewer-uid' });
+  getGuard.mockReset().mockResolvedValue({ exists: false });
   getUser.mockReset().mockResolvedValue(user);
   getProducts
     .mockReset()
@@ -102,7 +110,7 @@ describe('Mounted user profile routes', () => {
     const response = await authenticated(profilePath);
     expect(response.status).toBe(200);
     expect(response.headers['cache-control']).toBe('private, no-store');
-    expect(verifyToken).toHaveBeenCalledWith('approved-test-token');
+    expect(verifyToken).toHaveBeenCalledWith('approved-test-token', true);
     expect(getUser).toHaveBeenCalledWith('seller-uid');
     expect(getProducts).not.toHaveBeenCalled();
     expect(response.body).toEqual({ success: true, data: user });
@@ -159,12 +167,32 @@ describe('Mounted user profile routes', () => {
     expect(getUser).not.toHaveBeenCalled();
   });
 
-  it.each([1, 50])('accepts products page size %i as an integer', async (limit) => {
-    const response = await authenticated(productsPath).query({ limit });
-    expect(response.status).toBe(200);
-    expect(response.body.meta.limit).toBe(limit);
-    expect(getProducts).toHaveBeenCalledWith('seller-uid', limit, undefined);
+  it('blocks a guarded viewer before loading public profile data', async () => {
+    getGuard.mockResolvedValueOnce({ exists: true });
+    const response = await authenticated(profilePath);
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ error: 'ACCOUNT_DELETION_PENDING' });
+    expect(getUser).not.toHaveBeenCalled();
   });
+
+  it('fails closed when account access cannot be checked', async () => {
+    getGuard.mockRejectedValueOnce(new Error('private guard failure'));
+    const response = await authenticated(productsPath);
+    expect(response.status).toBe(503);
+    expect(response.text).not.toContain('private guard failure');
+    expect(getUser).not.toHaveBeenCalled();
+    expect(getProducts).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 50])(
+    'accepts products page size %i as an integer',
+    async (limit) => {
+      const response = await authenticated(productsPath).query({ limit });
+      expect(response.status).toBe(200);
+      expect(response.body.meta.limit).toBe(limit);
+      expect(getProducts).toHaveBeenCalledWith('seller-uid', limit, undefined);
+    },
+  );
 
   it.each(['0', '-1', '51', '1.5', 'invalid', '', 'Infinity'])(
     'rejects invalid products page size %s',
@@ -199,7 +227,9 @@ describe('Mounted user profile routes', () => {
     const profile = await authenticated('/api/users/%20seller-uid%20/profile');
     expect(profile.status).toBe(200);
     expect(profile.body.data.id).toBe('seller-uid');
-    const products = await authenticated('/api/users/%20seller-uid%20/products');
+    const products = await authenticated(
+      '/api/users/%20seller-uid%20/products',
+    );
     expect(products.status).toBe(200);
     expect(getProducts).toHaveBeenCalledWith('seller-uid', 20, undefined);
   });
@@ -258,8 +288,18 @@ describe('Mounted user profile routes', () => {
   });
 
   it.each([
-    ['profile', profilePath, 'user_profile.fetch_failed', 'Unable to load this profile. Please try again.'],
-    ['products', productsPath, 'user_products.fetch_failed', 'Unable to load these products. Please try again.'],
+    [
+      'profile',
+      profilePath,
+      'user_profile.fetch_failed',
+      'Unable to load this profile. Please try again.',
+    ],
+    [
+      'products',
+      productsPath,
+      'user_products.fetch_failed',
+      'Unable to load these products. Please try again.',
+    ],
   ])(
     'returns retryable 503 with safe logging for %s database failures',
     async (operation, path, logMessage, responseMessage) => {
@@ -303,7 +343,9 @@ describe('Mounted user profile routes', () => {
     const last = await authenticated(productsPath).query({ limit: 1, cursor });
     expect(last.status).toBe(200);
     expect(getProducts).toHaveBeenLastCalledWith('seller-uid', 1, position);
-    const wrongUser = await authenticated('/api/users/other-seller/products').query({
+    const wrongUser = await authenticated(
+      '/api/users/other-seller/products',
+    ).query({
       cursor,
     });
     expect(wrongUser.status).toBe(400);
@@ -320,7 +362,6 @@ describe('Mounted user profile routes', () => {
     expect(response.body).not.toHaveProperty('data');
     expect(getUser).not.toHaveBeenCalled();
   });
-
 });
 
 describe('User profile Swagger', () => {
@@ -355,10 +396,12 @@ describe('User profile Swagger', () => {
     expect(products.tags).toContain('Users');
     expect(profile.security).toEqual([{ bearerAuth: [] }]);
     expect(products.security).toEqual([{ bearerAuth: [] }]);
-    expect(profile.parameters.map(({ name, in: location }) => [name, location])).toEqual([
-      ['userId', 'path'],
-    ]);
-    expect(products.parameters.map(({ name, in: location }) => [name, location])).toEqual([
+    expect(
+      profile.parameters.map(({ name, in: location }) => [name, location]),
+    ).toEqual([['userId', 'path']]);
+    expect(
+      products.parameters.map(({ name, in: location }) => [name, location]),
+    ).toEqual([
       ['userId', 'path'],
       ['limit', 'query'],
       ['cursor', 'query'],

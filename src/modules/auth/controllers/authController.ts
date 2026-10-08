@@ -3,7 +3,6 @@ import { admin, clientAuth } from '../../../shared/config/firebaseConfig';
 import { UserRepository } from '../repositories/UserRepository';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { AuthService } from '../services/AuthService';
 import { User, UserDto } from '../model/User';
 
 const userRepo = new UserRepository();
@@ -164,36 +163,5 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         }
 
         ResponseHandler.internalServerError(res, 'Failed to update user profile', message);
-    }
-};
-
-export const deleteAccount = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const user = (req as any).user;
-        const firebaseUid = user?.uid;
-
-        if (!firebaseUid) {
-            ResponseHandler.unauthorized(
-                res,
-                'User not authenticated',
-                'Authentication required',
-            );
-            return;
-        }
-
-        const authService = new AuthService();
-        const result = await authService.deleteAccount(firebaseUid);
-
-        ResponseHandler.success(
-            res,
-            result,
-            'Account deleted successfully',
-        );
-    } catch (err) {
-        ResponseHandler.internalServerError(
-            res,
-            'Failed to delete account',
-            err instanceof Error ? err.message : 'Unknown error',
-        );
     }
 };

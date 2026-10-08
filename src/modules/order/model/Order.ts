@@ -68,6 +68,8 @@ export interface Order {
     | 'failed';
   shipmentStatus: ShipmentStatus;
   shipmentId?: string;
+  deletionMinimised?: boolean;
+  retentionExpired?: boolean;
   buyerConfirmedReceived?: boolean;
   buyerConfirmedReceivedAt?: Date;
   sellerSoldEmailSentAt?: Date;

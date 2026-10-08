@@ -1,3 +1,10 @@
+jest.mock('../CheckoutContextRepository', () => ({
+  CheckoutContextRepository: jest.fn().mockImplementation(() => ({
+    start: jest.fn().mockResolvedValue('checkout-test'),
+    attachPayment: jest.fn().mockResolvedValue(undefined),
+    flagUncertain: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
 const mockCreatePaymentIntentForUser = jest.fn();
 const mockGetUserById = jest.fn();
 const mockGetProductById = jest.fn();
@@ -90,22 +97,20 @@ describe('PaymentService', () => {
   it('calculates the total from trusted product and shipping data', async () => {
     const service = new PaymentService();
 
-    const result = await service.createPaymentIntentForUserByUid(
-      'user-1',
-      {
-        productId: 'product-1',
-        shippingMethodId: '3747',
-        pickupPointId: '13127548',
-        country: 'GB',
-        postalCode: 'SE18 4QH',
-      },
-    );
+    const result = await service.createPaymentIntentForUserByUid('user-1', {
+      productId: 'product-1',
+      shippingMethodId: '3747',
+      pickupPointId: '13127548',
+      country: 'GB',
+      postalCode: 'SE18 4QH',
+    });
 
     expect(mockCreatePaymentIntentForUser).toHaveBeenCalledWith(
       'buyer@example.com',
       3149,
       expect.objectContaining({
         firebaseUid: 'user-1',
+        checkoutSessionId: 'checkout-test',
         productId: 'product-1',
         productAmount: '2500',
         shippingFee: '399',

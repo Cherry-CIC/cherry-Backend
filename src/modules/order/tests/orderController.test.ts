@@ -68,6 +68,7 @@ jest.mock('../../notifications/services/NotificationService', () => ({
 jest.mock('../../products/repositories/ProductRepository', () => ({
   ProductRepository: jest.fn().mockImplementation(() => ({
     getById: mockGetProductById,
+    getForPaidOrder: mockGetProductById,
   })),
 }));
 
@@ -91,6 +92,77 @@ const createResponse = () => {
   res.json = jest.fn().mockReturnValue(res);
   return res;
 };
+
+describe('orderController retained-order integration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetShipmentByOrderId.mockResolvedValue(null);
+  });
+
+  it('returns an expired counterparty history shell without requiring erased shipping fields', async () => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      status: 'delivered',
+      deletionMinimised: true,
+      retentionExpired: true,
+    });
+    const res = createResponse();
+    await getMyOrderById(
+      { user: { uid: 'user-1' }, params: { id: 'order-1' } } as any,
+      res,
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          order: expect.objectContaining({
+            deliveryAddressSummary: '',
+            retentionExpired: true,
+          }),
+        },
+      }),
+    );
+  });
+
+  it('does not report a successful dispute after the transactional write was rejected', async () => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      status: 'delivered',
+      deletionMinimised: true,
+    });
+    mockUpdateOrder.mockResolvedValueOnce(false);
+    const res = createResponse();
+    await submitOrderDispute(
+      {
+        user: { uid: 'user-1' },
+        params: { id: 'order-1' },
+        body: { reason: 'wrong_item' },
+      } as any,
+      res,
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.status).not.toHaveBeenCalledWith(200);
+  });
+
+  it('does not report receipt confirmation after retention expiry raced the write', async () => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      status: 'delivered',
+      deletionMinimised: true,
+    });
+    mockUpdateOrder.mockResolvedValueOnce(false);
+    const res = createResponse();
+    await confirmOrderReceived(
+      { user: { uid: 'user-1' }, params: { id: 'order-1' } } as any,
+      res,
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.status).not.toHaveBeenCalledWith(200);
+  });
+});
 
 describe('orderController.createOrder', () => {
   const payload = {
@@ -683,13 +755,13 @@ describe('orderController.confirmOrderReceived', () => {
     mockGetShipmentByOrderId.mockResolvedValue(null);
   });
 
-    it('lets the buyer confirm a delivered order as received', async () => {
-      const deliveredOrder = {
-        ...shippedOrder,
-        status: 'delivered',
-        shipmentStatus: 'delivered',
-      };
-      mockGetOrderById.mockResolvedValue(deliveredOrder);
+  it('lets the buyer confirm a delivered order as received', async () => {
+    const deliveredOrder = {
+      ...shippedOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+    };
+    mockGetOrderById.mockResolvedValue(deliveredOrder);
     const req: any = {
       user: {
         uid: 'user-1',
@@ -708,12 +780,14 @@ describe('orderController.confirmOrderReceived', () => {
         buyerConfirmedReceived: true,
         status: 'delivered',
       }),
+      'user-1',
     );
     expect(mockUpdateOrder).toHaveBeenCalledWith(
       'order-1',
       expect.not.objectContaining({
         shipmentStatus: 'delivered',
       }),
+      'user-1',
     );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
@@ -882,13 +956,13 @@ describe('orderController.submitOrderDispute', () => {
     mockGetShipmentByOrderId.mockResolvedValue(null);
   });
 
-    it('lets the buyer submit a dispute for a delivered order', async () => {
-      const deliveredOrder = {
-        ...disputableOrder,
-        status: 'delivered',
-        shipmentStatus: 'delivered',
-      };
-      mockGetOrderById.mockResolvedValue(deliveredOrder);
+  it('lets the buyer submit a dispute for a delivered order', async () => {
+    const deliveredOrder = {
+      ...disputableOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+    };
+    mockGetOrderById.mockResolvedValue(deliveredOrder);
     const req: any = {
       user: {
         uid: 'user-1',
@@ -912,6 +986,7 @@ describe('orderController.submitOrderDispute', () => {
         buyerDisputeStatus: 'under_review',
         buyerDisputeMessage: 'I received a different item.',
       }),
+      'user-1',
     );
     expect(mockUpdateOrder).toHaveBeenCalledWith(
       'order-1',
@@ -919,6 +994,7 @@ describe('orderController.submitOrderDispute', () => {
         buyerConfirmedReceived: true,
         shipmentStatus: 'delivered',
       }),
+      'user-1',
     );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
@@ -987,6 +1063,7 @@ describe('orderController.submitOrderDispute', () => {
         buyerDisputeReason: 'item_arrived_damaged',
         buyerDisputeStatus: 'under_review',
       }),
+      'user-1',
     );
     expect(res.status).toHaveBeenCalledWith(200);
   });

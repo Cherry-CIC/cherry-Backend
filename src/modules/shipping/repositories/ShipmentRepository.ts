@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto';
+import { FieldValue } from 'firebase-admin/firestore';
+import { Order } from '../../order/model/Order';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Shipment } from '../models/Shipment';
 
@@ -12,13 +15,71 @@ export class ShipmentRepository {
    * @param shipmentData - Shipment data without ID
    * @returns Created shipment with generated ID
    */
-  async createShipment(shipmentData: Omit<Shipment, 'id'>): Promise<Shipment> {
-    const docRef = await firestore.collection(this.collection).add({
-      ...shipmentData,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  async beginShipmentCreation(
+    orderId: string,
+  ): Promise<{ order: Order; attemptId: string }> {
+    const ref = firestore.collection('orders').doc(orderId);
+    const attemptId = randomUUID();
+    return firestore.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      const existing = await transaction.get(
+        firestore
+          .collection(this.collection)
+          .where('orderId', '==', orderId)
+          .limit(1),
+      );
+      if (
+        !doc.exists ||
+        doc.get('deletionMinimised') === true ||
+        doc.get('retentionExpired') === true ||
+        doc.get('status') !== 'paid' ||
+        doc.get('paymentStatus') !== 'succeeded'
+      ) {
+        throw new Error('Order is no longer available for shipment');
+      }
+      if (!existing.empty || doc.get('shipmentCreationPending') === true) {
+        throw new Error('Shipment creation requires reconciliation');
+      }
+      // The deletion worker must retain this operational order until the provider
+      // outcome is durably recorded. Timeouts never prove that no parcel exists.
+      transaction.update(ref, {
+        shipmentCreationPending: true,
+        shipmentCreationAttemptId: attemptId,
+        shipmentCreationStartedAt: new Date(),
+      });
+      return { order: { ...doc.data(), id: orderId } as Order, attemptId };
     });
+  }
 
+  async createShipment(
+    shipmentData: Omit<Shipment, 'id'>,
+    attemptId: string,
+  ): Promise<Shipment> {
+    const docRef = firestore.collection(this.collection).doc();
+    const orderRef = firestore.collection('orders').doc(shipmentData.orderId);
+    await firestore.runTransaction(async (transaction) => {
+      const order = await transaction.get(orderRef);
+      if (
+        !order.exists ||
+        order.get('deletionMinimised') === true ||
+        order.get('retentionExpired') === true ||
+        order.get('shipmentCreationPending') !== true ||
+        order.get('shipmentCreationAttemptId') !== attemptId
+      ) {
+        throw new Error('Shipment creation requires reconciliation');
+      }
+      transaction.create(docRef, {
+        ...shipmentData,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      transaction.update(orderRef, {
+        shipmentId: docRef.id,
+        shipmentCreationPending: FieldValue.delete(),
+        shipmentCreationAttemptId: FieldValue.delete(),
+        shipmentCreationStartedAt: FieldValue.delete(),
+      });
+    });
     return { id: docRef.id, ...shipmentData };
   }
 
@@ -29,7 +90,7 @@ export class ShipmentRepository {
    */
   async getShipmentById(id: string): Promise<Shipment | null> {
     const doc = await firestore.collection(this.collection).doc(id).get();
-    
+
     if (!doc.exists) {
       return null;
     }
@@ -64,7 +125,9 @@ export class ShipmentRepository {
    * @param sendcloudId - Sendcloud parcel ID
    * @returns Shipment or null if not found
    */
-  async getShipmentBySendcloudId(sendcloudId: number): Promise<Shipment | null> {
+  async getShipmentBySendcloudId(
+    sendcloudId: number,
+  ): Promise<Shipment | null> {
     const snapshot = await firestore
       .collection(this.collection)
       .where('sendcloudId', '==', sendcloudId)
@@ -86,9 +149,11 @@ export class ShipmentRepository {
    * @param updates - Fields to update
    */
   async updateShipment(id: string, updates: Partial<Shipment>): Promise<void> {
-    await firestore.collection(this.collection).doc(id).update({
-      ...updates,
-      updatedAt: new Date(),
+    const ref = firestore.collection(this.collection).doc(id);
+    await firestore.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || doc.get('deletionMinimised') === true) return;
+      transaction.update(ref, { ...updates, updatedAt: new Date() });
     });
   }
 
