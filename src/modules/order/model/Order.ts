@@ -5,12 +5,9 @@ export type OrderDisputeReason =
   | 'item_arrived_damaged'
   | 'something_else';
 export type OrderDisputeStatus =
-  | 'under_review'
-  | 'awaiting_seller'
-  | 'awaiting_buyer'
-  | 'resolved_refunded'
-  | 'resolved_rejected'
-  | 'closed';
+  | 'raised'
+  | 'in_progress'
+  | 'resolved';
 export type ShipmentStatus =
   | 'pending'
   | 'announced'

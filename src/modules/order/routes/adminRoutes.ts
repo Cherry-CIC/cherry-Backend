@@ -3,7 +3,9 @@ import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { exportOrdersCsv } from '../controllers/exportController';
 import {
+	claimAdminDispute,
 	getAdminDisputeDetails,
+	getAdminDisputeDetailsByOrderId,
 	getAdminDisputeSummary,
 	listAdminDisputes,
 	moderateAdminDispute,
@@ -126,7 +128,7 @@ router.get(
  *         name: status
  *         schema:
  *           type: string
- *           enum: [under_review, awaiting_seller, awaiting_buyer, resolved_refunded, resolved_rejected, closed]
+ *           enum: [raised, in_progress, resolved]
  *       - in: query
  *         name: limit
  *         schema:
@@ -148,6 +150,70 @@ router.get(
  *         description: Admin access required
  */
 router.get('/disputes', authMiddleware, adminMiddleware, listAdminDisputes);
+
+/**
+ * @swagger
+ * /api/admin/disputes/{disputeId}/claim:
+ *   post:
+ *     summary: Claim an unassigned dispute for the authenticated administrator
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: disputeId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Dispute assigned to this administrator and moved to in_progress
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Dispute not found
+ *       409:
+ *         description: Dispute is already claimed or not available to claim
+ */
+router.post(
+	'/disputes/:disputeId/claim',
+	authMiddleware,
+	adminMiddleware,
+	claimAdminDispute,
+);
+
+/**
+ * @swagger
+ * /api/admin/disputes/by-order/{orderId}:
+ *   get:
+ *     summary: Get dispute detail and audit events by associated order ID
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Dispute and chronological event history
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: No dispute exists for this order
+ */
+router.get(
+	'/disputes/by-order/:orderId',
+	authMiddleware,
+	adminMiddleware,
+	getAdminDisputeDetailsByOrderId,
+);
 
 /**
  * @swagger
@@ -194,6 +260,13 @@ router.get(
  *         required: true
  *         schema:
  *           type: string
+ *       - in: header
+ *         name: Idempotency-Key
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 128
  *     requestBody:
  *       required: true
  *       content:
@@ -204,7 +277,7 @@ router.get(
  *             properties:
  *               status:
  *                 type: string
- *                 enum: [under_review, awaiting_seller, awaiting_buyer, resolved_rejected, closed]
+ *                 enum: [resolved]
  *               note:
  *                 type: string
  *                 maxLength: 2000
@@ -212,7 +285,7 @@ router.get(
  *       200:
  *         description: Dispute status updated
  *       400:
- *         description: Invalid status or rejection note missing
+ *         description: Invalid request, missing idempotency key, or resolution explanation
  *       401:
  *         description: Unauthorized
  *       403:
@@ -220,7 +293,7 @@ router.get(
  *       404:
  *         description: Dispute not found
  *       409:
- *         description: Invalid status transition
+ *         description: Invalid status transition or key reused with a different request
  */
 router.patch(
 	'/disputes/:disputeId/status',

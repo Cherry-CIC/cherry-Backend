@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { firestore } from '../shared/config/firebaseConfig';
 import { OrderDisputeReason } from '../modules/order/model/Order';
 import {
@@ -35,27 +36,9 @@ export interface DisputeDetails {
 }
 
 const ALLOWED_ADMIN_TRANSITIONS: Record<DisputeStatus, DisputeStatus[]> = {
-  under_review: [
-    'awaiting_seller',
-    'awaiting_buyer',
-    'resolved_rejected',
-    'closed',
-  ],
-  awaiting_seller: [
-    'under_review',
-    'awaiting_buyer',
-    'resolved_rejected',
-    'closed',
-  ],
-  awaiting_buyer: [
-    'under_review',
-    'awaiting_seller',
-    'resolved_rejected',
-    'closed',
-  ],
-  resolved_refunded: ['closed'],
-  resolved_rejected: ['closed'],
-  closed: [],
+  raised: [],
+  in_progress: ['resolved'],
+  resolved: [],
 };
 
 const toDate = (value: unknown): Date => {
@@ -74,6 +57,7 @@ const mapDispute = (
   disputeId: id,
   createdAt: toDate(data.createdAt),
   updatedAt: toDate(data.updatedAt),
+  ...(data.claimedAt ? { claimedAt: toDate(data.claimedAt) } : {}),
   ...(data.resolution
     ? { resolution: { ...data.resolution, resolvedAt: toDate(data.resolution.resolvedAt) } }
     : {}),
@@ -125,7 +109,7 @@ export class DisputeRepository {
         productName: order.productName,
         reason: input.reason,
         ...(input.message ? { message: input.message } : {}),
-        status: 'under_review',
+        status: 'raised',
         orderSnapshot: {
           totalAmount: order.totalAmount,
           currency: order.currency,
@@ -144,13 +128,13 @@ export class DisputeRepository {
         actorId: input.buyerId,
         actorRole: 'buyer',
         fromStatus: null,
-        toStatus: 'under_review',
+        toStatus: 'raised',
         createdAt: now,
       });
       transaction.update(orderRef, {
         buyerDisputeId: dispute.disputeId,
         buyerDisputeReason: dispute.reason,
-        buyerDisputeStatus: 'under_review',
+        buyerDisputeStatus: 'raised',
         ...(dispute.message ? { buyerDisputeMessage: dispute.message } : {}),
         buyerDisputedAt: now,
       });
@@ -218,12 +202,21 @@ export class DisputeRepository {
     };
   }
 
-  async moderateDispute(
-    disputeId: string,
-    adminId: string,
-    status: AdminModerationStatus,
-    note?: string,
-  ): Promise<Dispute> {
+  async getDisputeDetailsByOrderId(
+    orderId: string,
+  ): Promise<DisputeDetails | null> {
+    const snapshot = await firestore
+      .collection('disputes')
+      .where('orderId', '==', orderId)
+      .limit(1)
+      .get();
+    if (snapshot.empty) {
+      return null;
+    }
+    return this.getDisputeDetails(snapshot.docs[0].id);
+  }
+
+  async claimDispute(disputeId: string, adminId: string): Promise<Dispute> {
     const disputeRef = firestore.collection('disputes').doc(disputeId);
     const eventRef = disputeRef.collection('events').doc();
 
@@ -234,6 +227,77 @@ export class DisputeRepository {
       }
 
       const current = mapDispute(snapshot.id, snapshot.data()!);
+      if (current.assignedAdminId) {
+        if (current.assignedAdminId === adminId) {
+          return current;
+        }
+        throw new DisputeAdminError('dispute_already_claimed');
+      }
+      if (current.status !== 'raised') {
+        throw new DisputeAdminError('dispute_not_claimable');
+      }
+
+      const orderRef = firestore.collection('orders').doc(current.orderId);
+      const orderSnapshot = await transaction.get(orderRef);
+      const now = new Date();
+      const updates = {
+        assignedAdminId: adminId,
+        claimedAt: now,
+        status: 'in_progress' as const,
+        updatedAt: now,
+      };
+
+      transaction.update(disputeRef, updates);
+      transaction.create(eventRef, {
+        type: 'claimed',
+        actorId: adminId,
+        actorRole: 'admin',
+        fromStatus: current.status,
+        toStatus: 'in_progress',
+        createdAt: now,
+      });
+      if (orderSnapshot.exists) {
+        transaction.update(orderRef, { buyerDisputeStatus: 'in_progress' });
+      }
+
+      return { ...current, ...updates };
+    });
+  }
+
+  async moderateDispute(
+    disputeId: string,
+    adminId: string,
+    status: AdminModerationStatus,
+    note: string | undefined,
+    idempotencyKey: string,
+  ): Promise<Dispute> {
+    const disputeRef = firestore.collection('disputes').doc(disputeId);
+    const eventRef = disputeRef.collection('events').doc();
+    const idempotencyRef = disputeRef
+      .collection('idempotency_keys')
+      .doc(createHash('sha256').update(idempotencyKey).digest('hex'));
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({ adminId, status, note: note ?? null }))
+      .digest('hex');
+
+    return firestore.runTransaction(async (transaction) => {
+      const [snapshot, idempotencySnapshot] = await Promise.all([
+        transaction.get(disputeRef),
+        transaction.get(idempotencyRef),
+      ]);
+      if (!snapshot.exists) {
+        throw new DisputeAdminError('dispute_not_found');
+      }
+
+      const current = mapDispute(snapshot.id, snapshot.data()!);
+      if (idempotencySnapshot.exists) {
+        const previousRequest = idempotencySnapshot.data()!;
+        if (previousRequest.requestHash !== requestHash) {
+          throw new DisputeAdminError('idempotency_key_reused');
+        }
+        return mapDispute(disputeId, previousRequest.result);
+      }
+
       const orderRef = firestore.collection('orders').doc(current.orderId);
       const orderSnapshot = await transaction.get(orderRef);
       if (!ALLOWED_ADMIN_TRANSITIONS[current.status].includes(status)) {
@@ -245,15 +309,15 @@ export class DisputeRepository {
         status,
         updatedAt: now,
       };
-      if (status === 'resolved_rejected') {
+      if (status === 'resolved') {
         updates.resolution = {
-          outcome: 'rejected',
           note: note!,
           resolvedBy: adminId,
           resolvedAt: now,
         };
       }
 
+      const result = { ...current, ...updates } as Dispute;
       transaction.update(disputeRef, updates);
       transaction.create(eventRef, {
         type: 'status_changed',
@@ -264,14 +328,16 @@ export class DisputeRepository {
         ...(note ? { note } : {}),
         createdAt: now,
       });
+      transaction.create(idempotencyRef, {
+        requestHash,
+        result,
+        createdAt: now,
+      });
       if (orderSnapshot.exists) {
         transaction.update(orderRef, { buyerDisputeStatus: status });
       }
 
-      return {
-        ...current,
-        ...updates,
-      } as Dispute;
+      return result;
     });
   }
 }

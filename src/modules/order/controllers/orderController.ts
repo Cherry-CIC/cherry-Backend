@@ -710,7 +710,7 @@ export const submitOrderDispute = async (
       ...order,
       buyerDisputeId: dispute.disputeId,
       buyerDisputeReason: dispute.reason,
-      buyerDisputeStatus: 'under_review' as const,
+      buyerDisputeStatus: 'raised' as const,
       buyerDisputeMessage: dispute.message,
       buyerDisputedAt: dispute.createdAt,
     };

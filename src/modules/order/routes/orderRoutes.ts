@@ -126,7 +126,7 @@ const router = Router();
  *           nullable: true
  *         buyerDisputeStatus:
  *           type: string
- *           enum: [under_review]
+ *           enum: [raised, in_progress, resolved]
  *           nullable: true
  *         buyerDisputeMessage:
  *           type: string

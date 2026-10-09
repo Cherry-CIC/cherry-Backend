@@ -10,11 +10,7 @@ import {
 import { DisputeRepository } from './DisputeRepository';
 
 const MODERATABLE_STATUSES: AdminModerationStatus[] = [
-  'under_review',
-  'awaiting_seller',
-  'awaiting_buyer',
-  'resolved_rejected',
-  'closed',
+  'resolved',
 ];
 
 export const getAdminDisputeSummary = async (
@@ -112,6 +108,81 @@ export const getAdminDisputeDetails = async (
   }
 };
 
+export const getAdminDisputeDetailsByOrderId = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const orderId = requireSingleParam(req.params.orderId);
+  if (!orderId) {
+    ResponseHandler.badRequest(res, 'Order ID is required');
+    return;
+  }
+
+  try {
+    const details = await new DisputeRepository().getDisputeDetailsByOrderId(
+      orderId,
+    );
+    if (!details) {
+      ResponseHandler.notFound(res, 'Dispute not found for order');
+      return;
+    }
+    ResponseHandler.success(res, details, 'Dispute details fetched');
+  } catch (error) {
+    console.error('Error fetching dispute details by order ID:', error);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch dispute details',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+  }
+};
+
+export const claimAdminDispute = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const disputeId = requireSingleParam(req.params.disputeId);
+  if (!disputeId) {
+    ResponseHandler.badRequest(res, 'Dispute ID is required');
+    return;
+  }
+
+  const adminId = (req as any).user?.uid;
+  if (typeof adminId !== 'string') {
+    ResponseHandler.unauthorized(res, 'User not authenticated');
+    return;
+  }
+
+  try {
+    const dispute = await new DisputeRepository().claimDispute(
+      disputeId,
+      adminId,
+    );
+    ResponseHandler.success(res, { dispute }, 'Dispute claimed');
+  } catch (error) {
+    if (error instanceof DisputeAdminError) {
+      if (error.code === 'dispute_not_found') {
+        ResponseHandler.notFound(res, 'Dispute not found');
+        return;
+      }
+      if (error.code === 'dispute_already_claimed') {
+        ResponseHandler.conflict(res, 'Dispute has already been claimed');
+        return;
+      }
+      if (error.code === 'dispute_not_claimable') {
+        ResponseHandler.conflict(res, 'Dispute is not available to claim');
+        return;
+      }
+    }
+    console.error('Error claiming admin dispute:', error);
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to claim dispute',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+  }
+};
+
 export const moderateAdminDispute = async (
   req: Request,
   res: Response,
@@ -139,8 +210,21 @@ export const moderateAdminDispute = async (
     ResponseHandler.badRequest(res, 'Moderation note must be 2000 characters or fewer');
     return;
   }
-  if (status === 'resolved_rejected' && !note) {
-    ResponseHandler.badRequest(res, 'A note is required when rejecting a dispute');
+  if (status === 'resolved' && !note) {
+    ResponseHandler.badRequest(res, 'A resolution explanation is required');
+    return;
+  }
+
+  const idempotencyKey = req.header('Idempotency-Key');
+  if (
+    !idempotencyKey ||
+    idempotencyKey.length > 128 ||
+    !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)
+  ) {
+    ResponseHandler.badRequest(
+      res,
+      'A valid Idempotency-Key header of at most 128 characters is required',
+    );
     return;
   }
 
@@ -156,6 +240,7 @@ export const moderateAdminDispute = async (
       adminId,
       status as AdminModerationStatus,
       note || undefined,
+      idempotencyKey,
     );
     ResponseHandler.success(res, { dispute }, 'Dispute moderation saved');
   } catch (error) {
@@ -166,6 +251,13 @@ export const moderateAdminDispute = async (
       }
       if (error.code === 'invalid_status_transition') {
         ResponseHandler.conflict(res, 'Dispute cannot transition to that status');
+        return;
+      }
+      if (error.code === 'idempotency_key_reused') {
+        ResponseHandler.conflict(
+          res,
+          'Idempotency-Key was already used for a different request',
+        );
         return;
       }
     }

@@ -1,26 +1,17 @@
 import { OrderDisputeReason } from '../modules/order/model/Order';
 
 export type DisputeStatus =
-  | 'under_review'
-  | 'awaiting_seller'
-  | 'awaiting_buyer'
-  | 'resolved_refunded'
-  | 'resolved_rejected'
-  | 'closed';
+  | 'raised'
+  | 'in_progress'
+  | 'resolved';
 
 export const DISPUTE_STATUSES: DisputeStatus[] = [
-  'under_review',
-  'awaiting_seller',
-  'awaiting_buyer',
-  'resolved_refunded',
-  'resolved_rejected',
-  'closed',
+  'raised',
+  'in_progress',
+  'resolved',
 ];
 
-export type AdminModerationStatus = Exclude<
-  DisputeStatus,
-  'resolved_refunded'
->;
+export type AdminModerationStatus = Extract<DisputeStatus, 'resolved'>;
 
 export interface Dispute {
   disputeId: string;
@@ -32,8 +23,9 @@ export interface Dispute {
   reason: OrderDisputeReason;
   message?: string;
   status: DisputeStatus;
+  assignedAdminId?: string;
+  claimedAt?: Date;
   resolution?: {
-    outcome: 'rejected';
     note: string;
     resolvedBy: string;
     resolvedAt: Date;
@@ -75,6 +67,9 @@ export interface DisputeEvent {
 
 export type DisputeAdminErrorCode =
   | 'dispute_not_found'
+  | 'dispute_already_claimed'
+  | 'dispute_not_claimable'
+  | 'idempotency_key_reused'
   | 'invalid_status_transition'
   | 'cursor_not_found';
 
