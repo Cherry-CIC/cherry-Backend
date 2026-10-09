@@ -16,6 +16,8 @@ jest.mock('../../notifications/services/NotificationService', () => ({
 const mockGetStatusCounts = jest.fn();
 const mockListDisputes = jest.fn();
 const mockGetDisputeDetails = jest.fn();
+const mockGetDisputeDetailsByOrderId = jest.fn();
+const mockClaimDispute = jest.fn();
 const mockModerateDispute = jest.fn();
 
 jest.mock('../../../shared/config/firebaseConfig', () => ({
@@ -35,6 +37,8 @@ jest.mock('../../../disputes/DisputeRepository', () => ({
     getStatusCounts: mockGetStatusCounts,
     listDisputes: mockListDisputes,
     getDisputeDetails: mockGetDisputeDetails,
+    getDisputeDetailsByOrderId: mockGetDisputeDetailsByOrderId,
+    claimDispute: mockClaimDispute,
     moderateDispute: mockModerateDispute,
   })),
 }));
@@ -78,12 +82,9 @@ describe('Admin dispute routes', () => {
 
   it('returns dispute counts for the dashboard overview', async () => {
     mockGetStatusCounts.mockResolvedValue({
-      under_review: 3,
-      awaiting_seller: 1,
-      awaiting_buyer: 0,
-      resolved_refunded: 2,
-      resolved_rejected: 4,
-      closed: 1,
+      raised: 3,
+      in_progress: 0,
+      resolved: 8,
     });
 
     const response = await request(app)
@@ -92,7 +93,7 @@ describe('Admin dispute routes', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data.total).toBe(11);
-    expect(response.body.data.counts.under_review).toBe(3);
+    expect(response.body.data.counts.raised).toBe(3);
   });
 
   it('lists disputes with a status filter and cursor pagination', async () => {
@@ -105,11 +106,11 @@ describe('Admin dispute routes', () => {
     const response = await request(app)
       .get('/api/admin/disputes')
       .set('Authorization', `Bearer ${adminToken}`)
-      .query({ status: 'under_review', limit: '10', cursor: 'cursor-1' });
+      .query({ status: 'raised', limit: '10', cursor: 'cursor-1' });
 
     expect(response.status).toBe(200);
     expect(mockListDisputes).toHaveBeenCalledWith({
-      status: 'under_review',
+      status: 'raised',
       limit: 10,
       cursor: 'cursor-1',
     });
@@ -140,41 +141,130 @@ describe('Admin dispute routes', () => {
     expect(response.body.data.events).toHaveLength(1);
   });
 
+  it('returns dispute detail and audit history by order ID', async () => {
+    mockGetDisputeDetailsByOrderId.mockResolvedValue({
+      dispute: { disputeId: 'dispute-1', orderId: 'order-1' },
+      events: [{ eventId: 'event-1', type: 'submitted' }],
+    });
+
+    const response = await request(app)
+      .get('/api/admin/disputes/by-order/order-1')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(mockGetDisputeDetailsByOrderId).toHaveBeenCalledWith('order-1');
+    expect(response.body.data.dispute.disputeId).toBe('dispute-1');
+    expect(response.body.data.events).toHaveLength(1);
+  });
+
+  it('returns 404 when no dispute is linked to the order ID', async () => {
+    mockGetDisputeDetailsByOrderId.mockResolvedValue(null);
+
+    const response = await request(app)
+      .get('/api/admin/disputes/by-order/order-without-dispute')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('claims a dispute for the authenticated administrator', async () => {
+    mockClaimDispute.mockResolvedValue({
+      disputeId: 'dispute-1',
+      assignedAdminId: 'admin-1',
+      status: 'in_progress',
+    });
+
+    const response = await request(app)
+      .post('/api/admin/disputes/dispute-1/claim')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.dispute.assignedAdminId).toBe('admin-1');
+    expect(response.body.data.dispute.status).toBe('in_progress');
+    expect(mockClaimDispute).toHaveBeenCalledWith('dispute-1', 'admin-1');
+  });
+
+  it('returns conflict when another administrator already claimed a dispute', async () => {
+    const { DisputeAdminError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockClaimDispute.mockRejectedValue(
+      new DisputeAdminError('dispute_already_claimed'),
+    );
+
+    const response = await request(app)
+      .post('/api/admin/disputes/dispute-1/claim')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toContain('already been claimed');
+  });
+
   it('records an admin status change with the authenticated actor', async () => {
     mockModerateDispute.mockResolvedValue({
       disputeId: 'dispute-1',
-      status: 'awaiting_seller',
+      status: 'resolved',
     });
 
     const response = await request(app)
       .patch('/api/admin/disputes/dispute-1/status')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ status: 'awaiting_seller', note: 'Contact the seller.' });
+      .set('Idempotency-Key', 'resolve-dispute-1')
+      .send({ status: 'resolved', note: 'Decision recorded.' });
 
     expect(response.status).toBe(200);
     expect(mockModerateDispute).toHaveBeenCalledWith(
       'dispute-1',
       'admin-1',
-      'awaiting_seller',
-      'Contact the seller.',
+      'resolved',
+      'Decision recorded.',
+      'resolve-dispute-1',
     );
   });
 
-  it('requires a note when rejecting a dispute', async () => {
+  it('requires an idempotency key for status changes', async () => {
     const response = await request(app)
       .patch('/api/admin/disputes/dispute-1/status')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ status: 'resolved_rejected' });
+      .send({ status: 'resolved', note: 'Decision recorded.' });
 
     expect(response.status).toBe(400);
     expect(mockModerateDispute).not.toHaveBeenCalled();
   });
 
-  it('does not allow marking a dispute refunded without a refund workflow', async () => {
+  it('returns conflict when an idempotency key is reused with a different request', async () => {
+    const { DisputeAdminError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockModerateDispute.mockRejectedValue(
+      new DisputeAdminError('idempotency_key_reused'),
+    );
+
     const response = await request(app)
       .patch('/api/admin/disputes/dispute-1/status')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ status: 'resolved_refunded' });
+      .set('Idempotency-Key', 'resolve-dispute-1')
+      .send({ status: 'resolved', note: 'Different decision.' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toContain('different request');
+  });
+
+  it('requires an explanation when resolving a dispute', async () => {
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'resolved' });
+
+    expect(response.status).toBe(400);
+    expect(mockModerateDispute).not.toHaveBeenCalled();
+  });
+
+  it('rejects statuses outside the agreed dispute workflow', async () => {
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'closed' });
 
     expect(response.status).toBe(400);
     expect(mockModerateDispute).not.toHaveBeenCalled();

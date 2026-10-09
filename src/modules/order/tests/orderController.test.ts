@@ -891,7 +891,7 @@ describe('orderController.submitOrderDispute', () => {
       disputeId: 'dispute-generated-1',
       orderId: 'order-1',
       reason: 'wrong_item',
-      status: 'under_review',
+      status: 'raised',
       message: 'I received a different item.',
       createdAt: new Date('2026-07-15T10:00:00.000Z'),
     });
@@ -899,7 +899,7 @@ describe('orderController.submitOrderDispute', () => {
       ...disputableOrder,
       status: 'delivered',
       shipmentStatus: 'delivered',
-      buyerDisputeStatus: 'under_review',
+      buyerDisputeStatus: 'raised',
     });
   });
 
@@ -945,7 +945,7 @@ describe('orderController.submitOrderDispute', () => {
             id: 'order-1',
             buyerDisputeId: 'dispute-generated-1',
             buyerDisputeReason: 'wrong_item',
-            buyerDisputeStatus: 'under_review',
+            buyerDisputeStatus: 'raised',
             deliveryState: 'disputed',
             deliveryLabel: 'Disputed',
           }),
