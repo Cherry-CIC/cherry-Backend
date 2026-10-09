@@ -4,7 +4,13 @@ export type OrderDisputeReason =
   | 'item_not_as_described'
   | 'item_arrived_damaged'
   | 'something_else';
-export type OrderDisputeStatus = 'under_review';
+export type OrderDisputeStatus =
+  | 'under_review'
+  | 'awaiting_seller'
+  | 'awaiting_buyer'
+  | 'resolved_refunded'
+  | 'resolved_rejected'
+  | 'closed';
 export type ShipmentStatus =
   | 'pending'
   | 'announced'

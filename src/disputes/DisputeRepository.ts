@@ -1,6 +1,14 @@
 import { firestore } from '../shared/config/firebaseConfig';
 import { OrderDisputeReason } from '../modules/order/model/Order';
-import { Dispute, DisputeSubmissionError } from './Dispute';
+import {
+  AdminModerationStatus,
+  DISPUTE_STATUSES,
+  Dispute,
+  DisputeAdminError,
+  DisputeEvent,
+  DisputeStatus,
+  DisputeSubmissionError,
+} from './Dispute';
 
 export interface CreateBuyerDisputeInput {
   orderId: string;
@@ -8,6 +16,68 @@ export interface CreateBuyerDisputeInput {
   reason: OrderDisputeReason;
   message?: string;
 }
+
+export interface ListDisputesInput {
+  status?: DisputeStatus;
+  limit: number;
+  cursor?: string;
+}
+
+export interface ListDisputesResult {
+  disputes: Dispute[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface DisputeDetails {
+  dispute: Dispute;
+  events: DisputeEvent[];
+}
+
+const ALLOWED_ADMIN_TRANSITIONS: Record<DisputeStatus, DisputeStatus[]> = {
+  under_review: [
+    'awaiting_seller',
+    'awaiting_buyer',
+    'resolved_rejected',
+    'closed',
+  ],
+  awaiting_seller: [
+    'under_review',
+    'awaiting_buyer',
+    'resolved_rejected',
+    'closed',
+  ],
+  awaiting_buyer: [
+    'under_review',
+    'awaiting_seller',
+    'resolved_rejected',
+    'closed',
+  ],
+  resolved_refunded: ['closed'],
+  resolved_rejected: ['closed'],
+  closed: [],
+};
+
+const toDate = (value: unknown): Date => {
+  if (typeof (value as { toDate?: unknown })?.toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  const date = new Date(value as string | number | Date);
+  return Number.isNaN(date.getTime()) ? new Date(0) : date;
+};
+
+const mapDispute = (
+  id: string,
+  data: FirebaseFirestore.DocumentData,
+): Dispute => ({
+  ...data,
+  disputeId: id,
+  createdAt: toDate(data.createdAt),
+  updatedAt: toDate(data.updatedAt),
+  ...(data.resolution
+    ? { resolution: { ...data.resolution, resolvedAt: toDate(data.resolution.resolvedAt) } }
+    : {}),
+}) as Dispute;
 
 export class DisputeRepository {
   async createBuyerDispute(input: CreateBuyerDisputeInput): Promise<Dispute> {
@@ -86,6 +156,122 @@ export class DisputeRepository {
       });
 
       return dispute;
+    });
+  }
+
+  async getStatusCounts(): Promise<Record<DisputeStatus, number>> {
+    const counts = await Promise.all(
+      DISPUTE_STATUSES.map(async (status) => {
+        const result = await firestore
+          .collection('disputes')
+          .where('status', '==', status)
+          .count()
+          .get();
+        return [status, result.data().count] as const;
+      }),
+    );
+    return Object.fromEntries(counts) as Record<DisputeStatus, number>;
+  }
+
+  async listDisputes(input: ListDisputesInput): Promise<ListDisputesResult> {
+    const collection = firestore.collection('disputes');
+    let query = input.status
+      ? collection.where('status', '==', input.status)
+      : collection;
+    query = query.orderBy('createdAt', 'desc');
+
+    if (input.cursor) {
+      const cursorSnapshot = await collection.doc(input.cursor).get();
+      if (!cursorSnapshot.exists) {
+        throw new DisputeAdminError('cursor_not_found');
+      }
+      query = query.startAfter(cursorSnapshot);
+    }
+
+    const snapshot = await query.limit(input.limit + 1).get();
+    const hasMore = snapshot.docs.length > input.limit;
+    const page = snapshot.docs.slice(0, input.limit);
+    return {
+      disputes: page.map((doc) => mapDispute(doc.id, doc.data())),
+      nextCursor: hasMore ? page[page.length - 1].id : null,
+      hasMore,
+    };
+  }
+
+  async getDisputeDetails(disputeId: string): Promise<DisputeDetails | null> {
+    const disputeRef = firestore.collection('disputes').doc(disputeId);
+    const [disputeSnapshot, eventsSnapshot] = await Promise.all([
+      disputeRef.get(),
+      disputeRef.collection('events').orderBy('createdAt', 'asc').get(),
+    ]);
+    if (!disputeSnapshot.exists) {
+      return null;
+    }
+
+    return {
+      dispute: mapDispute(disputeSnapshot.id, disputeSnapshot.data()!),
+      events: eventsSnapshot.docs.map((doc) => ({
+        ...doc.data(),
+        eventId: doc.id,
+        createdAt: toDate(doc.data().createdAt),
+      })) as DisputeEvent[],
+    };
+  }
+
+  async moderateDispute(
+    disputeId: string,
+    adminId: string,
+    status: AdminModerationStatus,
+    note?: string,
+  ): Promise<Dispute> {
+    const disputeRef = firestore.collection('disputes').doc(disputeId);
+    const eventRef = disputeRef.collection('events').doc();
+
+    return firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(disputeRef);
+      if (!snapshot.exists) {
+        throw new DisputeAdminError('dispute_not_found');
+      }
+
+      const current = mapDispute(snapshot.id, snapshot.data()!);
+      const orderRef = firestore.collection('orders').doc(current.orderId);
+      const orderSnapshot = await transaction.get(orderRef);
+      if (!ALLOWED_ADMIN_TRANSITIONS[current.status].includes(status)) {
+        throw new DisputeAdminError('invalid_status_transition');
+      }
+
+      const now = new Date();
+      const updates: Record<string, unknown> = {
+        status,
+        updatedAt: now,
+      };
+      if (status === 'resolved_rejected') {
+        updates.resolution = {
+          outcome: 'rejected',
+          note: note!,
+          resolvedBy: adminId,
+          resolvedAt: now,
+        };
+      }
+
+      transaction.update(disputeRef, updates);
+      transaction.create(eventRef, {
+        type: 'status_changed',
+        actorId: adminId,
+        actorRole: 'admin',
+        fromStatus: current.status,
+        toStatus: status,
+        ...(note ? { note } : {}),
+        createdAt: now,
+      });
+      if (orderSnapshot.exists) {
+        transaction.update(orderRef, { buyerDisputeStatus: status });
+      }
+
+      return {
+        ...current,
+        ...updates,
+      } as Dispute;
     });
   }
 }

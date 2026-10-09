@@ -2,6 +2,12 @@ import { Router } from 'express';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { exportOrdersCsv } from '../controllers/exportController';
+import {
+	getAdminDisputeDetails,
+	getAdminDisputeSummary,
+	listAdminDisputes,
+	moderateAdminDispute,
+} from '../../../disputes/DisputeAdminController';
 
 const router = Router();
 
@@ -83,5 +89,144 @@ const router = Router();
  *         description: Internal server error
  */
 router.get('/export/orders', authMiddleware, adminMiddleware, exportOrdersCsv);
+
+/**
+ * @swagger
+ * /api/admin/disputes/summary:
+ *   get:
+ *     summary: Get dispute counts by moderation status
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Dispute totals and per-status counts
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.get(
+	'/disputes/summary',
+	authMiddleware,
+	adminMiddleware,
+	getAdminDisputeSummary,
+);
+
+/**
+ * @swagger
+ * /api/admin/disputes:
+ *   get:
+ *     summary: List disputes for the admin moderation queue
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [under_review, awaiting_seller, awaiting_buyer, resolved_refunded, resolved_rejected, closed]
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 25
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Dispute ID returned as nextCursor by the previous page
+ *     responses:
+ *       200:
+ *         description: Dispute page with hasMore and nextCursor
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.get('/disputes', authMiddleware, adminMiddleware, listAdminDisputes);
+
+/**
+ * @swagger
+ * /api/admin/disputes/{disputeId}:
+ *   get:
+ *     summary: Get dispute detail and audit events
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: disputeId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Dispute and chronological event history
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Dispute not found
+ */
+router.get(
+	'/disputes/:disputeId',
+	authMiddleware,
+	adminMiddleware,
+	getAdminDisputeDetails,
+);
+
+/**
+ * @swagger
+ * /api/admin/disputes/{disputeId}/status:
+ *   patch:
+ *     summary: Change dispute status and append an admin audit event
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: disputeId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [under_review, awaiting_seller, awaiting_buyer, resolved_rejected, closed]
+ *               note:
+ *                 type: string
+ *                 maxLength: 2000
+ *     responses:
+ *       200:
+ *         description: Dispute status updated
+ *       400:
+ *         description: Invalid status or rejection note missing
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Dispute not found
+ *       409:
+ *         description: Invalid status transition
+ */
+router.patch(
+	'/disputes/:disputeId/status',
+	authMiddleware,
+	adminMiddleware,
+	moderateAdminDispute,
+);
 
 export default router;

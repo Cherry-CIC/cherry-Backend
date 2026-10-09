@@ -8,6 +8,20 @@ export type DisputeStatus =
   | 'resolved_rejected'
   | 'closed';
 
+export const DISPUTE_STATUSES: DisputeStatus[] = [
+  'under_review',
+  'awaiting_seller',
+  'awaiting_buyer',
+  'resolved_refunded',
+  'resolved_rejected',
+  'closed',
+];
+
+export type AdminModerationStatus = Exclude<
+  DisputeStatus,
+  'resolved_refunded'
+>;
+
 export interface Dispute {
   disputeId: string;
   orderId: string;
@@ -18,6 +32,12 @@ export interface Dispute {
   reason: OrderDisputeReason;
   message?: string;
   status: DisputeStatus;
+  resolution?: {
+    outcome: 'rejected';
+    note: string;
+    resolvedBy: string;
+    resolvedAt: Date;
+  };
   orderSnapshot: {
     totalAmount: number;
     currency: string;
@@ -39,5 +59,28 @@ export class DisputeSubmissionError extends Error {
   constructor(readonly code: DisputeSubmissionErrorCode) {
     super(code);
     this.name = 'DisputeSubmissionError';
+  }
+}
+
+export interface DisputeEvent {
+  eventId: string;
+  type: string;
+  actorId: string;
+  actorRole: 'buyer' | 'seller' | 'admin';
+  fromStatus: DisputeStatus | null;
+  toStatus: DisputeStatus;
+  note?: string;
+  createdAt: Date;
+}
+
+export type DisputeAdminErrorCode =
+  | 'dispute_not_found'
+  | 'invalid_status_transition'
+  | 'cursor_not_found';
+
+export class DisputeAdminError extends Error {
+  constructor(readonly code: DisputeAdminErrorCode) {
+    super(code);
+    this.name = 'DisputeAdminError';
   }
 }
