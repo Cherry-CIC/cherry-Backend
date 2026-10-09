@@ -73,6 +73,7 @@ export interface Order {
   sellerSoldEmailSentAt?: Date;
   buyerShipmentStartedEmailSentAt?: Date;
   buyerDeliveryEmailSentAt?: Date;
+  buyerDisputeId?: string;
   buyerDisputeReason?: OrderDisputeReason;
   buyerDisputeStatus?: OrderDisputeStatus;
   buyerDisputeMessage?: string;
