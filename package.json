@@ -46,7 +46,6 @@
     "lint": "eslint 'src/**/*.{ts,js}' --fix",
     "format": "prettier --write .",
     "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",
-    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list",
-    "disputes:migrate": "tsc --target ES2020 --module commonjs --rootDir src --outDir dist --strict --esModuleInterop --skipLibCheck src/scripts/migrateOrderDisputes.ts && node -r dotenv/config dist/scripts/migrateOrderDisputes.js"
+    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list"
   }
 }
