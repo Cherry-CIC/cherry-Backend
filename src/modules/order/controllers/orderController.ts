@@ -13,6 +13,8 @@ import { Order, OrderDisputeReason } from '../model/Order';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
 import { EmailService } from '../../notifications/services/EmailService';
 import { NotificationService } from '../../notifications/services/NotificationService';
+import { DisputeRepository } from '../../../disputes/DisputeRepository';
+import { DisputeSubmissionError } from '../../../disputes/Dispute';
 
 const ENFORCED_CARRIER = sendcloudConfig.enforcedCarrier;
 
@@ -130,14 +132,6 @@ const DISPUTE_REASONS: OrderDisputeReason[] = [
   'item_arrived_damaged',
   'something_else',
 ];
-
-const canBuyerSubmitDispute = (order: Order): boolean => {
-  if (order.buyerDisputeStatus) {
-    return false;
-  }
-
-  return order.status === 'delivered' || order.shipmentStatus === 'delivered';
-};
 
 const parseDisputeReason = (value: unknown): OrderDisputeReason | null => {
   if (typeof value !== 'string') {
@@ -699,53 +693,27 @@ export const submitOrderDispute = async (
       return;
     }
 
-    const orderRepo = new OrderRepository();
-    const shipmentRepo = new ShipmentRepository();
-    const order = await orderRepo.getOrderById(orderId);
-
-    if (!order) {
-      ResponseHandler.notFound(
-        res,
-        'Order not found',
-        `Order with ID ${orderId} does not exist`,
-      );
-      return;
-    }
-
-    if (order.userId !== firebaseUid) {
-      ResponseHandler.forbidden(
-        res,
-        'Access denied',
-        'You can only dispute your own orders',
-      );
-      return;
-    }
-
-    if (!canBuyerSubmitDispute(order)) {
-      ResponseHandler.conflict(
-        res,
-        'Order cannot be disputed',
-        'The order is not eligible for buyer dispute submission',
-      );
-      return;
-    }
-
-    const buyerDisputedAt = new Date();
-    await orderRepo.updateOrder(order.id, {
-      buyerDisputeReason: reason,
-      buyerDisputeStatus: 'under_review',
-      buyerDisputeMessage: message || undefined,
-      buyerDisputedAt,
+    const dispute = await new DisputeRepository().createBuyerDispute({
+      orderId,
+      buyerId: firebaseUid,
+      reason,
+      message: message || undefined,
     });
-
+    const orderRepo = new OrderRepository();
+    const order = await orderRepo.getOrderById(orderId);
+    if (!order) {
+      throw new Error('Order disappeared after dispute submission');
+    }
+    const shipmentRepo = new ShipmentRepository();
+    const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
     const updatedOrder = {
       ...order,
-      buyerDisputeReason: reason,
-      buyerDisputeStatus: 'under_review' as const,
-      buyerDisputeMessage: message || undefined,
-      buyerDisputedAt,
+      buyerDisputeId: dispute.disputeId,
+      buyerDisputeReason: dispute.reason,
+      buyerDisputeStatus: 'raised' as const,
+      buyerDisputeMessage: dispute.message,
+      buyerDisputedAt: dispute.createdAt,
     };
-    const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
 
     ResponseHandler.success(
       res,
@@ -753,6 +721,27 @@ export const submitOrderDispute = async (
       'Order dispute submitted',
     );
   } catch (err) {
+    if (err instanceof DisputeSubmissionError) {
+      switch (err.code) {
+        case 'order_not_found':
+          ResponseHandler.notFound(res, 'Order not found');
+          return;
+        case 'not_order_owner':
+          ResponseHandler.forbidden(
+            res,
+            'Access denied',
+            'You can only dispute your own orders',
+          );
+          return;
+        case 'order_not_eligible':
+          ResponseHandler.conflict(
+            res,
+            'Order cannot be disputed',
+            'The order is not eligible for buyer dispute submission',
+          );
+          return;
+      }
+    }
     console.error('Error submitting order dispute:', err);
     ResponseHandler.internalServerError(
       res,

@@ -117,13 +117,16 @@ const router = Router();
  *           type: string
  *           format: date-time
  *           nullable: true
+ *         buyerDisputeId:
+ *           type: string
+ *           nullable: true
  *         buyerDisputeReason:
  *           type: string
  *           enum: [wrong_item, item_not_as_described, item_arrived_damaged, something_else]
  *           nullable: true
  *         buyerDisputeStatus:
  *           type: string
- *           enum: [under_review]
+ *           enum: [raised, in_progress, resolved]
  *           nullable: true
  *         buyerDisputeMessage:
  *           type: string

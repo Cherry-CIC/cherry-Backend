@@ -4,7 +4,10 @@ export type OrderDisputeReason =
   | 'item_not_as_described'
   | 'item_arrived_damaged'
   | 'something_else';
-export type OrderDisputeStatus = 'under_review';
+export type OrderDisputeStatus =
+  | 'raised'
+  | 'in_progress'
+  | 'resolved';
 export type ShipmentStatus =
   | 'pending'
   | 'announced'
@@ -73,6 +76,7 @@ export interface Order {
   sellerSoldEmailSentAt?: Date;
   buyerShipmentStartedEmailSentAt?: Date;
   buyerDeliveryEmailSentAt?: Date;
+  buyerDisputeId?: string;
   buyerDisputeReason?: OrderDisputeReason;
   buyerDisputeStatus?: OrderDisputeStatus;
   buyerDisputeMessage?: string;

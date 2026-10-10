@@ -3,6 +3,7 @@ const mockVerifySucceededPaymentIntentForUser = jest.fn();
 const mockGetDeliveryOptions = jest.fn();
 const mockCreatePaidOrderAndDecrementInventory = jest.fn();
 const mockUpdateOrder = jest.fn();
+const mockCreateBuyerDispute = jest.fn();
 const mockGetOrdersByUserId = jest.fn();
 const mockGetOrderById = jest.fn();
 const mockCreateShipmentForPaidOrder = jest.fn();
@@ -25,6 +26,12 @@ jest.mock('../repositories/OrderRepository', () => ({
     updateOrder: mockUpdateOrder,
     getOrdersByUserId: mockGetOrdersByUserId,
     getOrderById: mockGetOrderById,
+  })),
+}));
+
+jest.mock('../../../disputes/DisputeRepository', () => ({
+  DisputeRepository: jest.fn().mockImplementation(() => ({
+    createBuyerDispute: mockCreateBuyerDispute,
   })),
 }));
 
@@ -880,6 +887,20 @@ describe('orderController.submitOrderDispute', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetShipmentByOrderId.mockResolvedValue(null);
+    mockCreateBuyerDispute.mockResolvedValue({
+      disputeId: 'dispute-generated-1',
+      orderId: 'order-1',
+      reason: 'wrong_item',
+      status: 'raised',
+      message: 'I received a different item.',
+      createdAt: new Date('2026-07-15T10:00:00.000Z'),
+    });
+    mockGetOrderById.mockResolvedValue({
+      ...disputableOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+      buyerDisputeStatus: 'raised',
+    });
   });
 
     it('lets the buyer submit a dispute for a delivered order', async () => {
@@ -905,21 +926,15 @@ describe('orderController.submitOrderDispute', () => {
 
     await submitOrderDispute(req, res);
 
-    expect(mockUpdateOrder).toHaveBeenCalledWith(
-      'order-1',
+    expect(mockCreateBuyerDispute).toHaveBeenCalledWith(
       expect.objectContaining({
-        buyerDisputeReason: 'wrong_item',
-        buyerDisputeStatus: 'under_review',
-        buyerDisputeMessage: 'I received a different item.',
+        orderId: 'order-1',
+        buyerId: 'user-1',
+        reason: 'wrong_item',
+        message: 'I received a different item.',
       }),
     );
-    expect(mockUpdateOrder).toHaveBeenCalledWith(
-      'order-1',
-      expect.not.objectContaining({
-        buyerConfirmedReceived: true,
-        shipmentStatus: 'delivered',
-      }),
-    );
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -928,8 +943,9 @@ describe('orderController.submitOrderDispute', () => {
         data: {
           order: expect.objectContaining({
             id: 'order-1',
+            buyerDisputeId: 'dispute-generated-1',
             buyerDisputeReason: 'wrong_item',
-            buyerDisputeStatus: 'under_review',
+            buyerDisputeStatus: 'raised',
             deliveryState: 'disputed',
             deliveryLabel: 'Disputed',
           }),
@@ -955,7 +971,7 @@ describe('orderController.submitOrderDispute', () => {
     await submitOrderDispute(req, res);
 
     expect(mockGetOrderById).not.toHaveBeenCalled();
-    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(mockCreateBuyerDispute).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
@@ -981,23 +997,22 @@ describe('orderController.submitOrderDispute', () => {
 
     await submitOrderDispute(req, res);
 
-    expect(mockUpdateOrder).toHaveBeenCalledWith(
-      'order-1',
+    expect(mockCreateBuyerDispute).toHaveBeenCalledWith(
       expect.objectContaining({
-        buyerDisputeReason: 'item_arrived_damaged',
-        buyerDisputeStatus: 'under_review',
+        orderId: 'order-1',
+        reason: 'item_arrived_damaged',
       }),
     );
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
   it('rejects a duplicate unresolved dispute', async () => {
-    mockGetOrderById.mockResolvedValue({
-      ...disputableOrder,
-      status: 'delivered',
-      shipmentStatus: 'delivered',
-      buyerDisputeStatus: 'under_review',
-    });
+    const { DisputeSubmissionError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockCreateBuyerDispute.mockRejectedValue(
+      new DisputeSubmissionError('order_not_eligible'),
+    );
     const req: any = {
       user: { uid: 'user-1' },
       params: { id: 'order-1' },
@@ -1007,12 +1022,17 @@ describe('orderController.submitOrderDispute', () => {
 
     await submitOrderDispute(req, res);
 
-    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(mockCreateBuyerDispute).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(409);
   });
 
   it('rejects disputes before the order is delivered', async () => {
-    mockGetOrderById.mockResolvedValue(disputableOrder);
+    const { DisputeSubmissionError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockCreateBuyerDispute.mockRejectedValue(
+      new DisputeSubmissionError('order_not_eligible'),
+    );
     const req: any = {
       user: { uid: 'user-1' },
       params: { id: 'order-1' },
@@ -1022,7 +1042,7 @@ describe('orderController.submitOrderDispute', () => {
 
     await submitOrderDispute(req, res);
 
-    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(mockCreateBuyerDispute).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(409);
   });
 });
