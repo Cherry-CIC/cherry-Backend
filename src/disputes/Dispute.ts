@@ -11,7 +11,10 @@ export const DISPUTE_STATUSES: DisputeStatus[] = [
   'resolved',
 ];
 
-export type AdminModerationStatus = Extract<DisputeStatus, 'resolved'>;
+export type AdminModerationStatus = Extract<
+  DisputeStatus,
+  'in_progress' | 'resolved'
+>;
 
 export interface Dispute {
   disputeId: string;
@@ -67,8 +70,6 @@ export interface DisputeEvent {
 
 export type DisputeAdminErrorCode =
   | 'dispute_not_found'
-  | 'dispute_already_claimed'
-  | 'dispute_not_claimable'
   | 'idempotency_key_reused'
   | 'invalid_status_transition'
   | 'cursor_not_found';

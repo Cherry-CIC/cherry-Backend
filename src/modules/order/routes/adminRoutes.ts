@@ -3,7 +3,6 @@ import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { exportOrdersCsv } from '../controllers/exportController';
 import {
-	claimAdminDispute,
 	getAdminDisputeDetails,
 	getAdminDisputeDetailsByOrderId,
 	getAdminDisputeSummary,
@@ -153,39 +152,6 @@ router.get('/disputes', authMiddleware, adminMiddleware, listAdminDisputes);
 
 /**
  * @swagger
- * /api/admin/disputes/{disputeId}/claim:
- *   post:
- *     summary: Claim an unassigned dispute for the authenticated administrator
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: disputeId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Dispute assigned to this administrator and moved to in_progress
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- *       404:
- *         description: Dispute not found
- *       409:
- *         description: Dispute is already claimed or not available to claim
- */
-router.post(
-	'/disputes/:disputeId/claim',
-	authMiddleware,
-	adminMiddleware,
-	claimAdminDispute,
-);
-
-/**
- * @swagger
  * /api/admin/disputes/by-order/{orderId}:
  *   get:
  *     summary: Get dispute detail and audit events by associated order ID
@@ -277,7 +243,7 @@ router.get(
  *             properties:
  *               status:
  *                 type: string
- *                 enum: [resolved]
+ *                 enum: [in_progress, resolved]
  *               note:
  *                 type: string
  *                 maxLength: 2000

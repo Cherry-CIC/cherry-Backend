@@ -146,11 +146,23 @@ describe('DisputeRepository transactions', () => {
     );
   });
 
-  it('allows only one of two competing admins to claim a dispute', async () => {
+  it('allows only one of two competing admins to move a dispute in progress', async () => {
     const repository = new DisputeRepository();
     const results = await Promise.allSettled([
-      repository.claimDispute('dispute-1', 'admin-1'),
-      repository.claimDispute('dispute-1', 'admin-2'),
+      repository.moderateDispute(
+        'dispute-1',
+        'admin-1',
+        'in_progress',
+        undefined,
+        'progress-key-1',
+      ),
+      repository.moderateDispute(
+        'dispute-1',
+        'admin-2',
+        'in_progress',
+        undefined,
+        'progress-key-2',
+      ),
     ]);
 
     const fulfilled = results.filter(
@@ -163,14 +175,14 @@ describe('DisputeRepository transactions', () => {
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toBeInstanceOf(DisputeAdminError);
-    expect(rejected[0].reason.code).toBe('dispute_already_claimed');
+    expect(rejected[0].reason.code).toBe('invalid_status_transition');
     expect(['admin-1', 'admin-2']).toContain(disputeData.assignedAdminId);
     expect(disputeData.status).toBe('in_progress');
     expect(orderData.buyerDisputeStatus).toBe('in_progress');
     expect(events).toHaveLength(1);
     expect(events[0].data).toEqual(
       expect.objectContaining({
-        type: 'claimed',
+        type: 'status_changed',
         actorId: disputeData.assignedAdminId,
         actorRole: 'admin',
         fromStatus: 'raised',
@@ -179,16 +191,59 @@ describe('DisputeRepository transactions', () => {
     );
   });
 
-  it('makes a repeated claim by the assigned admin idempotent', async () => {
+  it('returns the original result for a repeated in-progress request with the same key', async () => {
     const repository = new DisputeRepository();
 
-    const firstClaim = await repository.claimDispute('dispute-1', 'admin-1');
-    const repeatedClaim = await repository.claimDispute('dispute-1', 'admin-1');
+    const firstResult = await repository.moderateDispute(
+      'dispute-1',
+      'admin-1',
+      'in_progress',
+      undefined,
+      'progress-key-1',
+    );
+    const repeatedResult = await repository.moderateDispute(
+      'dispute-1',
+      'admin-1',
+      'in_progress',
+      undefined,
+      'progress-key-1',
+    );
 
-    expect(repeatedClaim.assignedAdminId).toBe('admin-1');
-    expect(repeatedClaim.status).toBe('in_progress');
-    expect(firstClaim.claimedAt).toEqual(repeatedClaim.claimedAt);
+    expect(repeatedResult.assignedAdminId).toBe('admin-1');
+    expect(repeatedResult.status).toBe('in_progress');
+    expect(firstResult.claimedAt).toEqual(repeatedResult.claimedAt);
     expect(events).toHaveLength(1);
+  });
+
+  it('can resolve a raised dispute directly', async () => {
+    const repository = new DisputeRepository();
+
+    await repository.moderateDispute(
+      'dispute-1',
+      'admin-1',
+      'resolved',
+      'Decision recorded.',
+      'resolve-key-1',
+    );
+
+    expect(disputeData.status).toBe('resolved');
+    expect(disputeData.assignedAdminId).toBe('admin-1');
+    expect(disputeData.resolution).toEqual(
+      expect.objectContaining({
+        note: 'Decision recorded.',
+        resolvedBy: 'admin-1',
+      }),
+    );
+    expect(orderData.buyerDisputeStatus).toBe('resolved');
+    expect(events).toHaveLength(1);
+    expect(events[0].data).toEqual(
+      expect.objectContaining({
+        type: 'status_changed',
+        actorId: 'admin-1',
+        fromStatus: 'raised',
+        toStatus: 'resolved',
+      }),
+    );
   });
 
   it('returns the original result for a repeated status request with the same key', async () => {

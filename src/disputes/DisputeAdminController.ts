@@ -10,6 +10,7 @@ import {
 import { DisputeRepository } from './DisputeRepository';
 
 const MODERATABLE_STATUSES: AdminModerationStatus[] = [
+  'in_progress',
   'resolved',
 ];
 
@@ -132,52 +133,6 @@ export const getAdminDisputeDetailsByOrderId = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch dispute details',
-      error instanceof Error ? error.message : 'Unknown error',
-    );
-  }
-};
-
-export const claimAdminDispute = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const disputeId = requireSingleParam(req.params.disputeId);
-  if (!disputeId) {
-    ResponseHandler.badRequest(res, 'Dispute ID is required');
-    return;
-  }
-
-  const adminId = (req as any).user?.uid;
-  if (typeof adminId !== 'string') {
-    ResponseHandler.unauthorized(res, 'User not authenticated');
-    return;
-  }
-
-  try {
-    const dispute = await new DisputeRepository().claimDispute(
-      disputeId,
-      adminId,
-    );
-    ResponseHandler.success(res, { dispute }, 'Dispute claimed');
-  } catch (error) {
-    if (error instanceof DisputeAdminError) {
-      if (error.code === 'dispute_not_found') {
-        ResponseHandler.notFound(res, 'Dispute not found');
-        return;
-      }
-      if (error.code === 'dispute_already_claimed') {
-        ResponseHandler.conflict(res, 'Dispute has already been claimed');
-        return;
-      }
-      if (error.code === 'dispute_not_claimable') {
-        ResponseHandler.conflict(res, 'Dispute is not available to claim');
-        return;
-      }
-    }
-    console.error('Error claiming admin dispute:', error);
-    ResponseHandler.internalServerError(
-      res,
-      'Failed to claim dispute',
       error instanceof Error ? error.message : 'Unknown error',
     );
   }

@@ -36,7 +36,7 @@ export interface DisputeDetails {
 }
 
 const ALLOWED_ADMIN_TRANSITIONS: Record<DisputeStatus, DisputeStatus[]> = {
-  raised: [],
+  raised: ['in_progress', 'resolved'],
   in_progress: ['resolved'],
   resolved: [],
 };
@@ -216,54 +216,6 @@ export class DisputeRepository {
     return this.getDisputeDetails(snapshot.docs[0].id);
   }
 
-  async claimDispute(disputeId: string, adminId: string): Promise<Dispute> {
-    const disputeRef = firestore.collection('disputes').doc(disputeId);
-    const eventRef = disputeRef.collection('events').doc();
-
-    return firestore.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(disputeRef);
-      if (!snapshot.exists) {
-        throw new DisputeAdminError('dispute_not_found');
-      }
-
-      const current = mapDispute(snapshot.id, snapshot.data()!);
-      if (current.assignedAdminId) {
-        if (current.assignedAdminId === adminId) {
-          return current;
-        }
-        throw new DisputeAdminError('dispute_already_claimed');
-      }
-      if (current.status !== 'raised') {
-        throw new DisputeAdminError('dispute_not_claimable');
-      }
-
-      const orderRef = firestore.collection('orders').doc(current.orderId);
-      const orderSnapshot = await transaction.get(orderRef);
-      const now = new Date();
-      const updates = {
-        assignedAdminId: adminId,
-        claimedAt: now,
-        status: 'in_progress' as const,
-        updatedAt: now,
-      };
-
-      transaction.update(disputeRef, updates);
-      transaction.create(eventRef, {
-        type: 'claimed',
-        actorId: adminId,
-        actorRole: 'admin',
-        fromStatus: current.status,
-        toStatus: 'in_progress',
-        createdAt: now,
-      });
-      if (orderSnapshot.exists) {
-        transaction.update(orderRef, { buyerDisputeStatus: 'in_progress' });
-      }
-
-      return { ...current, ...updates };
-    });
-  }
-
   async moderateDispute(
     disputeId: string,
     adminId: string,
@@ -309,7 +261,14 @@ export class DisputeRepository {
         status,
         updatedAt: now,
       };
+      if (status === 'in_progress' && !current.assignedAdminId) {
+        updates.assignedAdminId = adminId;
+        updates.claimedAt = now;
+      }
       if (status === 'resolved') {
+        if (!current.assignedAdminId) {
+          updates.assignedAdminId = adminId;
+        }
         updates.resolution = {
           note: note!,
           resolvedBy: adminId,

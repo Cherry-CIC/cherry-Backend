@@ -17,7 +17,6 @@ const mockGetStatusCounts = jest.fn();
 const mockListDisputes = jest.fn();
 const mockGetDisputeDetails = jest.fn();
 const mockGetDisputeDetailsByOrderId = jest.fn();
-const mockClaimDispute = jest.fn();
 const mockModerateDispute = jest.fn();
 
 jest.mock('../../../shared/config/firebaseConfig', () => ({
@@ -38,7 +37,6 @@ jest.mock('../../../disputes/DisputeRepository', () => ({
     listDisputes: mockListDisputes,
     getDisputeDetails: mockGetDisputeDetails,
     getDisputeDetailsByOrderId: mockGetDisputeDetailsByOrderId,
-    claimDispute: mockClaimDispute,
     moderateDispute: mockModerateDispute,
   })),
 }));
@@ -167,39 +165,6 @@ describe('Admin dispute routes', () => {
     expect(response.status).toBe(404);
   });
 
-  it('claims a dispute for the authenticated administrator', async () => {
-    mockClaimDispute.mockResolvedValue({
-      disputeId: 'dispute-1',
-      assignedAdminId: 'admin-1',
-      status: 'in_progress',
-    });
-
-    const response = await request(app)
-      .post('/api/admin/disputes/dispute-1/claim')
-      .set('Authorization', `Bearer ${adminToken}`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.dispute.assignedAdminId).toBe('admin-1');
-    expect(response.body.data.dispute.status).toBe('in_progress');
-    expect(mockClaimDispute).toHaveBeenCalledWith('dispute-1', 'admin-1');
-  });
-
-  it('returns conflict when another administrator already claimed a dispute', async () => {
-    const { DisputeAdminError } = jest.requireActual(
-      '../../../disputes/Dispute',
-    );
-    mockClaimDispute.mockRejectedValue(
-      new DisputeAdminError('dispute_already_claimed'),
-    );
-
-    const response = await request(app)
-      .post('/api/admin/disputes/dispute-1/claim')
-      .set('Authorization', `Bearer ${adminToken}`);
-
-    expect(response.status).toBe(409);
-    expect(response.body.message).toContain('already been claimed');
-  });
-
   it('records an admin status change with the authenticated actor', async () => {
     mockModerateDispute.mockResolvedValue({
       disputeId: 'dispute-1',
@@ -219,6 +184,29 @@ describe('Admin dispute routes', () => {
       'resolved',
       'Decision recorded.',
       'resolve-dispute-1',
+    );
+  });
+
+  it('allows an admin to mark a dispute in progress through the status endpoint', async () => {
+    mockModerateDispute.mockResolvedValue({
+      disputeId: 'dispute-1',
+      assignedAdminId: 'admin-1',
+      status: 'in_progress',
+    });
+
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', 'progress-dispute-1')
+      .send({ status: 'in_progress' });
+
+    expect(response.status).toBe(200);
+    expect(mockModerateDispute).toHaveBeenCalledWith(
+      'dispute-1',
+      'admin-1',
+      'in_progress',
+      undefined,
+      'progress-dispute-1',
     );
   });
 
