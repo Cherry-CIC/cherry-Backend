@@ -1,3 +1,13 @@
+import {
+  assertOwner,
+  assertSafetyVerified,
+  assertUnreserved,
+  requireVersion,
+  ListingSafetyError,
+  listingEditingEnabled,
+} from '../../../shared/utils/listingSafety';
+import { parseListingEdit } from '../validators/productValidator';
+import type { UpdateProductData } from '../services/ProductService';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Product, ProductStatus } from '../model/Product';
 import { FieldPath, Timestamp, FieldValue } from 'firebase-admin/firestore';
@@ -24,7 +34,7 @@ export interface ProductQueryPage {
 }
 
 export class ProductRepository {
-  private db = firestore;
+  constructor(private readonly db: FirebaseFirestore.Firestore = firestore) {}
   private collectionName = 'products';
 
   async getAll(): Promise<Product[]> {
@@ -42,15 +52,33 @@ export class ProductRepository {
   }
 
   async create(product: Product): Promise<Product> {
-    const docRef = await this.db.collection(this.collectionName).add({
+    const ref = this.db.collection(this.collectionName).doc();
+    const stored = {
       ...product,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+      editVersion: 0,
+      editSafetyVerified: true,
+      hasSales: false,
+      hasBeenEdited: false,
+    };
+    await this.db.runTransaction(async (tx) => {
+      const deleting = await tx.get(
+        this.db.collection('account_deletions').doc(product.userId),
+      );
+      if (deleting.exists)
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_DELETION_PENDING',
+          'Account deletion is in progress.',
+        );
+      tx.create(ref, {
+        ...stored,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     });
-
     return {
-      id: docRef.id,
-      ...product,
+      ...stored,
+      id: ref.id,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -58,33 +86,125 @@ export class ProductRepository {
 
   async update(
     id: string,
-    product: Partial<Omit<Product, 'id' | 'createdAt' | 'updatedAt'>>,
-  ): Promise<Product | null> {
-    const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    await docRef.update({
-      ...product,
-      updatedAt: FieldValue.serverTimestamp(),
+    input: UpdateProductData,
+    uid: string,
+  ): Promise<Product> {
+    if (!listingEditingEnabled())
+      throw new ListingSafetyError(
+        503,
+        'LISTING_EDIT_DISABLED',
+        'Listing editing is not available yet.',
+      );
+    const { expectedEditVersion, ...changes } = parseListingEdit(input);
+    const ref = this.db.collection(this.collectionName).doc(id);
+    return this.db.runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      if (!doc.exists)
+        throw new ListingSafetyError(
+          404,
+          'LISTING_NOT_FOUND',
+          'Listing not found.',
+        );
+      const data = doc.data()!;
+      assertOwner(data, uid);
+      assertSafetyVerified(data);
+      assertUnreserved(data);
+      const version = requireVersion(data);
+      if (version !== expectedEditVersion)
+        throw new ListingSafetyError(
+          409,
+          'LISTING_VERSION_CONFLICT',
+          'This listing has changed. Reload it before saving.',
+        );
+      if (
+        !['active', 'unlisted'].includes(data.status) ||
+        !Number.isSafeInteger(data.number) ||
+        data.number <= 0
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'LISTING_NOT_EDITABLE',
+          'This listing cannot be edited in its current state.',
+        );
+      }
+      const orders = await tx.get(
+        this.db.collection('orders').where('productId', '==', id).limit(1),
+      );
+      if (data.hasSales === true || !orders.empty)
+        throw new ListingSafetyError(
+          409,
+          'LISTING_HAS_SALES',
+          'Listings with a purchase history cannot be edited.',
+        );
+      if (changes.categoryId) {
+        const category = await tx.get(
+          this.db.collection('categories').doc(changes.categoryId),
+        );
+        if (!category.exists)
+          throw new ListingSafetyError(
+            400,
+            'LISTING_INVALID_CATEGORY',
+            'Choose an existing category.',
+          );
+      }
+      const updates = {
+        ...changes,
+        hasBeenEdited: true,
+        editVersion: version + 1,
+        updatedAt: new Date(),
+      };
+      tx.update(ref, updates);
+      return this.mapToProduct(id, { ...data, ...updates });
     });
-
-    return this.getById(id);
   }
 
-  async delete(id: string): Promise<boolean> {
-    const docRef = this.db.collection(this.collectionName).doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
-      return false;
-    }
-
-    await docRef.delete();
-    return true;
+  async changeAvailability(
+    id: string,
+    uid: string,
+    status: 'active' | 'unlisted' | 'delete',
+  ): Promise<Product | null> {
+    const ref = this.db.collection(this.collectionName).doc(id);
+    return this.db.runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      if (!doc.exists)
+        throw new ListingSafetyError(
+          404,
+          'LISTING_NOT_FOUND',
+          'Listing not found.',
+        );
+      const data = doc.data()!;
+      assertOwner(data, uid);
+      assertSafetyVerified(data);
+      assertUnreserved(data);
+      const version = requireVersion(data);
+      const orders = await tx.get(
+        this.db.collection('orders').where('productId', '==', id).limit(1),
+      );
+      if (status === 'delete' && (data.hasSales === true || !orders.empty))
+        throw new ListingSafetyError(
+          409,
+          'LISTING_HAS_SALES',
+          'Purchased listings must be retained.',
+        );
+      if (status !== 'delete' && (data.status === 'sold' || data.number <= 0))
+        throw new ListingSafetyError(
+          409,
+          'LISTING_NOT_AVAILABLE',
+          'This listing has no available stock.',
+        );
+      if (status === 'delete') {
+        tx.delete(ref);
+        return null;
+      }
+      if (data.status === status) return this.mapToProduct(id, data);
+      const updates = {
+        status,
+        editVersion: version + 1,
+        updatedAt: new Date(),
+      };
+      tx.update(ref, updates);
+      return this.mapToProduct(id, { ...data, ...updates });
+    });
   }
 
   async getProductsByCategory(categoryId: string): Promise<Product[]> {

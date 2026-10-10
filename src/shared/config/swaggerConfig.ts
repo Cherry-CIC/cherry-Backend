@@ -1,14 +1,17 @@
+import { listingSafetySchemas, listingSafetyResponses } from './listingSafetyOpenApi';
 import swaggerJsdoc from 'swagger-jsdoc';
 
 export const swaggerOptions = {
     definition: {
         openapi: '3.0.0',
         info: {
-            title: 'Cherry Backend API',
+            title: 'cherry Backend API',
             version: '1.0.0',
-            description: 'API documentation for Cherry Backend with Firebase Authentication',
+            description: 'API documentation for cherry Backend with Firebase Authentication',
         },
         components: {
+            schemas: listingSafetySchemas,
+            responses: listingSafetyResponses,
             securitySchemes: {
                 bearerAuth: {
                     type: 'http',

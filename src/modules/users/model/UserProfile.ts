@@ -9,6 +9,7 @@ export interface UserProfile {
 
 /** Only fields approved for another user's product list. */
 export interface UserProduct {
+  editVersion?: number;
   id: string;
   userId: string;
   name: string;

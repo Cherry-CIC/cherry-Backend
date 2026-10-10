@@ -1,3 +1,8 @@
+import type { UpdateProductData } from '../services/ProductService';
+import {
+  ListingSafetyError,
+  sendListingSafetyError,
+} from '../../../shared/utils/listingSafety';
 import Joi from 'joi';
 import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
@@ -75,23 +80,63 @@ export const productSchema = Joi.object({
   }),
 });
 
+// These values match the Give form in frontend PR #525. Unchanged legacy values
+// can remain stored, but cannot be submitted as new values.
+export const LISTING_QUALITIES = [
+  'NEW',
+  'EXCELLENT',
+  'GOOD',
+  'FAIR',
+  'WORN',
+  'TEXTILES',
+];
+export const LISTING_SIZES = [
+  'XS',
+  'Small',
+  'Medium',
+  'Large',
+  'XL',
+  'XXL',
+  'One Size',
+];
 export const productUpdateSchema = Joi.object({
-  name: Joi.string().min(3).max(100).optional(),
-  description: Joi.string().max(500).allow('').optional(),
-  categoryId: Joi.string().optional(),
-  charityId: Joi.string().optional(),
-  postageSize: Joi.string().optional(),
-  quality: Joi.string().optional(),
-  size: Joi.string().optional(),
-  product_images: Joi.array().items(Joi.string().uri()).min(1).optional(),
-  donation: Joi.number().positive().optional(),
-  price: Joi.number().positive().optional(),
-  number: Joi.number().integer().min(0).optional(),
+  expectedEditVersion: Joi.number()
+    .integer()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER - 1)
+    .strict()
+    .required(),
+  name: Joi.string().trim().min(3).max(100),
+  description: Joi.string().max(500).allow(''),
+  categoryId: Joi.string().pattern(/^[^/\\\x00-\x1f]{1,128}$/),
+  quality: Joi.string().valid(...LISTING_QUALITIES),
+  size: Joi.string().valid(...LISTING_SIZES),
+  product_images: Joi.array()
+    .items(
+      Joi.string()
+        .uri({ scheme: ['https'] })
+        .max(4096),
+    )
+    .min(1)
+    .max(10)
+    .unique(),
 })
-  .min(1)
-  .messages({
-    'object.min': 'At least one product field must be provided',
+  .unknown(false)
+  .min(2);
+
+export function parseListingEdit(input: unknown): UpdateProductData {
+  const { error, value } = productUpdateSchema.validate(input, {
+    abortEarly: true,
+    stripUnknown: false,
   });
+  if (error)
+    throw new ListingSafetyError(
+      400,
+      'LISTING_VALIDATION_FAILED',
+      error.details[0].message,
+    );
+  return value;
+}
 
 export const productListQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(50).default(20),
@@ -142,18 +187,10 @@ export function validateProductUpdate(
   res: Response,
   next: NextFunction,
 ): void {
-  const { error, value } = productUpdateSchema.validate(req.body, {
-    abortEarly: true,
-    stripUnknown: true,
-  });
-  if (error) {
-    ResponseHandler.badRequest(
-      res,
-      'Validation failed',
-      error.details[0].message,
-    );
-    return;
+  try {
+    req.body = parseListingEdit(req.body);
+    next();
+  } catch (error) {
+    sendListingSafetyError(res, error);
   }
-  req.body = value;
-  next();
 }

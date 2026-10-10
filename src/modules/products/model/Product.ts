@@ -2,6 +2,11 @@ export type ProductStatus = 'active' | 'unlisted' | 'sold';
 
 export interface Product {
   id?: string;
+  editVersion?: number;
+  editSafetyVerified?: boolean;
+  hasSales?: boolean;
+  hasBeenEdited?: boolean;
+  paymentReservationId?: string | null;
   name: string;
   description?: string;
   categoryId: string;

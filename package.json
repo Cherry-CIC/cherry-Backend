@@ -16,11 +16,13 @@
     "joi": "^17.13.3",
     "node-fetch": "^3.3.2",
     "resend": "^6.26.0",
+    "sharp": "0.35.5",
     "stripe": "^18.5.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "4.0.1",
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.0",
@@ -46,6 +48,7 @@
     "lint": "eslint 'src/**/*.{ts,js}' --fix",
     "format": "prettier --write .",
     "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",
-    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list"
+    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list",
+    "test:integration": "jest --config jest.integration.config.js --runInBand"
   }
 }

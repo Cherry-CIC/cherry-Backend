@@ -1,23 +1,11 @@
-const StripeService = require('../../shared/config/stripeConfig');
+import * as StripeService from '../../shared/config/stripeConfig';
+import type Stripe from 'stripe';
 
 export class PaymentRepository {
-  /**
-   * Creates a Stripe PaymentIntent for the given user.
-   * Checks if a Stripe customer already exists for the provided email.
-   * If found, reuses that customer; otherwise creates a new one.
-   *
-   * @param email - Customer email address.
-   * @param amount - Amount in pence (e.g., 3000 = £30.00).
-   * @param currency - Currency code (e.g., usd).
-   * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
-   */
-  async createPaymentIntentForUser(
-    email: string,
-    totalAmount: number,
-    metadata: Record<string, string>,
-  ) {
+  /** Reuse a Stripe customer where possible; never create an intent yet. */
+  async customerForEmail(email: string): Promise<string> {
     // Attempt to find an existing customer by email
-    let customer: any;
+    let customer: Stripe.Customer | undefined;
     try {
       const listResult = await StripeService.stripe.customers.list({
         email,
@@ -35,21 +23,34 @@ export class PaymentRepository {
       customer = await StripeService.addNewCustomer(email);
     }
 
-    // Create an Ephemeral Key (useful for mobile SDKs)
-    const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
+    return customer.id as string;
+  }
 
-    const paymentIntent = await StripeService.createPaymentIntent(
+  async createPaymentIntentForUser(
+    customerId: string,
+    totalAmount: number,
+    metadata: Record<string, string>,
+    idempotencyKey: string,
+  ) {
+    return StripeService.createPaymentIntent(
       totalAmount,
       'gbp',
-      customer.id,
+      customerId,
       metadata,
+      idempotencyKey,
     );
+  }
 
+  async clientResponse(
+    customerId: string,
+    paymentIntent: { id: string; client_secret: string | null },
+  ) {
+    const ephemeralKey = await StripeService.createEphemeralKey(customerId);
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
-      customer: customer.id,
+      customer: customerId,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
     };
   }

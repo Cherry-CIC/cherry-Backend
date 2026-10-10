@@ -1,3 +1,7 @@
+import {
+  exposedListing,
+  sendListingSafetyError,
+} from '../../../shared/utils/listingSafety';
 import { Request, Response, NextFunction } from 'express';
 import { ServiceFactory } from '../services/ServiceFactory';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
@@ -7,7 +11,7 @@ import { gbpToPence } from '../../../shared/utils/money';
 import { ProductListQuery } from '../services/ProductService';
 
 const withSecurityFee = <T extends { price: number }>(product: T) => ({
-  ...product,
+  ...exposedListing(product),
   securityFee: calculateSecurityFeePence(gbpToPence(product.price)) / 100,
 });
 
@@ -73,8 +77,13 @@ export const createProduct = async (
     const user = (req as any).user;
     const productData = { ...req.body, userId: user.uid };
     const product = await productService.createProduct(productData);
-    ResponseHandler.created(res, product, 'Product created successfully');
+    ResponseHandler.created(
+      res,
+      exposedListing(product!),
+      'Product created successfully',
+    );
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     if (
       err instanceof Error &&
       (err.message === 'Category not found' ||
@@ -275,29 +284,18 @@ export const updateProduct = async (
     const user = (req as any).user;
     const updateData = req.body;
 
-    // First check if the product exists and belongs to the user
-    const existingProduct = await productService.getProductById(id);
-    if (!existingProduct) {
-      ResponseHandler.notFound(
-        res,
-        'Product not found',
-        `Product with ID ${id} does not exist`,
-      );
-      return;
-    }
-
-    if (existingProduct.userId !== user.uid) {
-      ResponseHandler.forbidden(
-        res,
-        'Access denied',
-        'You can only update your own products',
-      );
-      return;
-    }
-
-    const product = await productService.updateProduct(id, updateData);
-    ResponseHandler.success(res, product, 'Product updated successfully');
+    const product = await productService.updateProduct(
+      id,
+      updateData,
+      user.uid,
+    );
+    ResponseHandler.success(
+      res,
+      exposedListing(product!),
+      'Product updated successfully',
+    );
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     if (
       err instanceof Error &&
       (err.message === 'Category not found' ||
@@ -348,9 +346,10 @@ export const deleteProduct = async (
       return;
     }
 
-    const deleted = await productService.deleteProduct(id);
+    const deleted = await productService.deleteProduct(id, user.uid);
     ResponseHandler.success(res, null, 'Product deleted successfully');
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     ResponseHandler.internalServerError(
       res,
       'Failed to delete product',
@@ -391,9 +390,14 @@ export const unlistProduct = async (
       return;
     }
 
-    const product = await productService.unlistProduct(id);
-    ResponseHandler.success(res, product, 'Product unlisted successfully');
+    const product = await productService.unlistProduct(id, user.uid);
+    ResponseHandler.success(
+      res,
+      exposedListing(product!),
+      'Product unlisted successfully',
+    );
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     if (
       err instanceof Error &&
       err.message === 'Sold products cannot be unlisted'
@@ -441,9 +445,14 @@ export const relistProduct = async (
       return;
     }
 
-    const product = await productService.relistProduct(id);
-    ResponseHandler.success(res, product, 'Product relisted successfully');
+    const product = await productService.relistProduct(id, user.uid);
+    ResponseHandler.success(
+      res,
+      exposedListing(product!),
+      'Product relisted successfully',
+    );
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     if (
       err instanceof Error &&
       (err.message === 'Sold products cannot be relisted' ||
@@ -492,12 +501,13 @@ export const likeProduct = async (
     ResponseHandler.success(
       res,
       {
-        ...product,
+        ...exposedListing(product),
         liked,
       },
       'Product likes updated successfully',
     );
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     if (err instanceof Error && err.message === 'Product not found') {
       ResponseHandler.notFound(
         res,

@@ -1,3 +1,7 @@
+import {
+  ListingSafetyError,
+  requireVersion,
+} from '../../../shared/utils/listingSafety';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { Order } from '../model/Order';
@@ -10,6 +14,7 @@ const removeUndefinedValues = <T extends Record<string, unknown>>(
   ) as T;
 
 export interface CreateOrderInput {
+  listingReservationId?: string;
   userId: string;
   email: string;
   productAmount: number;
@@ -36,7 +41,7 @@ export interface CreateOrderInput {
 export class OrderRepository {
   async createPaidOrderAndDecrementInventory(
     input: CreateOrderInput,
-  ): Promise<Order> {
+  ): Promise<Order & { alreadyCreated?: boolean }> {
     const orderRef = firestore.collection('orders').doc();
     const paymentLockRef = firestore
       .collection('order_payment_intents')
@@ -50,7 +55,21 @@ export class OrderRepository {
       ]);
 
       if (paymentLock.exists) {
-        throw new Error('PaymentIntent has already been used');
+        const lock = paymentLock.data()!;
+        if (lock.userId !== input.userId)
+          throw new ListingSafetyError(
+            403,
+            'PAYMENT_NOT_OWNER',
+            'This payment belongs to another account.',
+          );
+        const existing = await transaction.get(
+          firestore.collection('orders').doc(lock.orderId),
+        );
+        if (!existing.exists) throw new Error('Order reconciliation required');
+        return {
+          ...this.mapToOrder(existing.id, existing.data()!),
+          alreadyCreated: true,
+        } as Order & { alreadyCreated: boolean };
       }
 
       if (!productDoc.exists) {
@@ -58,6 +77,37 @@ export class OrderRepository {
       }
 
       const productData = productDoc.data()!;
+      const reservationRef = input.listingReservationId
+        ? firestore
+            .collection('listing_payment_reservations')
+            .doc(input.listingReservationId)
+        : null;
+      const reservation = reservationRef
+        ? (await transaction.get(reservationRef)).data()
+        : null;
+      if (
+        reservationRef &&
+        (!reservation ||
+          reservation.productId !== input.productId ||
+          reservation.userId !== input.userId ||
+          reservation.paymentIntentId !== input.paymentIntentId ||
+          productData.paymentReservationId !== input.listingReservationId ||
+          !['active', 'succeeded'].includes(reservation.state))
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'PAYMENT_RESERVATION_MISMATCH',
+          'Payment reservation needs reconciliation.',
+        );
+      }
+      if (!reservationRef && productData.hasBeenEdited === true)
+        throw new ListingSafetyError(
+          409,
+          'LEGACY_PAYMENT_RECONCILIATION_REQUIRED',
+          'This legacy payment needs reconciliation.',
+        );
+      const version =
+        productData.editVersion === undefined ? 0 : requireVersion(productData);
       const quantity =
         typeof productData.number === 'number' ? productData.number : 0;
       const productStatus =
@@ -84,9 +134,17 @@ export class OrderRepository {
       });
       transaction.update(productRef, {
         number: quantity - 1,
+        hasSales: true,
+        editVersion: version + 1,
+        ...(reservationRef ? { paymentReservationId: null } : {}),
         status: quantity - 1 <= 0 ? 'sold' : 'active',
         updatedAt: new Date(),
       });
+      if (reservationRef)
+        transaction.update(reservationRef, {
+          state: 'completed',
+          orderId: orderRef.id,
+        });
       transaction.set(paymentLockRef, {
         orderId: orderRef.id,
         userId: input.userId,

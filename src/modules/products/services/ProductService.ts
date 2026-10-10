@@ -1,3 +1,12 @@
+import { ListingMediaService } from './ListingMediaService';
+import { parseListingEdit } from '../validators/productValidator';
+import {
+  assertOwner,
+  assertSafetyVerified,
+  assertUnreserved,
+  ListingSafetyError,
+  listingEditingEnabled,
+} from '../../../shared/utils/listingSafety';
 import { Product, ProductStatus } from '../model/Product';
 import { Category } from '../../categories/model/Category';
 import { Charity } from '../../charities/model/Charity';
@@ -237,71 +246,52 @@ export class ProductService {
   async updateProduct(
     id: string,
     data: UpdateProductData,
-  ): Promise<Product | null> {
-    // Check if product exists
-    const existingProduct = await this.productRepo.getById(id);
-    if (!existingProduct) {
-      return null;
-    }
-
-    // Validate category and charity references if they are being updated
-    if (data.categoryId || data.charityId) {
-      const categoryId = data.categoryId || existingProduct.categoryId;
-      const charityId = data.charityId || existingProduct.charityId;
-
-      if (categoryId && charityId) {
-        await this.validateCategoryAndCharity(categoryId, charityId);
-      }
-    }
-
-    if (data.postageSize) {
-      await this.validatePostageSize(data.postageSize);
-    }
-
-    const updateData: UpdateProductData = { ...data };
-    if (typeof data.number === 'number' && data.number <= 0) {
-      updateData.status = 'sold';
-    }
-
-    return this.productRepo.update(id, updateData);
+    uid: string,
+  ): Promise<Product> {
+    if (!listingEditingEnabled())
+      throw new ListingSafetyError(
+        503,
+        'LISTING_EDIT_DISABLED',
+        'Listing editing is not available yet.',
+      );
+    const validated = parseListingEdit(data);
+    const existing = await this.productRepo.getById(id);
+    if (!existing)
+      throw new ListingSafetyError(
+        404,
+        'LISTING_NOT_FOUND',
+        'Listing not found.',
+      );
+    assertOwner(existing, uid);
+    assertSafetyVerified(existing);
+    assertUnreserved(existing);
+    if (existing.editVersion !== validated.expectedEditVersion)
+      throw new ListingSafetyError(
+        409,
+        'LISTING_VERSION_CONFLICT',
+        'This listing has changed. Reload it before saving.',
+      );
+    // Storage objects are immutable under the prerequisite rules. The transaction
+    // rechecks the version, so the retained set cannot change during validation.
+    await new ListingMediaService().validate(
+      uid,
+      validated.product_images ?? existing.product_images,
+      existing.product_images,
+    );
+    return this.productRepo.update(id, validated, uid);
   }
 
-  async deleteProduct(id: string): Promise<boolean> {
-    return this.productRepo.delete(id);
+  async deleteProduct(id: string, uid: string): Promise<boolean> {
+    await this.productRepo.changeAvailability(id, uid, 'delete');
+    return true;
   }
 
-  async unlistProduct(id: string): Promise<Product | null> {
-    const product = await this.productRepo.getById(id);
-    if (!product) {
-      return null;
-    }
-
-    if (product.status === 'sold') {
-      throw new Error('Sold products cannot be unlisted');
-    }
-
-    return this.productRepo.update(id, {
-      status: 'unlisted',
-    });
+  async unlistProduct(id: string, uid: string): Promise<Product | null> {
+    return this.productRepo.changeAvailability(id, uid, 'unlisted');
   }
 
-  async relistProduct(id: string): Promise<Product | null> {
-    const product = await this.productRepo.getById(id);
-    if (!product) {
-      return null;
-    }
-
-    if (product.status === 'sold') {
-      throw new Error('Sold products cannot be relisted');
-    }
-
-    if (!this.hasStock(product)) {
-      throw new Error('Product must have stock before it can be relisted');
-    }
-
-    return this.productRepo.update(id, {
-      status: 'active',
-    });
+  async relistProduct(id: string, uid: string): Promise<Product | null> {
+    return this.productRepo.changeAvailability(id, uid, 'active');
   }
 
   /**
@@ -724,19 +714,13 @@ export interface CreateProductData {
 }
 
 export interface UpdateProductData {
+  expectedEditVersion: number;
   name?: string;
   description?: string;
   categoryId?: string;
-  charityId?: string;
-  postageSize?: string;
   quality?: string;
   size?: string;
   product_images?: string[];
-  donation?: number;
-  price?: number;
-  likes?: number;
-  number?: number;
-  status?: ProductStatus;
 }
 
 export interface ProductListQuery extends ProductListFilters {

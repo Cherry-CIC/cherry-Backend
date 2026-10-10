@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Emulator fixture for listing safeguards only, not a production policy.
+    // Unrelated client access must be preserved in the separately reviewed live rules.
+    // Products contain internal payment state: all product reads go through the
+    // API projection. This also avoids exposing reservation identifiers directly.
+    match /products/{id} { allow read, write: if false; }
+    match /orders/{id} { allow read, write: if false; }
+    match /listing_payment_reservations/{id} { allow read, write: if false; }
+    match /listing_payment_states/{id} { allow read, write: if false; }
+    match /order_payment_intents/{id} { allow read, write: if false; }
+    match /account_deletions/{id} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
