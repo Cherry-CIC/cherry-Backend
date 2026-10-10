@@ -16,6 +16,12 @@ export interface Product {
   likes: number;
   number: number;
   status: ProductStatus;
+  moderationStatus?: 'approved' | 'hidden';
+  moderationReason?: string;
+  moderationUpdatedAt?: Date;
+  moderationUpdatedBy?: string;
+  hidden?: boolean;
+  hiddenAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

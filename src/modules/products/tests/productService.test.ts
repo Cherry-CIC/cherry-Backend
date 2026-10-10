@@ -154,6 +154,36 @@ describe('ProductService pagination', () => {
     ]);
   });
 
+  it('excludes moderation-hidden products from marketplace pagination', async () => {
+    const availableProduct = createProduct(
+      'available-product',
+      '2026-07-13T10:00:00.000Z',
+    );
+    const hiddenProduct = {
+      ...createProduct('hidden-product', '2026-07-13T09:00:00.000Z'),
+      moderationStatus: 'hidden' as const,
+      hidden: true,
+    };
+    const getPageByFilters = jest.fn().mockResolvedValueOnce({
+      items: [availableProduct, hiddenProduct],
+      hasMore: false,
+    });
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+    );
+
+    const result = await service.getPaginatedProducts({ limit: 2 });
+
+    expect(result.items.map((product) => product.id)).toEqual([
+      'available-product',
+    ]);
+  });
+
   it('rejects malformed cursors', async () => {
     const service = new ProductService(
       { getPageByFilters: jest.fn() } as any,
@@ -166,6 +196,24 @@ describe('ProductService pagination', () => {
     await expect(
       service.getPaginatedProducts({ limit: 2, cursor: 'not-a-real-cursor' }),
     ).rejects.toThrow('Invalid cursor');
+  });
+
+  it('returns null for a moderation-hidden product detail', async () => {
+    const hiddenProduct = {
+      ...createProduct('hidden-product', '2026-07-13T10:00:00.000Z'),
+      moderationStatus: 'hidden' as const,
+    };
+    const service = new ProductService(
+      { getById: jest.fn().mockResolvedValue(hiddenProduct) } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+    );
+
+    await expect(
+      service.getVisibleProductById('hidden-product'),
+    ).resolves.toBeNull();
   });
 
   it('scopes my-products pagination to the authenticated user', async () => {
@@ -228,6 +276,34 @@ describe('ProductService pagination', () => {
     });
 
     expect(result.items.map((product) => product.id)).toEqual(['sold-product']);
+  });
+
+  it('keeps moderation-hidden products visible in my-products pagination', async () => {
+    const hiddenProduct = {
+      ...createProduct('hidden-product', '2026-07-13T10:00:00.000Z'),
+      hidden: true,
+      moderationStatus: 'hidden' as const,
+    };
+    const getPageByFilters = jest.fn().mockResolvedValueOnce({
+      items: [hiddenProduct],
+      hasMore: false,
+    });
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+    );
+
+    const result = await service.getPaginatedProductsByUserId('user-42', {
+      limit: 1,
+    });
+
+    expect(result.items.map((product) => product.id)).toEqual([
+      'hidden-product',
+    ]);
   });
 
   it('keeps sold products visible in liked products with their status', async () => {

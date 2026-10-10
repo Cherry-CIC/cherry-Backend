@@ -103,7 +103,7 @@ export const getProductById = async (
       ResponseHandler.badRequest(res, 'Product ID is required');
       return;
     }
-    const product = await productService.getProductById(id);
+    const product = await productService.getVisibleProductById(id);
 
     if (!product) {
       ResponseHandler.notFound(
@@ -139,7 +139,7 @@ export const getProductWithDetails = async (
       ResponseHandler.badRequest(res, 'Product ID is required');
       return;
     }
-    const product = await productService.getProductWithDetails(id);
+    const product = await productService.getVisibleProductWithDetails(id);
 
     if (!product) {
       ResponseHandler.notFound(

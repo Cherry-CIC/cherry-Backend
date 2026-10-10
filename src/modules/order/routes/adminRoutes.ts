@@ -9,6 +9,15 @@ import {
 	listAdminDisputes,
 	moderateAdminDispute,
 } from '../../../disputes/DisputeAdminController';
+import {
+	getAdminReport,
+	listAdminReports,
+	updateAdminReportStatus,
+} from '../../reports/controllers/reportController';
+import {
+	moderateProduct,
+	moderateUser,
+} from '../../moderation/controllers/moderationController';
 
 const router = Router();
 
@@ -266,6 +275,249 @@ router.patch(
 	authMiddleware,
 	adminMiddleware,
 	moderateAdminDispute,
+);
+
+/**
+ * @swagger
+ * /api/admin/reports:
+ *   get:
+ *     summary: List user-submitted reports
+ *     description: Returns the admin moderation report queue ordered by newest first.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [open, reviewing, resolved, rejected]
+ *         description: Optional report status filter.
+ *       - in: query
+ *         name: targetType
+ *         schema:
+ *           type: string
+ *           enum: [product, user]
+ *         description: Optional target type filter.
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 25
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Report ID returned as nextCursor by the previous page.
+ *     responses:
+ *       200:
+ *         description: Reports fetched
+ *       400:
+ *         description: Invalid report query or cursor
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to fetch reports
+ */
+router.get('/reports', authMiddleware, adminMiddleware, listAdminReports);
+
+/**
+ * @swagger
+ * /api/admin/reports/{reportId}:
+ *   get:
+ *     summary: Get a report by ID
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: reportId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Firestore report document ID.
+ *     responses:
+ *       200:
+ *         description: Report fetched
+ *       400:
+ *         description: Report ID is required
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Report not found
+ *       500:
+ *         description: Failed to fetch report
+ */
+router.get('/reports/:reportId', authMiddleware, adminMiddleware, getAdminReport);
+
+/**
+ * @swagger
+ * /api/admin/reports/{reportId}/status:
+ *   patch:
+ *     summary: Update a report review status
+ *     description: >
+ *       Moves a user-submitted report through the admin review workflow. Setting
+ *       status to `resolved` or `rejected` records the resolving admin and time.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: reportId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [open, reviewing, resolved, rejected]
+ *                 example: reviewing
+ *               note:
+ *                 type: string
+ *                 maxLength: 2000
+ *                 example: Reviewing seller history before action.
+ *     responses:
+ *       200:
+ *         description: Report updated
+ *       400:
+ *         description: Invalid report status update
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Report not found
+ *       500:
+ *         description: Failed to update report
+ */
+router.patch(
+	'/reports/:reportId/status',
+	authMiddleware,
+	adminMiddleware,
+	updateAdminReportStatus,
+);
+
+/**
+ * @swagger
+ * /api/admin/moderation/products/{productId}:
+ *   patch:
+ *     summary: Hide or restore a product listing
+ *     description: >
+ *       Applies admin moderation to a product. Hidden products are excluded from
+ *       public product browsing and detail views, while remaining visible to the
+ *       owner in their own listings.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [action, reason]
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 enum: [hide, restore]
+ *                 example: hide
+ *               reason:
+ *                 type: string
+ *                 example: prohibited_item
+ *     responses:
+ *       200:
+ *         description: Product moderation saved
+ *       400:
+ *         description: Invalid product moderation request
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Failed to moderate product
+ */
+router.patch(
+	'/moderation/products/:productId',
+	authMiddleware,
+	adminMiddleware,
+	moderateProduct,
+);
+
+/**
+ * @swagger
+ * /api/admin/moderation/users/{userId}:
+ *   patch:
+ *     summary: Warn, suspend, or restore a user
+ *     description: >
+ *       Applies admin moderation to a user. `suspend` disables the Firebase Auth
+ *       user and marks the Firestore profile suspended when present. `restore`
+ *       re-enables the Firebase Auth user and marks the profile active when
+ *       present. `warn` records warning metadata on the Firestore user profile.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Firebase UID to moderate.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [action, reason]
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 enum: [warn, suspend, restore]
+ *                 example: suspend
+ *               reason:
+ *                 type: string
+ *                 example: repeated_abuse
+ *     responses:
+ *       200:
+ *         description: User moderation saved
+ *       400:
+ *         description: Invalid user moderation request
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Failed to moderate user
+ */
+router.patch(
+	'/moderation/users/:userId',
+	authMiddleware,
+	adminMiddleware,
+	moderateUser,
 );
 
 export default router;

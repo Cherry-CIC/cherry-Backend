@@ -5,6 +5,7 @@ import {
 } from '../model/UserProfile';
 import { UserProductRepository } from '../repositories/UserProductRepository';
 import { UserProfileRepository } from '../repositories/UserProfileRepository';
+import { UserBlockRepository } from '../../blocks/repositories/UserBlockRepository';
 import { UserProductCursor } from './UserProductCursor';
 
 export class UserProfileService {
@@ -18,6 +19,10 @@ export class UserProfileService {
       'getPage'
     > = new UserProductRepository(),
     private readonly cursors: UserProductCursor = new UserProductCursor(),
+    private readonly blocks: Pick<
+      UserBlockRepository,
+      'getBlockedUserIds'
+    > = new UserBlockRepository(),
   ) {}
 
   async getUserProfile(ownerId: string): Promise<UserProfile | null> {
@@ -36,6 +41,13 @@ export class UserProfileService {
     query: UserProductsQuery,
   ): Promise<UserProductsPage | null> {
     const cursor = this.cursors.decode(query.cursor, ownerId, viewerId);
+    const blockedUserIds = await this.blocks.getBlockedUserIds(viewerId);
+    if (blockedUserIds.has(ownerId)) {
+      return {
+        data: { products: [] },
+        meta: { limit: query.limit, nextCursor: null, hasMore: false },
+      };
+    }
     const user = await this.users.getByFirebaseUid(ownerId);
     if (!user) return null;
 

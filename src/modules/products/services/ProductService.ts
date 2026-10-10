@@ -41,10 +41,13 @@ export class ProductService {
     userId: string,
     query: ProductListQuery,
   ): Promise<PaginatedResult<Product>> {
-    return this.getProductPage({
-      ...query,
-      userId,
-    });
+    return this.getProductPage(
+      {
+        ...query,
+        userId,
+      },
+      { includeModerationHidden: true },
+    );
   }
 
   async getPaginatedLikedProductsByUserId(
@@ -133,6 +136,14 @@ export class ProductService {
     return this.productRepo.getById(id);
   }
 
+  async getVisibleProductById(id: string): Promise<Product | null> {
+    const product = await this.productRepo.getById(id);
+    if (!product || this.isModerationHidden(product)) {
+      return null;
+    }
+    return product;
+  }
+
   async getProductsByUserId(userId: string): Promise<Product[]> {
     return this.productRepo.getByUserId(userId);
   }
@@ -165,6 +176,44 @@ export class ProductService {
     }
 
     // Only fetch category and charity if IDs exist and are valid strings
+    const categoryPromise =
+      product.categoryId &&
+      typeof product.categoryId === 'string' &&
+      product.categoryId.trim()
+        ? this.categoryRepo.getById(product.categoryId)
+        : Promise.resolve(null);
+
+    const charityPromise =
+      product.charityId &&
+      typeof product.charityId === 'string' &&
+      product.charityId.trim()
+        ? this.charityRepo.getById(product.charityId)
+        : Promise.resolve(null);
+
+    const [category, charity, postageSizeDetails] = await Promise.all([
+      categoryPromise,
+      charityPromise,
+      product.postageSize
+        ? this.postageSizeRepo.getById(product.postageSize)
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      ...product,
+      category: category || undefined,
+      charity: charity || undefined,
+      postageSizeDetails: postageSizeDetails || undefined,
+    };
+  }
+
+  async getVisibleProductWithDetails(
+    id: string,
+  ): Promise<ProductWithDetails | null> {
+    const product = await this.getVisibleProductById(id);
+    if (!product) {
+      return null;
+    }
+
     const categoryPromise =
       product.categoryId &&
       typeof product.categoryId === 'string' &&
@@ -506,6 +555,10 @@ export class ProductService {
         return false;
       }
 
+      if (!options.includeModerationHidden && this.isModerationHidden(product)) {
+        return false;
+      }
+
       if (query.categoryId && product.categoryId !== query.categoryId) {
         return false;
       }
@@ -546,6 +599,14 @@ export class ProductService {
 
   private isAvailableForPurchase(product: Product): boolean {
     return product.status === 'active' && this.hasStock(product);
+  }
+
+  private isModerationHidden(product: Product): boolean {
+    return (
+      product.hidden === true ||
+      product.moderationStatus === 'hidden' ||
+      product.hiddenAt !== undefined && product.hiddenAt !== null
+    );
   }
 
   private hasStock(product: Product): boolean {
@@ -748,6 +809,7 @@ export interface ProductListQuery extends ProductListFilters {
 
 interface ProductPageOptions {
   availableOnly?: boolean;
+  includeModerationHidden?: boolean;
 }
 
 export interface PaginatedResult<T> {
