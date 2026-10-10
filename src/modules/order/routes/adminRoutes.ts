@@ -9,6 +9,15 @@ import {
 	listAdminDisputes,
 	moderateAdminDispute,
 } from '../../../disputes/DisputeAdminController';
+import {
+	getAdminReport,
+	listAdminReports,
+	updateAdminReportStatus,
+} from '../../reports/controllers/reportController';
+import {
+	moderateProduct,
+	moderateUser,
+} from '../../moderation/controllers/moderationController';
 
 const router = Router();
 
@@ -266,6 +275,27 @@ router.patch(
 	authMiddleware,
 	adminMiddleware,
 	moderateAdminDispute,
+);
+
+router.get('/reports', authMiddleware, adminMiddleware, listAdminReports);
+router.get('/reports/:reportId', authMiddleware, adminMiddleware, getAdminReport);
+router.patch(
+	'/reports/:reportId/status',
+	authMiddleware,
+	adminMiddleware,
+	updateAdminReportStatus,
+);
+router.patch(
+	'/moderation/products/:productId',
+	authMiddleware,
+	adminMiddleware,
+	moderateProduct,
+);
+router.patch(
+	'/moderation/users/:userId',
+	authMiddleware,
+	adminMiddleware,
+	moderateUser,
 );
 
 export default router;
