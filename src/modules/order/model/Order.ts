@@ -61,6 +61,9 @@ export interface Order {
   pickupPoint: PickupPointSelection;
   paymentIntentId: string;
   paymentStatus: 'succeeded';
+  stripeChargeId?: string | null;
+  stripeBalanceTransactionId?: string | null;
+  paidAt?: Date;
   status:
     | 'paid'
     | 'shipment_pending'
