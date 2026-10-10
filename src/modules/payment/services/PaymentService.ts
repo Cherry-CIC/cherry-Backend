@@ -1,3 +1,4 @@
+import type Stripe from 'stripe';
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { stripe } from '../../../shared/config/stripeConfig';
@@ -31,6 +32,8 @@ export interface VerifiedCheckoutPayment {
   shippingFee: number;
   securityFee: number;
   totalAmount: number;
+  // Null when Stripe has not reported its fee for the payment yet.
+  stripeFee: number | null;
   currency: 'GBP';
 }
 
@@ -127,7 +130,10 @@ export class PaymentService {
     firebaseUid: string,
     paymentIntentId: string,
   ): Promise<VerifiedCheckoutPayment> {
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      { expand: ['latest_charge.balance_transaction'] },
+    );
 
     if (paymentIntent.status !== 'succeeded') {
       throw new Error('Payment has not succeeded');
@@ -183,8 +189,29 @@ export class PaymentService {
       shippingFee,
       securityFee,
       totalAmount,
+      stripeFee: this.readStripeFee(paymentIntent),
       currency: 'GBP',
     };
+  }
+
+  // Stripe's actual processing fee, from the charge's balance transaction.
+  private readStripeFee(paymentIntent: Stripe.PaymentIntent): number | null {
+    const charge = paymentIntent.latest_charge;
+    if (!charge || typeof charge === 'string') {
+      return null;
+    }
+
+    const balanceTransaction = charge.balance_transaction;
+    if (!balanceTransaction || typeof balanceTransaction === 'string') {
+      return null;
+    }
+
+    if (balanceTransaction.currency.toLowerCase() !== 'gbp') {
+      return null;
+    }
+
+    const fee = balanceTransaction.fee;
+    return Number.isInteger(fee) && fee >= 0 ? fee : null;
   }
 
   private parseMetadataInteger(value: string | undefined, field: string): number {

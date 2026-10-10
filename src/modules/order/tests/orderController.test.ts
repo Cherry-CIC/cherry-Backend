@@ -158,6 +158,7 @@ describe('orderController.createOrder', () => {
       shippingFee: 399,
       securityFee: 200,
       totalAmount: 2599,
+      stripeFee: 59,
       currency: 'GBP',
     });
     mockGetProductById.mockResolvedValue({
@@ -238,6 +239,9 @@ describe('orderController.createOrder', () => {
         shippingFee: 399,
         securityFee: 200,
         totalAmount: 2599,
+        charityProceeds: 2000,
+        stripeFee: 59,
+        cherryRevenue: 141,
         shippingOptionId: '12345',
         shippingOptionName: 'InPost locker',
       }),
@@ -317,6 +321,68 @@ describe('orderController.createOrder', () => {
     await createOrder(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('still creates the order when the Stripe fee is not yet available', async () => {
+    mockVerifySucceededPaymentIntentForUser.mockResolvedValue({
+      paymentIntentId: 'pi_123',
+      firebaseUid: 'user-1',
+      productId: 'product-1',
+      shippingMethodId: '12345',
+      shippingMethodName: 'InPost locker',
+      pickupPointId: '999',
+      destinationCountry: 'GB',
+      destinationPostalCode: 'SW1A 1AA',
+      shippingCarrier: 'inpost_gb',
+      shippingWeight: 2000,
+      productAmount: 2000,
+      shippingFee: 399,
+      securityFee: 200,
+      totalAmount: 2599,
+      stripeFee: null,
+      currency: 'GBP',
+    });
+    mockCreatePaidOrderAndDecrementInventory.mockResolvedValue({
+      id: 'order-1',
+      userId: 'user-1',
+      email: 'user@example.com',
+      ...payload,
+      productName: 'Winter Coat',
+      paymentStatus: 'succeeded',
+      shipmentStatus: 'pending',
+      status: 'paid',
+      createdAt: new Date(),
+    });
+    mockCreateShipmentForPaidOrder.mockResolvedValue({
+      shipment: {
+        id: 'shipment-1',
+        status: 'announced',
+      },
+      sendcloudParcel: {
+        id: 99,
+      },
+    });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const req: any = {
+      user: {
+        uid: 'user-1',
+      },
+      body: payload,
+    };
+    const res = createResponse();
+
+    await createOrder(req, res);
+
+    expect(mockCreatePaidOrderAndDecrementInventory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        charityProceeds: 2000,
+        stripeFee: null,
+        cherryRevenue: null,
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    warnSpy.mockRestore();
   });
 
   it('returns 202 when shipment creation fails after order creation', async () => {
@@ -540,6 +606,9 @@ describe('orderController order retrieval', () => {
       shippingFee: 399,
       securityFee: 200,
       totalAmount: 2599,
+      charityProceeds: 2000,
+      stripeFee: 59,
+      cherryRevenue: 141,
       currency: 'GBP',
       productId: 'product-1',
       productName: 'Winter Coat',
@@ -617,6 +686,12 @@ describe('orderController order retrieval', () => {
         },
       }),
     );
+
+    const returnedOrder = res.json.mock.calls[0][0].data.order;
+    expect(returnedOrder.totalAmount).toBe(2599);
+    expect(returnedOrder).not.toHaveProperty('charityProceeds');
+    expect(returnedOrder).not.toHaveProperty('stripeFee');
+    expect(returnedOrder).not.toHaveProperty('cherryRevenue');
   });
 
   it('forbids access to another user’s order', async () => {

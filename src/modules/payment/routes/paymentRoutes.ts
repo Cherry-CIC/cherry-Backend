@@ -82,7 +82,7 @@ const router = Router();
  *                       description: Shipping fee in pence
  *                     securityFee:
  *                       type: integer
- *                       description: 10% purchase security fee in pence
+ *                       description: Purchase security fee in pence (10% of the item price, minimum 100)
  *                     totalAmount:
  *                       type: integer
  *                       description: Total Stripe charge in pence

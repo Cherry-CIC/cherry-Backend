@@ -48,6 +48,9 @@ const createPaymentIntent = async (
     currency,
     customer: customerId,
     metadata,
+    // Capture before Stripe reports success, so the Stripe fee is already
+    // available when the order is created (the default captures afterwards).
+    capture_method: 'automatic',
     automatic_payment_methods: {
       enabled: true,
     },

@@ -162,4 +162,73 @@ describe('PaymentService', () => {
       }),
     );
   });
+
+  describe('Stripe fee', () => {
+    const succeededPaymentIntent = (latestCharge: unknown) => ({
+      id: 'pi_123',
+      status: 'succeeded',
+      currency: 'gbp',
+      amount: 3149,
+      latest_charge: latestCharge,
+      metadata: {
+        firebaseUid: 'user-1',
+        productId: 'product-1',
+        shippingMethodId: '3747',
+        shippingMethodName: 'InPost locker',
+        pickupPointId: '13127548',
+        destinationCountry: 'GB',
+        destinationPostalCode: 'SE18 4QH',
+        shippingCarrier: 'inpost_gb',
+        shippingWeight: '2000',
+        productAmount: '2500',
+        shippingFee: '399',
+        securityFee: '250',
+        totalAmount: '3149',
+      },
+    });
+
+    const verify = () =>
+      new PaymentService().verifySucceededPaymentIntentForUser(
+        'user-1',
+        'pi_123',
+      );
+
+    it('asks Stripe for the charge balance transaction and returns its fee', async () => {
+      mockRetrievePaymentIntent.mockResolvedValue(
+        succeededPaymentIntent({
+          id: 'ch_123',
+          balance_transaction: { id: 'txn_123', currency: 'gbp', fee: 67 },
+        }),
+      );
+
+      const result = await verify();
+
+      expect(mockRetrievePaymentIntent).toHaveBeenCalledWith('pi_123', {
+        expand: ['latest_charge.balance_transaction'],
+      });
+      expect(result.stripeFee).toBe(67);
+    });
+
+    it.each([
+      [
+        'the balance transaction is missing',
+        { id: 'ch_123', balance_transaction: null },
+      ],
+      [
+        'the fee is not in GBP',
+        {
+          id: 'ch_123',
+          balance_transaction: { id: 'txn_123', currency: 'eur', fee: 67 },
+        },
+      ],
+    ])('returns a null fee when %s', async (_case, latestCharge) => {
+      mockRetrievePaymentIntent.mockResolvedValue(
+        succeededPaymentIntent(latestCharge),
+      );
+
+      const result = await verify();
+
+      expect(result.stripeFee).toBeNull();
+    });
+  });
 });

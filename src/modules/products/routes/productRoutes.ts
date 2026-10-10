@@ -89,7 +89,7 @@ const router = Router();
  *           example: 599.99
  *         securityFee:
  *           type: number
- *           description: 10% purchase security fee in GBP
+ *           description: Purchase security fee in GBP (10% of the item price, minimum £1)
  *           example: 2
  *         likes:
  *           type: number

@@ -16,6 +16,9 @@ export interface CreateOrderInput {
   shippingFee: number;
   securityFee: number;
   totalAmount: number;
+  charityProceeds: number;
+  stripeFee: number | null;
+  cherryRevenue: number | null;
   currency: 'GBP';
   productId: string;
   productName: string;
@@ -108,6 +111,9 @@ export class OrderRepository {
       shippingFee: input.shippingFee,
       securityFee: input.securityFee,
       totalAmount: input.totalAmount,
+      charityProceeds: input.charityProceeds,
+      stripeFee: input.stripeFee,
+      cherryRevenue: input.cherryRevenue,
       currency: input.currency,
       productId: input.productId,
       productName: input.productName,
