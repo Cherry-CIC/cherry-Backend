@@ -939,6 +939,7 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  * /api/products/{id}/like:
  *   post:
  *     summary: Like or unlike a product
+ *     description: Users cannot like their own products. Removing an existing self-like is allowed.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -988,6 +989,10 @@ router.delete('/:id', authMiddleware, validateProductId, deleteProduct);
  *                           example: true
  *       400:
  *         description: Bad request (e.g., missing like flag)
+ *       401:
+ *         description: Missing or invalid Firebase authentication
+ *       403:
+ *         description: Users cannot like their own products
  *       404:
  *         description: Product not found
  *       500:

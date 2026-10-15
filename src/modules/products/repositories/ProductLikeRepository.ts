@@ -44,6 +44,11 @@ export class ProductLikeRepository {
             }
 
             const data = productDoc.data()!;
+            // Check ownership in the transaction so it cannot change before the write.
+            // Allow unliking to remove self-likes saved before this restriction.
+            if (like && data.userId === userId) {
+                throw new Error('You cannot like your own product');
+            }
             const currentLikes =
                 typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0;
             const alreadyLiked = likeDoc.exists;
