@@ -6,6 +6,7 @@ import {
 import Joi from 'joi';
 import { Request, Response, NextFunction } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { localFirebaseEmulators } from '../../../shared/config/firebaseEmulators';
 
 export const productSchema = Joi.object({
   name: Joi.string().min(3).max(100).required().messages({
@@ -114,7 +115,19 @@ export const productUpdateSchema = Joi.object({
   product_images: Joi.array()
     .items(
       Joi.string()
-        .uri({ scheme: ['https'] })
+        .uri({ scheme: ['https', 'http'] })
+        .custom((value: string, helpers) => {
+          const url = new URL(value);
+          if (url.protocol === 'https:') return value;
+          const emulators = localFirebaseEmulators();
+          return emulators &&
+            url.origin === emulators.storageOrigin &&
+            !url.username &&
+            !url.password &&
+            !url.hash
+            ? value
+            : helpers.error('string.uri');
+        })
         .max(4096),
     )
     .min(1)

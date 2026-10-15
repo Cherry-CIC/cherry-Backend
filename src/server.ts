@@ -4,7 +4,8 @@ dotenv.config({ path: '.env' });
 
 import app from './app';
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Add error handling for uncaught exceptions
 process.on('uncaughtException', (error) => {
@@ -17,7 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
     console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
     console.log(`Server is listening and ready to handle requests`);
 }).on('error', (error) => {

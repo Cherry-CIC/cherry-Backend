@@ -4,6 +4,7 @@ import { getStorage } from 'firebase-admin/storage';
 import sharp from 'sharp';
 import type { Bucket } from '@google-cloud/storage';
 import { ListingSafetyError } from '../../../shared/utils/listingSafety';
+import { localFirebaseEmulators } from '../../../shared/config/firebaseEmulators';
 
 export const MAX_LISTING_PHOTOS = 10;
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -41,6 +42,7 @@ export class ListingMediaService {
       urls.length > MAX_LISTING_PHOTOS
     )
       invalid('Use between 1 and 10 photos.');
+    const emulators = localFirebaseEmulators();
     const bucket = this.injectedBucket ?? getStorage().bucket(bucketName);
     const objects = new Set<string>();
     // Sequential decoding bounds peak memory on the small Cloud Run instance.
@@ -51,10 +53,15 @@ export class ListingMediaService {
       } catch {
         return invalid('Use an approved uploaded photo.');
       }
+      const approvedCloudOrigin =
+        emulators === undefined &&
+        url.protocol === 'https:' &&
+        url.hostname === 'firebasestorage.googleapis.com' &&
+        !url.port;
+      const approvedLocalOrigin =
+        emulators !== undefined && url.origin === emulators.storageOrigin;
       if (
-        url.protocol !== 'https:' ||
-        url.hostname !== 'firebasestorage.googleapis.com' ||
-        url.port ||
+        (!approvedCloudOrigin && !approvedLocalOrigin) ||
         url.username ||
         url.password ||
         url.hash

@@ -309,3 +309,26 @@ Recorded local result for this branch: TypeScript build passed; 274 unit tests
 passed across 22 suites; 56 integration/rules tests passed against Firestore and
 Storage emulators; generated Swagger schema checks and `git diff --check` passed.
 These results do not substitute for the staging or deployed-rule checks above.
+
+## Local integration verification (15 October 2026)
+
+Local testing now supports Auth, Firestore and Storage emulators together. The
+backend refuses partial emulator configuration, non-loopback emulator hosts and
+emulators in production. HTTP photo URLs are accepted only for the exact local
+Storage origin; normal deployments still require approved HTTPS Storage URLs.
+Use `HOST=127.0.0.1` for the local API listener. No deployed environment changes.
+
+The shared `cherry-mvp` rules were read on 14 October: Firestore and Storage still
+have broad time-limited grants. They were not changed. The hosted writer also lacks
+these reservation safeguards, so the local test uses isolated synthetic accounts,
+listings and photos rather than certifying shared records. Live rules and writer
+cutover remain release prerequisites.
+
+Updated checks: 290 unit tests, 56 integration/rules tests and TypeScript build
+passed. A separate local fixture passed 41 client access checks. Actual local API
+and Storage requests verified owner edits, stale/non-owner rejection, sparse
+updates, authenticated uploads, photo order and immutable owner controls. Stripe
+test-mode API checks verified intent reuse, payment locks, confirmed cancellation,
+unlocking, a successful payment, one resulting order and duplicate-order replay.
+Shipping was mocked; labels and emails were off. Native simulator verification is
+pending installation of the iOS platform required by the current Xcode.

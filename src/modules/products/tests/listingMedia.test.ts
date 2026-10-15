@@ -8,6 +8,8 @@ jest.mock('firebase-admin/firestore', () => ({
 }));
 import { Readable } from 'stream';
 import sharp from 'sharp';
+import { localFirebaseEmulators } from '../../../shared/config/firebaseEmulators';
+import { parseListingEdit } from '../validators/productValidator';
 import {
   ListingMediaService,
   MAX_PHOTO_BYTES,
@@ -19,6 +21,13 @@ const url = (name = 'listing-media-v1/seller/test.png') =>
 let bytes: Buffer;
 let metadata: any;
 let bucket: any;
+const originalEnv = { ...process.env };
+const emulatorEnv = {
+  NODE_ENV: 'development',
+  FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
+  FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+  FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199',
+};
 beforeAll(async () => {
   bytes = await sharp({
     create: { width: 2, height: 2, channels: 3, background: '#fff' },
@@ -27,6 +36,12 @@ beforeAll(async () => {
     .toBuffer();
 });
 beforeEach(() => {
+  process.env.NODE_ENV = 'test';
+  for (const key of Object.keys(emulatorEnv).filter(
+    (key) => key !== 'NODE_ENV',
+  ))
+    delete process.env[key];
+  delete process.env.STORAGE_EMULATOR_HOST;
   process.env.LISTING_MEDIA_BUCKET = bucketName;
   process.env.LISTING_MEDIA_POLICY_START = '2026-01-01T00:00:00Z';
   process.env.LISTING_MEDIA_RULES_VERIFIED = 'true';
@@ -49,9 +64,90 @@ beforeEach(() => {
   };
 });
 afterAll(() => {
-  delete process.env.LISTING_MEDIA_BUCKET;
-  delete process.env.LISTING_MEDIA_POLICY_START;
-  delete process.env.LISTING_MEDIA_RULES_VERIFIED;
+  process.env = originalEnv;
+});
+
+test('accepts an owned emulator photo only with all local services configured', async () => {
+  const localUrl = url().replace(
+    'https://firebasestorage.googleapis.com',
+    'http://127.0.0.1:9199',
+  );
+  const service = new ListingMediaService(bucket);
+  const edit = { expectedEditVersion: 0, product_images: [localUrl] };
+  expect(() => parseListingEdit(edit)).toThrow();
+  await expect(
+    service.validate('seller', [localUrl], []),
+  ).rejects.toMatchObject({ code: 'LISTING_INVALID_MEDIA' });
+  Object.assign(process.env, emulatorEnv);
+  expect(parseListingEdit(edit)).toEqual(edit);
+  await expect(
+    service.validate('seller', [localUrl], []),
+  ).resolves.toBeUndefined();
+  metadata.metadata.ownerUid = 'other';
+  await expect(
+    service.validate('seller', [localUrl], []),
+  ).rejects.toMatchObject({ code: 'LISTING_INVALID_MEDIA' });
+});
+
+test.each([
+  'http://127.0.0.1.evil.example:9199',
+  'http://127.0.0.1:9298',
+  'http://user@127.0.0.1:9199',
+  'https://127.0.0.1:9199',
+  'http://firebasestorage.googleapis.com',
+])('rejects unapproved emulator URL origin %s', async (origin) => {
+  Object.assign(process.env, emulatorEnv);
+  const raw = url().replace('https://firebasestorage.googleapis.com', origin);
+  if (raw.startsWith('http:'))
+    expect(() =>
+      parseListingEdit({ expectedEditVersion: 0, product_images: [raw] }),
+    ).toThrow();
+  await expect(
+    new ListingMediaService(bucket).validate('seller', [raw], []),
+  ).rejects.toMatchObject({ code: 'LISTING_INVALID_MEDIA' });
+  expect(bucket.file).not.toHaveBeenCalled();
+});
+
+test('rejects local photo access in production, even with emulator variables set', async () => {
+  Object.assign(process.env, emulatorEnv, { NODE_ENV: 'production' });
+  const localUrl = url().replace(
+    'https://firebasestorage.googleapis.com',
+    'http://127.0.0.1:9199',
+  );
+  expect(() =>
+    parseListingEdit({ expectedEditVersion: 0, product_images: [localUrl] }),
+  ).toThrow();
+  await expect(
+    new ListingMediaService(bucket).validate('seller', [localUrl], []),
+  ).rejects.toThrow('must not be enabled in production');
+  expect(bucket.file).not.toHaveBeenCalled();
+});
+
+test.each([
+  { FIRESTORE_EMULATOR_HOST: undefined },
+  { FIREBASE_AUTH_EMULATOR_HOST: 'auth.example:9099' },
+  { FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1.evil.example:9199' },
+  { FIREBASE_STORAGE_EMULATOR_HOST: 'http://127.0.0.1:9199' },
+  { FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:65536' },
+  { STORAGE_EMULATOR_HOST: 'https://storage.googleapis.com' },
+])('refuses partial or external emulator configuration %j', (change) => {
+  expect(() => localFirebaseEmulators({ ...emulatorEnv, ...change })).toThrow();
+});
+
+test('keeps hosted Firebase configuration unchanged when no emulator hosts are set', () => {
+  expect(localFirebaseEmulators({ NODE_ENV: 'production' })).toBeUndefined();
+  expect(
+    localFirebaseEmulators({
+      ...emulatorEnv,
+      STORAGE_EMULATOR_HOST: 'http://127.0.0.1:9199',
+    }),
+  ).toMatchObject({ storageOrigin: 'http://127.0.0.1:9199' });
+});
+test('still parses HTTPS edits in the Firestore and Storage-only rules test harness', () => {
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8188';
+  process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9298';
+  const edit = { expectedEditVersion: 0, product_images: [url()] };
+  expect(parseListingEdit(edit)).toEqual(edit);
 });
 test('accepts a fully decoded owned immutable object', async () => {
   await expect(
@@ -134,5 +230,12 @@ test('accepts retained legacy photos only with matching server-owned generation 
       [url(legacyPath)],
       [url(legacyPath)],
     ),
+  ).rejects.toMatchObject({ code: 'LISTING_INVALID_MEDIA' });
+});
+
+test('does not validate a hosted photo against local emulator metadata', async () => {
+  Object.assign(process.env, emulatorEnv);
+  await expect(
+    new ListingMediaService(bucket).validate('seller', [url()], []),
   ).rejects.toMatchObject({ code: 'LISTING_INVALID_MEDIA' });
 });
