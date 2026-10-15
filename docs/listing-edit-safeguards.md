@@ -98,11 +98,11 @@ Legacy success events set `hasSales`, and successful legacy orders remain
 processable. Rejecting an order after charge is not the safety mechanism: rollout
 must prevent editing while any legacy intent can still succeed.
 
-The live database edition, rules, indexes, bucket, existing intent inventory and
-Firestore/Storage access policies were not verified: the local Firebase login
-was expired and no target project/database was confirmed. Existing repository
-code uses the Native Firestore SDK; tests use local emulators. Verify the actual
-edition/database before applying any migration or rules.
+Read-only inspection confirmed the `cherry-mvp` default database is Standard
+Firestore Native, and identified its Storage bucket and broadly permissive deployed
+rules. No shared configuration was changed. Existing intent inventory, historical
+media ownership, index readiness and the full IAM policy still require review.
+Local verification uses emulators and must not be treated as a live-data migration.
 
 Migration procedure, requiring separate authorised staging and production runs:
 
