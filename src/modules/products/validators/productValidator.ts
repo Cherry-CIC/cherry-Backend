@@ -1,4 +1,5 @@
 import type { UpdateProductData } from '../services/ProductService';
+import { localFirebaseEmulators } from '../../../shared/config/firebaseEmulators';
 import {
   ListingSafetyError,
   sendListingSafetyError,
@@ -100,6 +101,12 @@ export const LISTING_SIZES = [
   'One Size',
 ];
 export const productUpdateSchema = Joi.object({
+  expectedEditVersion: Joi.number()
+    .integer()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER - 1)
+    .strict()
+    .required(),
   name: Joi.string().trim().min(3).max(100),
   description: Joi.string().max(500).allow(''),
   categoryId: Joi.string().pattern(/^[^/\\\x00-\x1f]{1,128}$/),
@@ -108,7 +115,19 @@ export const productUpdateSchema = Joi.object({
   product_images: Joi.array()
     .items(
       Joi.string()
-        .uri({ scheme: ['https'] })
+        .uri({ scheme: ['https', 'http'] })
+        .custom((value: string, helpers) => {
+          if (value.startsWith('https://')) return value;
+          try {
+            if (
+              localFirebaseEmulators()?.storageOrigin === new URL(value).origin
+            )
+              return value;
+          } catch {
+            /* Invalid emulator settings must not enable HTTP uploads. */
+          }
+          return helpers.error('string.uri');
+        })
         .max(4096),
     )
     .min(1)
@@ -116,7 +135,7 @@ export const productUpdateSchema = Joi.object({
     .unique(),
 })
   .unknown(false)
-  .min(1);
+  .min(2);
 
 export function parseListingEdit(input: unknown): UpdateProductData {
   const { error, value } = productUpdateSchema.validate(input, {

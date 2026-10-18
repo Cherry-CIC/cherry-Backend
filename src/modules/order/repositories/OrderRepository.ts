@@ -1,3 +1,9 @@
+import { isDeepStrictEqual } from 'util';
+import {
+  ListingSafetyError,
+  listingEditVersion,
+  hasPendingPayment,
+} from '../../../shared/utils/listingSafety';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { FieldValue } from 'firebase-admin/firestore';
 import { gbpToPence } from '../../../shared/utils/money';
@@ -57,6 +63,8 @@ export type CreatePendingOrderInput = Pick<
   | 'shippingWeight'
   | 'shipping'
   | 'pickupPoint'
+  | 'listingEditVersion'
+  | 'stripeCustomerId'
 >;
 
 export interface VerifiedOrderPayment {
@@ -86,13 +94,13 @@ export class OrderRepository {
   async createPendingOrder(
     orderId: string,
     input: CreatePendingOrderInput,
+    expectedEditVersion?: number,
   ): Promise<Order> {
     const orderRef = firestore.collection('orders').doc(orderId);
     const productRef = firestore.collection('products').doc(input.productId);
     const pendingOrdersQuery = firestore
       .collection('orders')
-      .where('productId', '==', input.productId)
-      .where('status', '==', 'pending_payment');
+      .where('productId', '==', input.productId);
 
     return firestore.runTransaction(async (transaction) => {
       const [orderDoc, pendingOrders, productDoc] = await Promise.all([
@@ -111,9 +119,27 @@ export class OrderRepository {
       const productData = productDoc.data()!;
       const quantity =
         typeof productData.number === 'number' ? productData.number : 0;
-      if (quantity <= 0 || productData.status !== 'active') {
+      if (
+        !Number.isSafeInteger(quantity) ||
+        quantity <= 0 ||
+        (productData.status !== undefined && productData.status !== 'active') ||
+        productData.hidden === true ||
+        productData.moderationStatus === 'hidden'
+      ) {
         throw new Error('Product is not available');
       }
+
+      const deletions = await Promise.all(
+        [input.userId, input.sellerId].map((uid) =>
+          transaction.get(firestore.collection('account_deletions').doc(uid)),
+        ),
+      );
+      if (deletions.some((doc) => doc.exists))
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_DELETION_PENDING',
+          'Account deletion is in progress.',
+        );
 
       if (
         typeof productData.price !== 'number' ||
@@ -122,26 +148,74 @@ export class OrderRepository {
         throw new Error('Product price changed');
       }
 
-      const now = new Date();
-      let activeReservations = 0;
-      pendingOrders.docs.forEach((pendingOrder) => {
-        const pendingData = pendingOrder.data();
-        const expiresAt = this.toDate(pendingData.paymentExpiresAt);
-        if (expiresAt && expiresAt.getTime() > now.getTime()) {
-          activeReservations += 1;
-        } else {
-          transaction.update(pendingOrder.ref, {
-            status: 'expired',
-            reservationActive: false,
-            updatedAt: now,
-          });
-        }
+      const revision = listingEditVersion(productData);
+      if (revision >= Number.MAX_SAFE_INTEGER)
+        throw new ListingSafetyError(
+          409,
+          'LISTING_NOT_AVAILABLE',
+          'This listing needs review before checkout.',
+        );
+      if (
+        input.listingEditVersion !== revision ||
+        (expectedEditVersion !== undefined && expectedEditVersion !== revision)
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'LISTING_VERSION_CONFLICT',
+          'This listing changed. Reopen it before paying.',
+        );
+      }
+      if (
+        expectedEditVersion === undefined &&
+        productData.hasBeenEdited === true
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'LISTING_VERSION_REQUIRED',
+          'Reopen this edited listing before paying.',
+        );
+      }
+      if (
+        productData.userId === input.userId ||
+        productData.userId !== input.sellerId ||
+        productData.charityId !== input.charityId
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'LISTING_NOT_AVAILABLE',
+          'This listing is not available for this checkout.',
+        );
+      }
+      // A deadline cannot prove that Stripe has cancelled an actionable intent.
+      // Keep uncertain creation and processing attempts reserved until reconciled.
+      const activeOrders = pendingOrders.docs.filter((doc) => {
+        const data = doc.data();
+        return hasPendingPayment(data);
       });
-
-      if (quantity - activeReservations <= 0) {
-        throw new Error('Product is out of stock');
+      for (const pending of activeOrders) {
+        const existing = pending.data();
+        const sameSelection = Object.entries(input).every(
+          ([key, value]) =>
+            key === 'stripeCustomerId' ||
+            isDeepStrictEqual(existing[key], value),
+        );
+        if (
+          sameSelection &&
+          existing.userId === input.userId &&
+          existing.stripeCustomerId
+        ) {
+          return this.mapToOrder(pending.id, existing);
+        }
+      }
+      if (activeOrders.length > 0) {
+        throw new ListingSafetyError(
+          409,
+          'LISTING_PAYMENT_PENDING',
+          'A payment is already in progress for this listing.',
+        );
       }
 
+      const now = new Date();
       const paymentExpiresAt = new Date(now.getTime() + PAYMENT_RESERVATION_MS);
       const orderData = removeUndefinedValues({
         ...input,
@@ -164,6 +238,16 @@ export class OrderRepository {
         ...orderData,
       } as Order;
     });
+  }
+
+  async getPendingOrdersForProduct(productId: string): Promise<Order[]> {
+    const snapshot = await firestore
+      .collection('orders')
+      .where('productId', '==', productId)
+      .get();
+    return snapshot.docs
+      .filter((doc) => hasPendingPayment(doc.data()))
+      .map((doc) => this.mapToOrder(doc.id, doc.data()));
   }
 
   async attachPaymentIntent(
@@ -200,8 +284,8 @@ export class OrderRepository {
 
   async releasePendingOrder(
     orderId: string,
-    paymentIntentId?: string,
-    cancelled = false,
+    paymentIntentId: string,
+    cancelled = true,
   ): Promise<void> {
     const orderRef = firestore.collection('orders').doc(orderId);
     await firestore.runTransaction(async (transaction) => {
@@ -209,25 +293,23 @@ export class OrderRepository {
       if (!orderDoc.exists) {
         throw new Error('Pending order not found');
       }
-      if (orderDoc.data()!.status !== 'pending_payment') {
-        return;
-      }
-
       const orderData = orderDoc.data()!;
-      if (
-        paymentIntentId &&
-        orderData.paymentIntentId !== paymentIntentId
-      ) {
+      if (!cancelled)
+        throw new Error(
+          'Only confirmed Stripe cancellation can release a pending order',
+        );
+      if (orderData.paymentIntentId !== paymentIntentId) {
         throw new Error('PaymentIntent does not match pending order');
       }
+      if (orderData.status !== 'pending_payment') return;
       const productRef = firestore
         .collection('products')
         .doc(orderData.productId);
       const productDoc = await transaction.get(productRef);
 
       transaction.update(orderRef, {
-        status: cancelled ? 'cancelled' : 'failed',
-        paymentStatus: cancelled ? 'cancelled' : 'failed',
+        status: 'cancelled',
+        paymentStatus: 'cancelled',
         reservationActive: false,
         updatedAt: new Date(),
       });
@@ -321,22 +403,6 @@ export class OrderRepository {
         }
         return 'mismatch' as const;
       }
-      const paymentExpiresAt = this.toDate(orderData.paymentExpiresAt);
-      if (!paymentExpiresAt || paymentExpiresAt.getTime() <= Date.now()) {
-        transaction.update(orderRef, {
-          paymentIntentId,
-          status: 'expired',
-          reservationActive: false,
-          updatedAt: new Date(),
-        });
-        if (productDoc.exists) {
-          transaction.update(productRef, {
-            checkoutReservationVersion: FieldValue.increment(1),
-          });
-        }
-        return 'expired' as const;
-      }
-
       if (!productDoc.exists || orderData.reservationActive !== true) {
         transaction.update(orderRef, {
           paymentIntentId,
@@ -375,6 +441,8 @@ export class OrderRepository {
         updatedAt: now,
       });
       transaction.update(productRef, {
+        hasSales: true,
+        editVersion: listingEditVersion(productData) + 1,
         number: quantity - 1,
         status:
           quantity - 1 <= 0
@@ -407,9 +475,6 @@ export class OrderRepository {
       } as Order;
     });
 
-    if (result === 'expired') {
-      throw new PendingOrderUnavailableError('expired');
-    }
     if (result === 'unavailable') {
       throw new PendingOrderUnavailableError('unavailable');
     }
@@ -493,9 +558,7 @@ export class OrderRepository {
   }
 
   async claimFulfillmentJob(orderId: string): Promise<'claimed' | 'completed'> {
-    const jobRef = firestore
-      .collection('order_fulfillment_jobs')
-      .doc(orderId);
+    const jobRef = firestore.collection('order_fulfillment_jobs').doc(orderId);
     return firestore.runTransaction(async (transaction) => {
       const jobDoc = await transaction.get(jobRef);
       if (!jobDoc.exists) {
@@ -549,15 +612,12 @@ export class OrderRepository {
   }
 
   async completeFulfillmentJob(orderId: string): Promise<void> {
-    await firestore
-      .collection('order_fulfillment_jobs')
-      .doc(orderId)
-      .update({
-        status: 'completed',
-        leaseUntil: FieldValue.delete(),
-        lastError: null,
-        updatedAt: new Date(),
-      });
+    await firestore.collection('order_fulfillment_jobs').doc(orderId).update({
+      status: 'completed',
+      leaseUntil: FieldValue.delete(),
+      lastError: null,
+      updatedAt: new Date(),
+    });
   }
 
   async getOrderById(id: string): Promise<Order | null> {

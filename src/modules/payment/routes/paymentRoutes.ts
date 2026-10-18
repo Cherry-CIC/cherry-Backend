@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { createPaymentIntent } from '../controllers/paymentController';
+import { cancelPaymentIntent, createPaymentIntent } from '../controllers/paymentController';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateRequest } from '../../../shared/middleware/validateRequest';
-import { createPaymentIntentValidator } from '../validators/paymentValidator';
+import { cancelPaymentIntentValidator, createPaymentIntentValidator } from '../validators/paymentValidator';
 
 const router = Router();
 
@@ -46,6 +46,10 @@ const router = Router();
  *               productId:
  *                 type: string
  *                 example: "product-001"
+ *               expectedEditVersion:
+ *                 type: integer
+ *                 minimum: 0
+ *                 description: Required for an edited listing. Must match its latest editVersion.
  *               shippingMethodId:
  *                 type: string
  *                 example: "3747"
@@ -152,6 +156,9 @@ const router = Router();
  *                       example: "order-001"
  *                     paymentIntentId:
  *                       type: string
+ *                     paymentStatus:
+ *                       type: string
+ *                       description: Current Stripe status, including succeeded on an idempotent retry.
  *                     clientSecret:
  *                       type: string
  *                     ephemeralKey:
@@ -178,6 +185,8 @@ const router = Router();
  *                       example: "GBP"
  *       400:
  *         description: Bad request
+ *       409:
+ *         $ref: "#/components/responses/ListingConflictError"
  *       500:
  *         description: Internal server error
  */
@@ -188,4 +197,26 @@ router.post(
   validateRequest(createPaymentIntentValidator),
   createPaymentIntent,
 );
+/**
+ * @swagger
+ * /api/payment/cancel-payment-intent:
+ *   post:
+ *     summary: Cancel an owned payment and release its pending order after confirmation
+ *     tags: [Payment]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [paymentIntentId]
+ *             properties:
+ *               paymentIntentId: { type: string }
+ *     responses:
+ *       200: { description: Stripe cancellation confirmed }
+ *       403: { description: Payment belongs to another account }
+ *       409: { description: Payment is still actionable or needs reconciliation }
+ */
+router.post('/cancel-payment-intent', authMiddleware, validateRequest(cancelPaymentIntentValidator), cancelPaymentIntent);
 export default router;

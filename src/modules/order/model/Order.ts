@@ -67,6 +67,8 @@ export interface Order {
   };
   pickupPoint: PickupPointSelection;
   paymentIntentId?: string;
+  listingEditVersion?: number;
+  stripeCustomerId?: string;
   paymentStatus: 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'refunded';
   status:
     | 'pending_payment'

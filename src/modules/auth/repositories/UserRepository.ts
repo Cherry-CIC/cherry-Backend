@@ -1,3 +1,7 @@
+import {
+  hasPendingPayment,
+  ListingSafetyError,
+} from '../../../shared/utils/listingSafety';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
@@ -181,6 +185,36 @@ export class UserRepository {
     anonymisedShipments: number;
     deletedLikes: number;
   }> {
+    // Serialise deletion against checkout and listing creation. Retain the
+    // tombstone so an already issued token cannot recreate account data.
+    await this.db.runTransaction(async (tx) => {
+      const products = await tx.get(
+        this.db.collection('products').where('userId', '==', firebaseUid),
+      );
+      const buyerOrders = await tx.get(
+        this.db.collection('orders').where('userId', '==', firebaseUid),
+      );
+      const sellerOrders = await Promise.all(
+        products.docs.map((doc) =>
+          tx.get(this.db.collection('orders').where('productId', '==', doc.id)),
+        ),
+      );
+      if (
+        [buyerOrders, ...sellerOrders].some((orders) =>
+          orders.docs.some((doc) => hasPendingPayment(doc.data())),
+        )
+      )
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_PAYMENT_PENDING',
+          'Complete or cancel pending payments before deleting your account.',
+        );
+      tx.set(
+        this.db.collection('account_deletions').doc(firebaseUid),
+        { startedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    });
     const userProfilesSnapshot = await this.db
       .collection(this.collectionName)
       .where('id', '==', firebaseUid)
@@ -212,7 +246,7 @@ export class UserRepository {
         .limit(1)
         .get();
 
-      if (relatedOrders.empty) {
+      if (relatedOrders.empty && productDoc.data().hasSales !== true) {
         unsoldProductDocs.push(productDoc);
       } else {
         soldProductDocs.push(productDoc);
@@ -277,6 +311,8 @@ export class UserRepository {
     for (const doc of soldProductDocs) {
       await doc.ref.update({
         userId: DELETED_USER_MARKER,
+        status: doc.data().number > 0 ? 'unlisted' : 'sold',
+        editVersion: FieldValue.increment(1),
         updatedAt: FieldValue.serverTimestamp(),
       });
     }

@@ -587,11 +587,7 @@ describe('ProductService pagination', () => {
       postageSizeRepo,
     );
     await expect(
-      service.updateProduct(
-        'product-1',
-        { number: 0 } as any,
-        'user-1',
-      ),
+      service.updateProduct('product-1', { number: 0 } as any, 'user-1'),
     ).rejects.toMatchObject({ code: 'LISTING_VALIDATION_FAILED' });
   });
 
@@ -616,4 +612,80 @@ describe('ProductService pagination', () => {
       );
     },
   );
+});
+
+describe('listing edit rollout and media boundary', () => {
+  const enabled = process.env.LISTING_EDIT_ENABLED;
+  const existing = createProduct('product-1', '2026-01-01');
+  const getById = jest.fn();
+  const update = jest.fn();
+  const validatePhotos = jest.fn();
+  const service = new ProductService(
+    { getById, update } as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    { validatePhotos } as any,
+  );
+  beforeEach(() => {
+    getById.mockReset().mockResolvedValue(existing);
+    update.mockReset().mockResolvedValue({ ...existing, editVersion: 1 });
+    validatePhotos.mockReset().mockResolvedValue(undefined);
+    process.env.LISTING_EDIT_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (enabled === undefined) delete process.env.LISTING_EDIT_ENABLED;
+    else process.env.LISTING_EDIT_ENABLED = enabled;
+  });
+  test('editing stays disabled until explicitly enabled', async () => {
+    delete process.env.LISTING_EDIT_ENABLED;
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'user-1',
+      ),
+    ).rejects.toHaveProperty('code', 'LISTING_EDIT_DISABLED');
+    expect(update).not.toHaveBeenCalled();
+    expect(validatePhotos).not.toHaveBeenCalled();
+  });
+  test('a text-only edit still validates retained photos before writing', async () => {
+    await service.updateProduct(
+      'product-1',
+      { expectedEditVersion: 0, name: 'New title' },
+      'user-1',
+    );
+    expect(validatePhotos).toHaveBeenCalledWith(
+      existing.product_images,
+      'user-1',
+    );
+    expect(update).toHaveBeenCalledWith(
+      'product-1',
+      { expectedEditVersion: 0, name: 'New title' },
+      'user-1',
+    );
+  });
+  test('unauthorised edits cannot read or validate storage', async () => {
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'other',
+      ),
+    ).rejects.toHaveProperty('code', 'LISTING_NOT_OWNER');
+    expect(validatePhotos).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+  test('unverifiable media prevents an otherwise valid edit', async () => {
+    validatePhotos.mockRejectedValue(new Error('Unverified photo'));
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'user-1',
+      ),
+    ).rejects.toThrow('Unverified photo');
+    expect(update).not.toHaveBeenCalled();
+  });
 });

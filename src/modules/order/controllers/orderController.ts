@@ -146,7 +146,7 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
 
   return {
     ...order,
-    paymentState: 'paid' as const,
+    paymentState: order.paymentStatus === 'succeeded' ? 'paid' : order.paymentStatus,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
     canTrack: Boolean(shipment?.trackingUrl),

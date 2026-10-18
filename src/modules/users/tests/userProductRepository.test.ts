@@ -142,6 +142,7 @@ describe('UserProductRepository', () => {
       products: [
         {
           id: 'listing-id',
+          editVersion: 0,
           userId: 'seller-uid',
           name: 'Blue cotton shirt',
           description: 'A pre-loved cotton shirt in good condition.',

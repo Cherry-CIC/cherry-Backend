@@ -1,4 +1,5 @@
 import { parseListingEdit } from '../validators/productValidator';
+import { ListingMediaService } from './ListingMediaService';
 import {
   assertOwner,
   ListingSafetyError,
@@ -30,6 +31,7 @@ export class ProductService {
     private categoryRepo: CategoryRepository,
     private charityRepo: CharityRepository,
     private postageSizeRepo: PostageSizeRepository,
+    private mediaService = new ListingMediaService(),
   ) {}
 
   async getAllProducts(): Promise<Product[]> {
@@ -162,6 +164,8 @@ export class ProductService {
       data.charityId,
       data.postageSize,
     );
+    if (process.env.LISTING_EDIT_ENABLED === 'true')
+      await this.mediaService.validatePhotos(data.product_images, data.userId);
     const product: Product = {
       ...data,
       likes: data.likes || 0,
@@ -293,6 +297,12 @@ export class ProductService {
     uid: string,
   ): Promise<Product> {
     const validated = parseListingEdit(data);
+    if (process.env.LISTING_EDIT_ENABLED !== 'true')
+      throw new ListingSafetyError(
+        503,
+        'LISTING_EDIT_DISABLED',
+        'Listing editing is not available yet.',
+      );
     const existing = await this.productRepo.getById(id);
     if (!existing)
       throw new ListingSafetyError(
@@ -301,6 +311,10 @@ export class ProductService {
         'Listing not found.',
       );
     assertOwner(existing, uid);
+    await this.mediaService.validatePhotos(
+      validated.product_images ?? existing.product_images,
+      uid,
+    );
     return this.productRepo.update(id, validated, uid);
   }
 
@@ -749,6 +763,7 @@ export interface CreateProductData {
 }
 
 export interface UpdateProductData {
+  expectedEditVersion: number;
   name?: string;
   description?: string;
   categoryId?: string;

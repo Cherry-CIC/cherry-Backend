@@ -1,3 +1,4 @@
+import { sendListingSafetyError } from '../../../shared/utils/listingSafety';
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
@@ -20,6 +21,7 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
 
     ResponseHandler.success(res, responseData, 'PaymentIntent created');
   } catch (err) {
+    if (sendListingSafetyError(res, err)) return;
     ResponseHandler.badRequest(
       res,
       'Failed to create PaymentIntent',
@@ -28,6 +30,16 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
   }
 };
  
+export const cancelPaymentIntent = async (req: Request, res: Response): Promise<void> => {
+  try {
+    await new PaymentService().cancelPaymentIntentForUser((req as any).user.uid, req.body.paymentIntentId);
+    ResponseHandler.success(res, {}, 'Payment cancellation confirmed');
+  } catch (error) {
+    if (sendListingSafetyError(res, error)) return;
+    ResponseHandler.internalServerError(res, 'Payment cancellation could not be confirmed');
+  }
+};
+
 export const stripeWebhook = async (req: Request, res: Response): Promise<void> => {
   const sig = req.headers['stripe-signature'] as string;
   if (!sig) {

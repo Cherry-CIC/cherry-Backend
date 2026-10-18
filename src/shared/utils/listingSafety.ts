@@ -11,6 +11,29 @@ export class ListingSafetyError extends Error {
   }
 }
 
+/** Legacy listings start at zero. Malformed stored versions are never writable. */
+export function listingEditVersion(data: { editVersion?: unknown }): number {
+  if (data.editVersion === undefined) return 0;
+  if (
+    typeof data.editVersion !== 'number' ||
+    !Number.isSafeInteger(data.editVersion) ||
+    data.editVersion < 0
+  )
+    throw new ListingSafetyError(
+      409,
+      'LISTING_NOT_EDITABLE',
+      'This listing needs to be checked before it can be changed.',
+    );
+  return data.editVersion;
+}
+
+export function hasPendingPayment(data: {
+  status?: unknown;
+  reservationActive?: unknown;
+}): boolean {
+  return data.status === 'pending_payment' || data.reservationActive === true;
+}
+
 export function sendListingSafetyError(res: Response, error: unknown): boolean {
   if (!(error instanceof ListingSafetyError)) return false;
   res.status(error.status).json({
@@ -29,8 +52,12 @@ export function exposedListing<T extends object>(data: T): T {
   if (result.status === undefined && typeof result.number === 'number') {
     result.status = result.number > 0 ? 'active' : 'sold';
   }
-  for (const key of ['hasSales', 'hasBeenEdited'])
-    delete result[key];
+  try {
+    result.editVersion = listingEditVersion(result);
+  } catch {
+    delete result.editVersion;
+  }
+  for (const key of ['hasSales', 'hasBeenEdited']) delete result[key];
   return result as T;
 }
 

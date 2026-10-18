@@ -16,6 +16,7 @@
     "joi": "^17.13.3",
     "node-fetch": "^3.3.2",
     "resend": "^6.26.0",
+    "sharp": "0.35.5",
     "stripe": "^18.5.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
