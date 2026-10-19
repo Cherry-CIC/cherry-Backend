@@ -1,6 +1,7 @@
 import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Product } from '../model/Product';
+import { ListingSafetyError } from '../../../shared/utils/listingSafety';
 
 export interface ProductLike {
     id: string;
@@ -44,6 +45,15 @@ export class ProductLikeRepository {
             }
 
             const data = productDoc.data()!;
+            // Check ownership in the transaction so it cannot change before the write.
+            // Allow unliking to remove self-likes saved before this restriction.
+            if (like && data.userId === userId) {
+                throw new ListingSafetyError(
+                    403,
+                    'PRODUCT_SELF_LIKE_NOT_ALLOWED',
+                    'You cannot like your own product',
+                );
+            }
             const currentLikes =
                 typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0;
             const alreadyLiked = likeDoc.exists;

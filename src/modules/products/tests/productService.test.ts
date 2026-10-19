@@ -612,6 +612,27 @@ describe('ProductService pagination', () => {
       );
     },
   );
+
+  it.each([false, true])('delegates deletion without accessing Storage (failure=%s)', async (fails) => {
+    const getStorage = jest.spyOn(require('firebase-admin/storage'), 'getStorage');
+    const changeAvailability = fails
+      ? jest.fn().mockRejectedValue(new Error('Payment pending'))
+      : jest.fn().mockResolvedValue(null);
+    const service = new ProductService(
+      { changeAvailability } as any,
+      productLikeRepo, categoryRepo, charityRepo, postageSizeRepo,
+    );
+    try {
+      const deletion = service.deleteProduct('product-1', 'user-1');
+      if (fails) await expect(deletion).rejects.toThrow('Payment pending');
+      else await expect(deletion).resolves.toBe(true);
+      expect(changeAvailability).toHaveBeenCalledWith('product-1', 'user-1', 'delete');
+      expect(getStorage).not.toHaveBeenCalled();
+    } finally {
+      getStorage.mockRestore();
+    }
+  });
+
 });
 
 describe('listing edit rollout and media boundary', () => {
@@ -676,6 +697,24 @@ describe('listing edit rollout and media boundary', () => {
     ).rejects.toHaveProperty('code', 'LISTING_NOT_OWNER');
     expect(validatePhotos).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+  });
+  test('replacing photos validates the new photos without immediately deleting old files', async () => {
+    const getStorage = jest.spyOn(require('firebase-admin/storage'), 'getStorage');
+    const product_images = ['https://example.com/replacement.jpg'];
+    try {
+      await service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, product_images },
+        'user-1',
+      );
+      expect(validatePhotos).toHaveBeenCalledWith(product_images, 'user-1');
+      expect(update).toHaveBeenCalledWith(
+        'product-1', { expectedEditVersion: 0, product_images }, 'user-1',
+      );
+      expect(getStorage).not.toHaveBeenCalled();
+    } finally {
+      getStorage.mockRestore();
+    }
   });
   test('unverifiable media prevents an otherwise valid edit', async () => {
     validatePhotos.mockRejectedValue(new Error('Unverified photo'));

@@ -472,7 +472,6 @@ export const likeProduct = async (
       return;
     }
 
-    // Convert the boolean 'like' flag to a numeric delta (+1 for like, -1 for unlike)
     const { product, liked } = await productService.setProductLikeStatus(
       user.uid,
       id,

@@ -3,6 +3,14 @@
 This backend change extends `DELETE /api/products/{id}`. It does not add Flutter
 controls, deploy rules, schedule a hosted job or sweep historical uploads.
 
+This supersedes the immediate listing-photo deletion and account-wide Storage
+sweep on `main`. Those paths bypassed the grace period, reference checks and
+retry records, so they must not run alongside the worker. Photos removed by an
+edit and historical orphaned uploads remain for a separately reviewed cleanup;
+this worker only handles photos recorded when an eligible listing is deleted.
+The immutable-media validator replaces the older `products/{uid}/` prefix-only
+check. Legacy photos must be uploaded again before editing can be enabled safely.
+
 ## Behaviour and API contract
 
 - Authentication remains required. Ownership, current orders and retention checks
@@ -190,3 +198,8 @@ staging requirement because the emulator does not enforce them.
 
 No hosted data, rules, settings or schedules were changed. Only disposable local
 emulator fixtures were deleted. The Flutter application was not modified.
+
+After merging `main` at `c3f436a`, the build, 122 targeted unit tests and all 79
+listing/checkout/deletion emulator tests passed again. Regression checks also
+verify that account deletion, listing deletion and photo replacement do not
+invoke the superseded immediate Storage cleanup paths.

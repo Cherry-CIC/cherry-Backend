@@ -33,7 +33,8 @@ if (emulators) {
 } else if (process.env.NODE_ENV === 'production') {
   // In Cloud Run, use Application Default Credentials (ADC)
   initializeApp({
-    projectId:process.env.FIREBASE_PROJECT_ID,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
   });
 }else{
   // Initialise Admin SDK (for server‑side Firestore & Auth)
