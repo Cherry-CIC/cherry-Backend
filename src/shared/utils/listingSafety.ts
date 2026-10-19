@@ -57,7 +57,13 @@ export function exposedListing<T extends object>(data: T): T {
   } catch {
     delete result.editVersion;
   }
-  for (const key of ['hasSales', 'hasBeenEdited']) delete result[key];
+  for (const key of [
+    'hasSales',
+    'hasBeenEdited',
+    'reportRevision',
+    'retentionHold',
+  ])
+    delete result[key];
   return result as T;
 }
 

@@ -1,3 +1,4 @@
+import { ProductRepository } from '../../products/repositories/ProductRepository';
 import {
   hasPendingPayment,
   ListingSafetyError,
@@ -276,9 +277,13 @@ export class UserRepository {
       }
     });
 
+    // Use the same transactional safeguards and durable cleanup as listing deletion.
+    for (const product of unsoldProductDocs) {
+      await new ProductRepository(this.db).changeAvailability(product.id, firebaseUid, 'delete');
+    }
+
     const deleteDocRefs = [
       ...userProfilesSnapshot.docs.map((doc) => doc.ref),
-      ...unsoldProductDocs.map((doc) => doc.ref),
       ...likesSnapshot.docs.map((doc) => doc.ref),
     ];
 

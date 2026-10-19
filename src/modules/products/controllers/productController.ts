@@ -326,27 +326,8 @@ export const deleteProduct = async (
     }
     const user = (req as any).user;
 
-    // First check if the product exists and belongs to the user
-    const existingProduct = await productService.getProductById(id);
-    if (!existingProduct) {
-      ResponseHandler.notFound(
-        res,
-        'Product not found',
-        `Product with ID ${id} does not exist`,
-      );
-      return;
-    }
-
-    if (existingProduct.userId !== user.uid) {
-      ResponseHandler.forbidden(
-        res,
-        'Access denied',
-        'You can only delete your own products',
-      );
-      return;
-    }
-
-    const deleted = await productService.deleteProduct(id, user.uid);
+    // Ownership and eligibility, including repeat requests, are checked atomically.
+    await productService.deleteProduct(id, user.uid);
     ResponseHandler.success(res, null, 'Product deleted successfully');
   } catch (err) {
     if (sendListingSafetyError(res, err)) return;

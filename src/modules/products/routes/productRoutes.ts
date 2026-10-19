@@ -624,7 +624,10 @@ router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
  * @swagger
  * /api/products/{id}:
  *   delete:
- *     summary: Delete a product by ID
+ *     summary: Delete an owned, unsold listing and record durable cleanup
+ *     description: Returns after listing removal and cleanup recording commit together. Photos are retained for at least 30 days before eligible cleanup. Repeat requests by the owner succeed while the receipt is retained.
+ *     security:
+ *       - bearerAuth: []
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -651,6 +654,12 @@ router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
  *                 timestamp:
  *                   type: string
  *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/ListingAuthenticationError'
+ *       403:
+ *         $ref: '#/components/responses/ListingOwnershipError'
+ *       409:
+ *         $ref: '#/components/responses/ListingConflictError'
  *       400:
  *         description: Invalid product ID
  *         content:

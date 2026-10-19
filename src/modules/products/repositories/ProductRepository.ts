@@ -4,6 +4,8 @@ import {
   hasPendingPayment,
   ListingSafetyError,
 } from '../../../shared/utils/listingSafety';
+import { guardListingMedia } from '../cleanup/media';
+import { DELETION_JOBS, newDeletionJob } from '../cleanup/jobs';
 import { parseListingEdit } from '../validators/productValidator';
 import type { UpdateProductData } from '../services/ProductService';
 import { firestore } from '../../../shared/config/firebaseConfig';
@@ -67,6 +69,7 @@ export class ProductRepository {
           'ACCOUNT_DELETION_PENDING',
           'Account deletion is in progress.',
         );
+      await guardListingMedia(tx, this.db, product.product_images);
       tx.create(ref, {
         ...stored,
         createdAt: FieldValue.serverTimestamp(),
@@ -161,6 +164,11 @@ export class ProductRepository {
             'Choose an existing category.',
           );
       }
+      await guardListingMedia(
+        tx,
+        this.db,
+        changes.product_images ?? data.product_images,
+      );
       const updates = {
         ...changes,
         hasBeenEdited: true,
@@ -180,6 +188,13 @@ export class ProductRepository {
     const ref = this.db.collection(this.collectionName).doc(id);
     return this.db.runTransaction(async (tx) => {
       const doc = await tx.get(ref);
+      if (!doc.exists && status === 'delete') {
+        const receipt = await tx.get(this.db.collection(DELETION_JOBS).doc(id));
+        if (receipt.exists) {
+          assertOwner({ userId: receipt.get('ownerUid') }, uid);
+          return null;
+        }
+      }
       if (!doc.exists)
         throw new ListingSafetyError(
           404,
@@ -200,6 +215,9 @@ export class ProductRepository {
       if (
         status === 'delete' &&
         (data.hasSales === true ||
+          data.status === 'sold' ||
+          !Number.isSafeInteger(data.number) ||
+          data.number <= 0 ||
           orders.docs.some((order) => this.hasPurchaseHistory(order.data())))
       )
         throw new ListingSafetyError(
@@ -214,6 +232,28 @@ export class ProductRepository {
           'This listing has no available stock.',
         );
       if (status === 'delete') {
+        const reports = await tx.get(
+          this.db.collection('reports').where('targetId', '==', id),
+        );
+        if (
+          data.hidden === true ||
+          data.moderationStatus === 'hidden' ||
+          data.retentionHold === true ||
+          reports.docs.some(
+            (report) =>
+              report.get('targetType') === 'product' &&
+              !['resolved', 'rejected'].includes(report.get('status')),
+          )
+        )
+          throw new ListingSafetyError(
+            409,
+            'LISTING_REVIEW_REQUIRED',
+            'This listing needs to be reviewed before it can be deleted.',
+          );
+        tx.create(
+          this.db.collection(DELETION_JOBS).doc(id),
+          newDeletionJob(id, uid, data.product_images),
+        );
         tx.delete(ref);
         return null;
       }
