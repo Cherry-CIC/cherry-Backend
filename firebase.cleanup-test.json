@@ -1,0 +1,11 @@
+{
+  "firestore": { "rules": "security/firestore.rules" },
+  "storage": { "rules": "security/cleanup-storage.rules" },
+  "emulators": {
+    "auth": { "host": "127.0.0.1", "port": 9299 },
+    "firestore": { "host": "127.0.0.1", "port": 8280 },
+    "storage": { "host": "127.0.0.1", "port": 9399 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}

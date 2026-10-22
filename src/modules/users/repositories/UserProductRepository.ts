@@ -1,3 +1,4 @@
+import { exposedListing } from '../../../shared/utils/listingSafety';
 import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
@@ -151,7 +152,7 @@ const mapUserProduct = (
   const charityId = safeIdentifier(data.charityId);
   if (categoryId) product.categoryId = categoryId;
   if (charityId) product.charityId = charityId;
-  return product;
+  return { ...product, editVersion: exposedListing(data).editVersion };
 };
 
 export class UserProductRepository {

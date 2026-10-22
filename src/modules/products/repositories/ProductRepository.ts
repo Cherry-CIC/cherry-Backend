@@ -1,8 +1,11 @@
 import {
   assertOwner,
-  assertOwnedProductImages,
+  listingEditVersion,
+  hasPendingPayment,
   ListingSafetyError,
 } from '../../../shared/utils/listingSafety';
+import { guardListingMedia } from '../cleanup/media';
+import { DELETION_JOBS, newDeletionJob } from '../cleanup/jobs';
 import { parseListingEdit } from '../validators/productValidator';
 import type { UpdateProductData } from '../services/ProductService';
 import { firestore } from '../../../shared/config/firebaseConfig';
@@ -54,6 +57,7 @@ export class ProductRepository {
       ...product,
       hasSales: false,
       hasBeenEdited: false,
+      editVersion: 0,
     };
     await this.db.runTransaction(async (tx) => {
       const deleting = await tx.get(
@@ -65,6 +69,7 @@ export class ProductRepository {
           'ACCOUNT_DELETION_PENDING',
           'Account deletion is in progress.',
         );
+      await guardListingMedia(tx, this.db, product.product_images);
       tx.create(ref, {
         ...stored,
         createdAt: FieldValue.serverTimestamp(),
@@ -84,10 +89,7 @@ export class ProductRepository {
     input: UpdateProductData,
     uid: string,
   ): Promise<Product> {
-    const changes = parseListingEdit(input);
-    if (changes.product_images) {
-      assertOwnedProductImages(changes.product_images, uid);
-    }
+    const { expectedEditVersion, ...changes } = parseListingEdit(input);
     const ref = this.db.collection(this.collectionName).doc(id);
     return this.db.runTransaction(async (tx) => {
       const doc = await tx.get(ref);
@@ -99,10 +101,24 @@ export class ProductRepository {
         );
       const data = doc.data()!;
       assertOwner(data, uid);
+      const version = listingEditVersion(data);
+      if (version !== expectedEditVersion)
+        throw new ListingSafetyError(
+          409,
+          'LISTING_VERSION_CONFLICT',
+          'This listing has changed. Refresh it before saving.',
+        );
       if (
-        !['active', 'unlisted'].includes(data.status) ||
+        !['active', 'unlisted'].includes(
+          data.status === undefined
+            ? this.resolveProductStatus(data)
+            : data.status,
+        ) ||
         !Number.isSafeInteger(data.number) ||
-        data.number <= 0
+        data.number <= 0 ||
+        data.hidden === true ||
+        data.moderationStatus === 'hidden' ||
+        version >= Number.MAX_SAFE_INTEGER
       ) {
         throw new ListingSafetyError(
           409,
@@ -110,6 +126,15 @@ export class ProductRepository {
           'This listing cannot be edited in its current state.',
         );
       }
+      const deleting = await tx.get(
+        this.db.collection('account_deletions').doc(uid),
+      );
+      if (deleting.exists)
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_DELETION_PENDING',
+          'Account deletion is in progress.',
+        );
       const orders = await tx.get(
         this.db.collection('orders').where('productId', '==', id),
       );
@@ -121,7 +146,7 @@ export class ProductRepository {
         );
       if (
         data.hasSales === true ||
-        orders.docs.some((order) => order.data().paymentStatus === 'succeeded')
+        orders.docs.some((order) => this.hasPurchaseHistory(order.data()))
       )
         throw new ListingSafetyError(
           409,
@@ -139,9 +164,15 @@ export class ProductRepository {
             'Choose an existing category.',
           );
       }
+      await guardListingMedia(
+        tx,
+        this.db,
+        changes.product_images ?? data.product_images,
+      );
       const updates = {
         ...changes,
         hasBeenEdited: true,
+        editVersion: version + 1,
         updatedAt: new Date(),
       };
       tx.update(ref, updates);
@@ -157,6 +188,13 @@ export class ProductRepository {
     const ref = this.db.collection(this.collectionName).doc(id);
     return this.db.runTransaction(async (tx) => {
       const doc = await tx.get(ref);
+      if (!doc.exists && status === 'delete') {
+        const receipt = await tx.get(this.db.collection(DELETION_JOBS).doc(id));
+        if (receipt.exists) {
+          assertOwner({ userId: receipt.get('ownerUid') }, uid);
+          return null;
+        }
+      }
       if (!doc.exists)
         throw new ListingSafetyError(
           404,
@@ -177,9 +215,10 @@ export class ProductRepository {
       if (
         status === 'delete' &&
         (data.hasSales === true ||
-          orders.docs.some(
-            (order) => order.data().paymentStatus === 'succeeded',
-          ))
+          data.status === 'sold' ||
+          !Number.isSafeInteger(data.number) ||
+          data.number <= 0 ||
+          orders.docs.some((order) => this.hasPurchaseHistory(order.data())))
       )
         throw new ListingSafetyError(
           409,
@@ -193,12 +232,42 @@ export class ProductRepository {
           'This listing has no available stock.',
         );
       if (status === 'delete') {
+        const reports = await tx.get(
+          this.db.collection('reports').where('targetId', '==', id),
+        );
+        if (
+          data.hidden === true ||
+          data.moderationStatus === 'hidden' ||
+          data.retentionHold === true ||
+          reports.docs.some(
+            (report) =>
+              report.get('targetType') === 'product' &&
+              !['resolved', 'rejected'].includes(report.get('status')),
+          )
+        )
+          throw new ListingSafetyError(
+            409,
+            'LISTING_REVIEW_REQUIRED',
+            'This listing needs to be reviewed before it can be deleted.',
+          );
+        tx.create(
+          this.db.collection(DELETION_JOBS).doc(id),
+          newDeletionJob(id, uid, data.product_images),
+        );
         tx.delete(ref);
         return null;
       }
       if (data.status === status) return this.mapToProduct(id, data);
+      const version = listingEditVersion(data);
+      if (version >= Number.MAX_SAFE_INTEGER)
+        throw new ListingSafetyError(
+          409,
+          'LISTING_NOT_EDITABLE',
+          'This listing needs to be checked before it can be changed.',
+        );
       const updates = {
         status,
+        editVersion: version + 1,
         updatedAt: new Date(),
       };
       tx.update(ref, updates);
@@ -345,16 +414,17 @@ export class ProductRepository {
       : 'sold';
   }
 
-  private isActiveReservation(
-    data: FirebaseFirestore.DocumentData,
-  ): boolean {
-    if (data.status !== 'pending_payment' || data.reservationActive !== true) {
-      return false;
-    }
-    const expiresAt =
-      typeof data.paymentExpiresAt?.toDate === 'function'
-        ? data.paymentExpiresAt.toDate()
-        : new Date(data.paymentExpiresAt);
-    return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
+  private hasPurchaseHistory(data: FirebaseFirestore.DocumentData): boolean {
+    // Only a confirmed unpaid cancellation is safe to ignore. Legacy or
+    // refunded records may still back a buyer's historical order details.
+    return (
+      !hasPendingPayment(data) &&
+      !(data.status === 'cancelled' && data.paymentStatus === 'cancelled')
+    );
+  }
+
+  private isActiveReservation(data: FirebaseFirestore.DocumentData): boolean {
+    // Time alone cannot prove that Stripe is no longer able to charge.
+    return hasPendingPayment(data);
   }
 }

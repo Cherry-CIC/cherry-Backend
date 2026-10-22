@@ -4,6 +4,7 @@ export interface Product {
   id?: string;
   hasSales?: boolean;
   hasBeenEdited?: boolean;
+  editVersion?: number;
   name: string;
   description?: string;
   categoryId: string;

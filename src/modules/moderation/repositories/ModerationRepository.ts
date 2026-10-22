@@ -24,6 +24,7 @@ export class ModerationRepository {
       moderationUpdatedBy: adminId,
       hidden: action === 'hide',
       hiddenAt: action === 'hide' ? FieldValue.serverTimestamp() : null,
+      editVersion: FieldValue.increment(1),
     });
     return true;
   }

@@ -1,3 +1,7 @@
+import {
+  ListingSafetyError,
+  listingEditVersion,
+} from '../../../shared/utils/listingSafety';
 import { PaymentRepository } from '../PaymentRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { stripe } from '../../../shared/config/stripeConfig';
@@ -17,6 +21,7 @@ import { OrderFulfillmentService } from '../../order/services/OrderFulfillmentSe
 
 export interface CreatePaymentSelection {
   productId: string;
+  expectedEditVersion?: number;
   shippingMethodId: string;
   pickupPointId: string;
   country: string;
@@ -68,6 +73,35 @@ export class PaymentService {
     const product = await this.productRepo.getById(selection.productId);
     if (!product) {
       throw new Error('Product not found');
+    }
+
+    if (product.userId === firebaseUid) {
+      throw new ListingSafetyError(
+        403,
+        'SELF_PURCHASE_NOT_ALLOWED',
+        'You cannot buy your own listing.',
+      );
+    }
+    const quotedRevision = listingEditVersion(product);
+    if (
+      selection.expectedEditVersion !== undefined &&
+      selection.expectedEditVersion !== quotedRevision
+    ) {
+      throw new ListingSafetyError(
+        409,
+        'LISTING_VERSION_CONFLICT',
+        'This listing changed. Reopen it before paying.',
+      );
+    }
+    if (
+      selection.expectedEditVersion === undefined &&
+      product.hasBeenEdited === true
+    ) {
+      throw new ListingSafetyError(
+        409,
+        'LISTING_VERSION_REQUIRED',
+        'Reopen this edited listing before paying.',
+      );
     }
 
     if (product.number <= 0) {
@@ -122,76 +156,189 @@ export class PaymentService {
     const securityFee = calculateSecurityFeePence(productAmount);
     const totalAmount = productAmount + shippingFee + securityFee;
 
-    const order = await this.orderRepo.createPendingOrder(orderId, {
-      userId: firebaseUid,
-      sellerId: product.userId,
-      charityId: product.charityId,
-      email: user.email,
-      productAmount,
-      shippingFee,
-      securityFee,
-      totalAmount,
-      currency: 'GBP',
-      productId: selection.productId,
-      productName: product.name,
-      deliveryType: 'pickup_point',
-      shippingOptionId: shippingMethod.id,
-      shippingOptionName: shippingMethod.name,
-      shippingCarrier: sendcloudConfig.enforcedCarrier,
-      shippingWeight: postageSize.weight,
-      shipping: selection.shipping,
-      pickupPoint: selection.pickupPoint,
-    });
+    await this.reconcileExpiredOrders(selection.productId);
 
-    const metadata = {
-      firebaseUid,
+    const stripeCustomerId = await this.paymentRepo.getOrCreateCustomerId(
+      user.email,
+    );
+    const order = await this.orderRepo.createPendingOrder(
       orderId,
-      sellerId: product.userId,
-      charityId: product.charityId,
-      productId: selection.productId,
-      shippingMethodId: shippingMethod.id,
-      shippingMethodName: shippingMethod.name,
-      pickupPointId: selection.pickupPointId,
-      destinationCountry: selection.country,
-      destinationPostalCode: selection.postalCode,
-      shippingCarrier: sendcloudConfig.enforcedCarrier,
-      shippingWeight: String(postageSize.weight),
-      productAmount: String(productAmount),
-      shippingFee: String(shippingFee),
-      securityFee: String(securityFee),
-      totalAmount: String(totalAmount),
-    };
-
-    let payment;
-    try {
-      payment = await this.paymentRepo.createPaymentIntentForUser(
-        user.email,
+      {
+        listingEditVersion: quotedRevision,
+        stripeCustomerId,
+        userId: firebaseUid,
+        sellerId: product.userId,
+        charityId: product.charityId,
+        email: user.email,
+        productAmount,
+        shippingFee,
+        securityFee,
         totalAmount,
-        metadata,
-      );
-      await this.orderRepo.attachPaymentIntent(orderId, payment.paymentIntentId);
-    } catch (err) {
-      try {
-        await this.orderRepo.releasePendingOrder(orderId);
-      } catch (releaseError) {
-        const reason =
-          releaseError instanceof Error ? releaseError.message : String(releaseError);
-        throw new Error(
-          `Payment setup failed and the pending order could not be released: ${reason}`,
-        );
-      }
-      throw err;
-    }
+        currency: 'GBP',
+        productId: selection.productId,
+        productName: product.name,
+        deliveryType: 'pickup_point',
+        shippingOptionId: shippingMethod.id,
+        shippingOptionName: shippingMethod.name,
+        shippingCarrier: sendcloudConfig.enforcedCarrier,
+        shippingWeight: postageSize.weight,
+        shipping: selection.shipping,
+        pickupPoint: selection.pickupPoint,
+      },
+      selection.expectedEditVersion,
+    );
 
+    const payment = await this.recoverPayment(order);
+    await this.orderRepo.attachPaymentIntent(order.id, payment.paymentIntentId);
+    if (payment.paymentStatus === 'canceled') {
+      await this.orderRepo.releasePendingOrder(
+        order.id,
+        payment.paymentIntentId,
+      );
+      throw new ListingSafetyError(
+        409,
+        'CHECKOUT_FINISHED',
+        'This payment was cancelled. Reopen the listing before paying.',
+      );
+    }
     return {
       ...payment,
-      orderId,
-      productAmount,
-      shippingFee,
-      securityFee,
-      totalAmount,
-      currency: 'GBP',
+      orderId: order.id,
+      productAmount: order.productAmount,
+      shippingFee: order.shippingFee,
+      securityFee: order.securityFee,
+      totalAmount: order.totalAmount,
+      currency: order.currency,
     };
+  }
+
+  private async recoverPayment(order: Order) {
+    if (
+      !order.stripeCustomerId ||
+      (!order.paymentIntentId &&
+        Date.now() - order.createdAt.getTime() >= 23 * 60 * 60 * 1000)
+    ) {
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_RECONCILIATION_REQUIRED',
+        'This pending payment needs review before it can be retried.',
+      );
+    }
+
+    const metadata = {
+      firebaseUid: order.userId,
+      orderId: order.id,
+      sellerId: order.sellerId,
+      charityId: order.charityId,
+      productId: order.productId,
+      shippingMethodId: order.shippingOptionId,
+      shippingMethodName: order.shippingOptionName,
+      pickupPointId: order.pickupPoint.id,
+      destinationCountry: order.pickupPoint.country,
+      destinationPostalCode: order.pickupPoint.postalCode,
+      shippingCarrier: order.shippingCarrier,
+      shippingWeight: String(order.shippingWeight),
+      productAmount: String(order.productAmount),
+      shippingFee: String(order.shippingFee),
+      securityFee: String(order.securityFee),
+      totalAmount: String(order.totalAmount),
+    };
+
+    // Timeouts can occur after Stripe creates the intent. Retain the pending
+    // order and replay its frozen arguments with the same idempotency key.
+    return this.paymentRepo.createPaymentIntentForUser(
+      order.totalAmount,
+      metadata,
+      order.stripeCustomerId,
+      order.paymentIntentId,
+    );
+  }
+
+  /** Expiry is a request to reconcile with Stripe, never permission to unlock. */
+  async reconcileExpiredOrders(productId: string): Promise<void> {
+    const orders = await this.orderRepo.getPendingOrdersForProduct(productId);
+    for (const order of orders) {
+      if (
+        !order.paymentExpiresAt ||
+        order.paymentExpiresAt.getTime() > Date.now()
+      )
+        continue;
+      let intentId = order.paymentIntentId;
+      if (!intentId) {
+        // A lost creation response is recoverable only within Stripe's key window.
+        // Frozen arguments ensure recovery cannot create a differently priced intent.
+        const recovered = await this.recoverPayment(order);
+        intentId = recovered.paymentIntentId;
+        await this.orderRepo.attachPaymentIntent(order.id, intentId);
+      }
+      const intent = await stripe.paymentIntents.retrieve(intentId);
+      if (
+        intent.metadata.orderId !== order.id ||
+        intent.metadata.firebaseUid !== order.userId
+      ) {
+        throw new ListingSafetyError(
+          409,
+          'PAYMENT_RECONCILIATION_REQUIRED',
+          'A pending payment needs review.',
+        );
+      }
+      if (intent.status === 'succeeded') {
+        await this.handleSucceededPaymentIntent(intentId);
+      } else if (intent.status !== 'processing') {
+        await this.cancelPaymentIntentForUser(order.userId, intentId);
+      }
+    }
+  }
+
+  async cancelPaymentIntentForUser(
+    firebaseUid: string,
+    paymentIntentId: string,
+  ): Promise<void> {
+    let intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const orderId = intent.metadata.orderId;
+    if (intent.metadata.firebaseUid !== firebaseUid || !orderId) {
+      throw new ListingSafetyError(
+        403,
+        'PAYMENT_NOT_OWNER',
+        'This payment does not belong to your account.',
+      );
+    }
+    const order = await this.orderRepo.getOrderById(orderId);
+    if (
+      !order ||
+      order.userId !== firebaseUid ||
+      order.paymentIntentId !== paymentIntentId ||
+      order.productId !== intent.metadata.productId
+    ) {
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_RECONCILIATION_REQUIRED',
+        'The payment does not match its order.',
+      );
+    }
+    if (intent.status !== 'canceled') {
+      if (intent.status === 'succeeded' || intent.status === 'processing') {
+        throw new ListingSafetyError(
+          409,
+          'PAYMENT_STILL_ACTIONABLE',
+          'The payment has completed or is processing. Finish or check your order.',
+        );
+      }
+      try {
+        intent = await stripe.paymentIntents.cancel(paymentIntentId);
+      } catch {
+        // Confirmation may have raced cancellation, or the response was lost.
+        intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      }
+    }
+    if (intent.status !== 'canceled') {
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_STILL_ACTIONABLE',
+        'Payment cancellation could not be confirmed.',
+      );
+    }
+    await this.orderRepo.releasePendingOrder(orderId, paymentIntentId);
   }
 
   async verifySucceededPaymentIntentForUser(
@@ -217,11 +364,26 @@ export class PaymentService {
       throw new Error('Payment order metadata is incomplete');
     }
 
-    const productAmount = this.parseMetadataInteger(metadata.productAmount, 'productAmount');
-    const shippingFee = this.parseMetadataInteger(metadata.shippingFee, 'shippingFee');
-    const securityFee = this.parseMetadataInteger(metadata.securityFee, 'securityFee');
-    const totalAmount = this.parseMetadataInteger(metadata.totalAmount, 'totalAmount');
-    const shippingWeight = this.parseMetadataInteger(metadata.shippingWeight, 'shippingWeight');
+    const productAmount = this.parseMetadataInteger(
+      metadata.productAmount,
+      'productAmount',
+    );
+    const shippingFee = this.parseMetadataInteger(
+      metadata.shippingFee,
+      'shippingFee',
+    );
+    const securityFee = this.parseMetadataInteger(
+      metadata.securityFee,
+      'securityFee',
+    );
+    const totalAmount = this.parseMetadataInteger(
+      metadata.totalAmount,
+      'totalAmount',
+    );
+    const shippingWeight = this.parseMetadataInteger(
+      metadata.shippingWeight,
+      'shippingWeight',
+    );
 
     if (productAmount + shippingFee + securityFee !== totalAmount) {
       throw new Error('Payment pricing metadata is inconsistent');
@@ -318,13 +480,24 @@ export class PaymentService {
     paymentIntentId: string,
     orderId: string | undefined,
   ): Promise<void> {
-    if (!orderId) {
-      throw new Error('Canceled PaymentIntent is missing its order metadata');
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (
+      !orderId ||
+      intent.metadata.orderId !== orderId ||
+      intent.status !== 'canceled'
+    ) {
+      throw new Error('Payment cancellation is not confirmed for this order');
     }
-    await this.orderRepo.releasePendingOrder(orderId, paymentIntentId, true);
+    await this.cancelPaymentIntentForUser(
+      intent.metadata.firebaseUid,
+      paymentIntentId,
+    );
   }
 
-  private parseMetadataInteger(value: string | undefined, field: string): number {
+  private parseMetadataInteger(
+    value: string | undefined,
+    field: string,
+  ): number {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 0) {
       throw new Error(`Payment metadata ${field} is invalid`);

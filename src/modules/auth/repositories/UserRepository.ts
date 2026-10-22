@@ -1,21 +1,16 @@
+import { ProductRepository } from '../../products/repositories/ProductRepository';
+import {
+  hasPendingPayment,
+  ListingSafetyError,
+} from '../../../shared/utils/listingSafety';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
 
 const DELETED_USER_MARKER = 'deleted_user';
 const DELETED_EMAIL_MARKER = 'deleted@anonymous.invalid';
 const REDACTED_VALUE = 'REDACTED';
 const FIRESTORE_BATCH_LIMIT = 450;
-
-interface StorageFileLike {
-  name: string;
-  delete(): Promise<unknown>;
-}
-
-interface StorageBucketLike {
-  getFiles(options?: { prefix?: string }): Promise<[StorageFileLike[], ...unknown[]]>;
-}
 
 const chunk = <T>(items: T[], size: number): T[][] => {
   const chunks: T[][] = [];
@@ -28,8 +23,6 @@ const chunk = <T>(items: T[], size: number): T[][] => {
 export class UserRepository {
   private db = firestore;
   private collectionName = 'users';
-
-  constructor(private readonly mediaBucket?: StorageBucketLike) {}
 
   async getAll(): Promise<User[]> {
     const snapshot = await this.db.collection(this.collectionName).get();
@@ -193,6 +186,36 @@ export class UserRepository {
     anonymisedShipments: number;
     deletedLikes: number;
   }> {
+    // Serialise deletion against checkout and listing creation. Retain the
+    // tombstone so an already issued token cannot recreate account data.
+    await this.db.runTransaction(async (tx) => {
+      const products = await tx.get(
+        this.db.collection('products').where('userId', '==', firebaseUid),
+      );
+      const buyerOrders = await tx.get(
+        this.db.collection('orders').where('userId', '==', firebaseUid),
+      );
+      const sellerOrders = await Promise.all(
+        products.docs.map((doc) =>
+          tx.get(this.db.collection('orders').where('productId', '==', doc.id)),
+        ),
+      );
+      if (
+        [buyerOrders, ...sellerOrders].some((orders) =>
+          orders.docs.some((doc) => hasPendingPayment(doc.data())),
+        )
+      )
+        throw new ListingSafetyError(
+          409,
+          'ACCOUNT_PAYMENT_PENDING',
+          'Complete or cancel pending payments before deleting your account.',
+        );
+      tx.set(
+        this.db.collection('account_deletions').doc(firebaseUid),
+        { startedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    });
     const userProfilesSnapshot = await this.db
       .collection(this.collectionName)
       .where('id', '==', firebaseUid)
@@ -224,7 +247,7 @@ export class UserRepository {
         .limit(1)
         .get();
 
-      if (relatedOrders.empty) {
+      if (relatedOrders.empty && productDoc.data().hasSales !== true) {
         unsoldProductDocs.push(productDoc);
       } else {
         soldProductDocs.push(productDoc);
@@ -254,9 +277,13 @@ export class UserRepository {
       }
     });
 
+    // Use the same transactional safeguards and durable cleanup as listing deletion.
+    for (const product of unsoldProductDocs) {
+      await new ProductRepository(this.db).changeAvailability(product.id, firebaseUid, 'delete');
+    }
+
     const deleteDocRefs = [
       ...userProfilesSnapshot.docs.map((doc) => doc.ref),
-      ...unsoldProductDocs.map((doc) => doc.ref),
       ...likesSnapshot.docs.map((doc) => doc.ref),
     ];
 
@@ -289,6 +316,8 @@ export class UserRepository {
     for (const doc of soldProductDocs) {
       await doc.ref.update({
         userId: DELETED_USER_MARKER,
+        status: doc.data().number > 0 ? 'unlisted' : 'sold',
+        editVersion: FieldValue.increment(1),
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
@@ -340,8 +369,6 @@ export class UserRepository {
       });
     }
 
-    await this.deleteUserProductMedia(firebaseUid);
-
     return {
       deletedUserProfiles: userProfilesSnapshot.size,
       deletedUnsoldProducts: unsoldProductDocs.length,
@@ -350,33 +377,5 @@ export class UserRepository {
       anonymisedShipments: uniqueShipmentDocs.length,
       deletedLikes: likesSnapshot.size,
     };
-  }
-
-  /** Removes listing uploads, including orphaned files with no Firestore document. */
-  private async deleteUserProductMedia(firebaseUid: string): Promise<void> {
-    try {
-      const bucket = this.mediaBucket ?? getStorage().bucket();
-      const prefixes = [`products/${firebaseUid}/`];
-
-      for (const prefix of prefixes) {
-        const [files] = await bucket.getFiles({ prefix });
-        const results = await Promise.allSettled(files.map((file) => file.delete()));
-        const failedFiles = files.filter((_, index) => results[index].status === 'rejected');
-
-        if (failedFiles.length > 0) {
-          console.error('Account product media cleanup failed', {
-            firebaseUid,
-            prefix,
-            failedFiles: failedFiles.map((file) => file.name),
-            totalFiles: files.length,
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Account product media listing failed', {
-        firebaseUid,
-        error,
-      });
-    }
   }
 }

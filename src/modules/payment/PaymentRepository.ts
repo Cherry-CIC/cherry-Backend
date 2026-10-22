@@ -1,55 +1,61 @@
-const StripeService = require('../../shared/config/stripeConfig');
+import {
+  stripe,
+  addNewCustomer,
+  createEphemeralKey,
+} from '../../shared/config/stripeConfig';
+import { ListingSafetyError } from '../../shared/utils/listingSafety';
 
 export class PaymentRepository {
-  /**
-   * Creates a Stripe PaymentIntent for the given user.
-   * Checks if a Stripe customer already exists for the provided email.
-   * If found, reuses that customer; otherwise creates a new one.
-   *
-   * @param email - Customer email address.
-   * @param amount - Amount in pence (e.g., 3000 = £30.00).
-   * @param currency - Currency code (e.g., usd).
-   * @returns An object containing the client secret, ephemeral key, customer ID, and publishable key.
-   */
+  async getOrCreateCustomerId(email: string): Promise<string> {
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    return customers.data[0]?.id ?? (await addNewCustomer(email)).id;
+  }
+
+  /** All creation arguments come from the durable pending order. */
   async createPaymentIntentForUser(
-    email: string,
     totalAmount: number,
     metadata: Record<string, string>,
+    customerId: string,
+    existingPaymentIntentId?: string,
   ) {
-    // Attempt to find an existing customer by email
-    let customer: any;
-    try {
-      const listResult = await StripeService.stripe.customers.list({
-        email,
-        limit: 1,
-      });
-      if (listResult.data && listResult.data.length > 0) {
-        customer = listResult.data[0];
-      }
-    } catch (err) {
-      // If listing fails, fallback to creating a new customer
+    const paymentIntent = existingPaymentIntentId
+      ? await stripe.paymentIntents.retrieve(existingPaymentIntentId)
+      : await stripe.paymentIntents.create(
+          {
+            amount: totalAmount,
+            currency: 'gbp',
+            customer: customerId,
+            metadata,
+            capture_method: 'automatic',
+            automatic_payment_methods: { enabled: true },
+          },
+          { idempotencyKey: `checkout-order-${metadata.orderId}` },
+        );
+    const actualCustomer =
+      typeof paymentIntent.customer === 'string'
+        ? paymentIntent.customer
+        : paymentIntent.customer?.id;
+    if (
+      paymentIntent.amount !== totalAmount ||
+      paymentIntent.currency !== 'gbp' ||
+      actualCustomer !== customerId ||
+      Object.entries(metadata).some(
+        ([key, value]) => paymentIntent.metadata[key] !== value,
+      )
+    ) {
+      throw new ListingSafetyError(
+        409,
+        'PAYMENT_RECONCILIATION_REQUIRED',
+        'The existing payment needs review before checkout can continue.',
+      );
     }
-
-    // If no existing customer, create a new one
-    if (!customer) {
-      customer = await StripeService.addNewCustomer(email);
-    }
-
-    // Create an Ephemeral Key (useful for mobile SDKs)
-    const ephemeralKey = await StripeService.createEphemeralKey(customer.id);
-
-    const paymentIntent = await StripeService.createPaymentIntent(
-      totalAmount,
-      'gbp',
-      customer.id,
-      metadata,
-    );
-
+    const ephemeralKey = await createEphemeralKey(customerId);
     return {
       paymentIntentId: paymentIntent.id,
+      paymentStatus: paymentIntent.status,
       clientSecret: paymentIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
-      customer: customer.id,
+      customer: customerId,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
     };
   }

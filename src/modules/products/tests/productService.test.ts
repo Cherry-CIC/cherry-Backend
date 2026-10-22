@@ -587,54 +587,8 @@ describe('ProductService pagination', () => {
       postageSizeRepo,
     );
     await expect(
-      service.updateProduct(
-        'product-1',
-        { number: 0 } as any,
-        'user-1',
-      ),
+      service.updateProduct('product-1', { number: 0 } as any, 'user-1'),
     ).rejects.toMatchObject({ code: 'LISTING_VALIDATION_FAILED' });
-  });
-
-  it('deletes removed owned media after a successful listing edit', async () => {
-    const existing = createProduct('product-1', '2026-07-13T10:00:00.000Z');
-    existing.product_images = [
-      'https://firebasestorage.googleapis.com/v0/b/cherry.appspot.com/o/products%2Fuser-1%2Fkeep.jpg?alt=media',
-      'https://firebasestorage.googleapis.com/v0/b/cherry.appspot.com/o/products%2Fuser-1%2Fremove.jpg?alt=media',
-      'https://example.com/external.jpg',
-    ];
-    const updated = { ...existing, product_images: [existing.product_images[0]] };
-    const update = jest.fn().mockResolvedValue(updated);
-    const deleteCalls: string[] = [];
-    const bucket = {
-      name: 'cherry.appspot.com',
-      file: jest.fn((path: string) => ({
-        delete: jest.fn().mockImplementation(async () => {
-          deleteCalls.push(path);
-        }),
-      })),
-    };
-    const service = new ProductService(
-      { getById: jest.fn().mockResolvedValue(existing), update } as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-      bucket,
-    );
-
-    await expect(
-      service.updateProduct(
-        'product-1',
-        { product_images: [existing.product_images[0]] },
-        'user-1',
-      ),
-    ).resolves.toEqual(updated);
-    expect(update).toHaveBeenCalledWith(
-      'product-1',
-      { product_images: [existing.product_images[0]] },
-      'user-1',
-    );
-    expect(deleteCalls).toEqual(['products/user-1/remove.jpg']);
   });
 
   it.each(['active', 'unlisted'] as const)(
@@ -659,62 +613,118 @@ describe('ProductService pagination', () => {
     },
   );
 
-  it('deletes owned listing media after a safe product deletion', async () => {
-    const product = createProduct('product-1', '2026-07-13T10:00:00.000Z');
-    product.product_images = [
-      'https://firebasestorage.googleapis.com/v0/b/cherry.appspot.com/o/products%2Fuser-1%2Fold.jpg?alt=media',
-      'https://example.com/not-owned.jpg',
-    ];
-    const deleteCalls: string[] = [];
-    const productRepo = {
-      getById: jest.fn().mockResolvedValue(product),
-      changeAvailability: jest.fn().mockResolvedValue(null),
-    };
-    const bucket = {
-      name: 'cherry.appspot.com',
-      file: jest.fn((path: string) => ({
-        delete: jest.fn().mockImplementation(async () => {
-          deleteCalls.push(path);
-        }),
-      })),
-    };
+  it.each([false, true])('delegates deletion without accessing Storage (failure=%s)', async (fails) => {
+    const getStorage = jest.spyOn(require('firebase-admin/storage'), 'getStorage');
+    const changeAvailability = fails
+      ? jest.fn().mockRejectedValue(new Error('Payment pending'))
+      : jest.fn().mockResolvedValue(null);
     const service = new ProductService(
-      productRepo as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-      bucket,
+      { changeAvailability } as any,
+      productLikeRepo, categoryRepo, charityRepo, postageSizeRepo,
     );
-
-    await expect(service.deleteProduct('product-1', 'user-1')).resolves.toBe(true);
-    expect(productRepo.changeAvailability).toHaveBeenCalledWith(
-      'product-1',
-      'user-1',
-      'delete',
-    );
-    expect(deleteCalls).toEqual([
-      'products/user-1/old.jpg',
-    ]);
+    try {
+      const deletion = service.deleteProduct('product-1', 'user-1');
+      if (fails) await expect(deletion).rejects.toThrow('Payment pending');
+      else await expect(deletion).resolves.toBe(true);
+      expect(changeAvailability).toHaveBeenCalledWith('product-1', 'user-1', 'delete');
+      expect(getStorage).not.toHaveBeenCalled();
+    } finally {
+      getStorage.mockRestore();
+    }
   });
 
-  it('does not delete media when the product deletion fails', async () => {
-    const product = createProduct('product-1', '2026-07-13T10:00:00.000Z');
-    const productRepo = {
-      getById: jest.fn().mockResolvedValue(product),
-      changeAvailability: jest.fn().mockRejectedValue(new Error('Payment pending')),
-    };
-    const bucket = { file: jest.fn() };
-    const service = new ProductService(
-      productRepo as any,
-      productLikeRepo,
-      categoryRepo,
-      charityRepo,
-      postageSizeRepo,
-      bucket,
-    );
+});
 
-    await expect(service.deleteProduct('product-1', 'user-1')).rejects.toThrow('Payment pending');
-    expect(bucket.file).not.toHaveBeenCalled();
+describe('listing edit rollout and media boundary', () => {
+  const enabled = process.env.LISTING_EDIT_ENABLED;
+  const existing = createProduct('product-1', '2026-01-01');
+  const getById = jest.fn();
+  const update = jest.fn();
+  const validatePhotos = jest.fn();
+  const service = new ProductService(
+    { getById, update } as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    { validatePhotos } as any,
+  );
+  beforeEach(() => {
+    getById.mockReset().mockResolvedValue(existing);
+    update.mockReset().mockResolvedValue({ ...existing, editVersion: 1 });
+    validatePhotos.mockReset().mockResolvedValue(undefined);
+    process.env.LISTING_EDIT_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (enabled === undefined) delete process.env.LISTING_EDIT_ENABLED;
+    else process.env.LISTING_EDIT_ENABLED = enabled;
+  });
+  test('editing stays disabled until explicitly enabled', async () => {
+    delete process.env.LISTING_EDIT_ENABLED;
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'user-1',
+      ),
+    ).rejects.toHaveProperty('code', 'LISTING_EDIT_DISABLED');
+    expect(update).not.toHaveBeenCalled();
+    expect(validatePhotos).not.toHaveBeenCalled();
+  });
+  test('a text-only edit still validates retained photos before writing', async () => {
+    await service.updateProduct(
+      'product-1',
+      { expectedEditVersion: 0, name: 'New title' },
+      'user-1',
+    );
+    expect(validatePhotos).toHaveBeenCalledWith(
+      existing.product_images,
+      'user-1',
+    );
+    expect(update).toHaveBeenCalledWith(
+      'product-1',
+      { expectedEditVersion: 0, name: 'New title' },
+      'user-1',
+    );
+  });
+  test('unauthorised edits cannot read or validate storage', async () => {
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'other',
+      ),
+    ).rejects.toHaveProperty('code', 'LISTING_NOT_OWNER');
+    expect(validatePhotos).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+  test('replacing photos validates the new photos without immediately deleting old files', async () => {
+    const getStorage = jest.spyOn(require('firebase-admin/storage'), 'getStorage');
+    const product_images = ['https://example.com/replacement.jpg'];
+    try {
+      await service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, product_images },
+        'user-1',
+      );
+      expect(validatePhotos).toHaveBeenCalledWith(product_images, 'user-1');
+      expect(update).toHaveBeenCalledWith(
+        'product-1', { expectedEditVersion: 0, product_images }, 'user-1',
+      );
+      expect(getStorage).not.toHaveBeenCalled();
+    } finally {
+      getStorage.mockRestore();
+    }
+  });
+  test('unverifiable media prevents an otherwise valid edit', async () => {
+    validatePhotos.mockRejectedValue(new Error('Unverified photo'));
+    await expect(
+      service.updateProduct(
+        'product-1',
+        { expectedEditVersion: 0, name: 'New title' },
+        'user-1',
+      ),
+    ).rejects.toThrow('Unverified photo');
+    expect(update).not.toHaveBeenCalled();
   });
 });

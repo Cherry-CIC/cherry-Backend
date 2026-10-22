@@ -2,11 +2,16 @@ import { initializeApp, cert } from 'firebase-admin/app';
 import * as admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp as initializeClientApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { connectAuthEmulator, getAuth } from 'firebase/auth';
+import { localFirebaseEmulators } from './firebaseEmulators';
+
+const emulators = localFirebaseEmulators();
 
 // Firebase client SDK config (used for auth on the client side)
 const firebaseClientConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
+  apiKey:
+    process.env.FIREBASE_API_KEY ||
+    (emulators ? 'local-emulator-key' : undefined),
   projectId: process.env.FIREBASE_PROJECT_ID,
   // authDomain: process.env.FIREBASE_AUTH_DOMAIN,
   // storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
@@ -16,7 +21,16 @@ const firebaseClientConfig = {
 
 // Initialise client app (for client‑side Auth utilities)
 const clientApp = initializeClientApp(firebaseClientConfig);
-if (process.env.NODE_ENV === 'production') {
+if (emulators) {
+  if (!process.env.FIREBASE_PROJECT_ID)
+    throw new Error('FIREBASE_PROJECT_ID is required for local emulators.');
+  if (!admin.apps.length) {
+    initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
+  }
+} else if (process.env.NODE_ENV === 'production') {
   // In Cloud Run, use Application Default Credentials (ADC)
   initializeApp({
     projectId: process.env.FIREBASE_PROJECT_ID,
@@ -49,4 +63,5 @@ if (process.env.NODE_ENV === 'production') {
 // Export commonly used Firebase objects
 export const firestore = getFirestore();
 export const clientAuth = getAuth(clientApp);
+if (emulators) connectAuthEmulator(clientAuth, `http://${emulators.authHost}`);
 export { admin };

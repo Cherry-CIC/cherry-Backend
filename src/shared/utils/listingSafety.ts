@@ -11,6 +11,29 @@ export class ListingSafetyError extends Error {
   }
 }
 
+/** Legacy listings start at zero. Malformed stored versions are never writable. */
+export function listingEditVersion(data: { editVersion?: unknown }): number {
+  if (data.editVersion === undefined) return 0;
+  if (
+    typeof data.editVersion !== 'number' ||
+    !Number.isSafeInteger(data.editVersion) ||
+    data.editVersion < 0
+  )
+    throw new ListingSafetyError(
+      409,
+      'LISTING_NOT_EDITABLE',
+      'This listing needs to be checked before it can be changed.',
+    );
+  return data.editVersion;
+}
+
+export function hasPendingPayment(data: {
+  status?: unknown;
+  reservationActive?: unknown;
+}): boolean {
+  return data.status === 'pending_payment' || data.reservationActive === true;
+}
+
 export function sendListingSafetyError(res: Response, error: unknown): boolean {
   if (!(error instanceof ListingSafetyError)) return false;
   res.status(error.status).json({
@@ -29,7 +52,17 @@ export function exposedListing<T extends object>(data: T): T {
   if (result.status === undefined && typeof result.number === 'number') {
     result.status = result.number > 0 ? 'active' : 'sold';
   }
-  for (const key of ['hasSales', 'hasBeenEdited'])
+  try {
+    result.editVersion = listingEditVersion(result);
+  } catch {
+    delete result.editVersion;
+  }
+  for (const key of [
+    'hasSales',
+    'hasBeenEdited',
+    'reportRevision',
+    'retentionHold',
+  ])
     delete result[key];
   return result as T;
 }
@@ -47,35 +80,4 @@ export function assertOwner(data: { userId?: unknown }, uid: string): void {
       'LISTING_NOT_OWNER',
       'You can only change your own listings.',
     );
-}
-
-export function assertOwnedProductImages(images: string[], uid: string): void {
-  const prefix = `products/${uid}/`;
-
-  for (const image of images) {
-    try {
-      const url = new URL(image);
-      let objectPath: string | undefined;
-
-      if (url.protocol === 'gs:') {
-        objectPath = decodeURIComponent(url.pathname.slice(1));
-      } else if (url.hostname === 'firebasestorage.googleapis.com') {
-        const match = url.pathname.match(/^\/v0\/b\/[^/]+\/o\/(.+)$/);
-        if (match) objectPath = decodeURIComponent(match[1]);
-      } else if (url.hostname === 'storage.googleapis.com') {
-        const parts = url.pathname.split('/').filter(Boolean);
-        if (parts.length > 1) {
-          objectPath = decodeURIComponent(parts.slice(1).join('/'));
-        }
-      }
-
-      if (!objectPath || !objectPath.startsWith(prefix)) throw new Error();
-    } catch {
-      throw new ListingSafetyError(
-        400,
-        'LISTING_MEDIA_NOT_OWNED',
-        'Listing images must belong to the authenticated seller.',
-      );
-    }
-  }
 }

@@ -27,6 +27,11 @@ const pickupPointSchema = Joi.object({
 
 export const createPaymentIntentValidator = Joi.object({
   productId: Joi.string().trim().required(),
+  expectedEditVersion: Joi.number()
+    .integer()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER - 1)
+    .strict(),
   shippingMethodId: Joi.string().trim().required(),
   pickupPointId: Joi.string().trim().pattern(/^\d+$/).required(),
   country: Joi.string().length(2).uppercase().required(),
@@ -37,4 +42,12 @@ export const createPaymentIntentValidator = Joi.object({
     telephone: Joi.string().trim().required(),
   }).required(),
   pickupPoint: pickupPointSchema.required(),
+});
+
+export const cancelPaymentIntentValidator = Joi.object({
+  paymentIntentId: Joi.string()
+    .trim()
+    .pattern(/^pi_[A-Za-z0-9_]+$/)
+    .max(255)
+    .required(),
 });

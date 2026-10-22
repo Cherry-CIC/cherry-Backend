@@ -49,15 +49,16 @@ test('updates an allowed field and preserves sparse request semantics', async ()
   const result = await request(app)
     .put('/api/products/listing')
     .set('Authorization', 'Bearer seller')
-    .send({ name: ' New title ' });
+    .send({ expectedEditVersion: 0, name: ' New title ' });
   expect(result.status).toBe(200);
   expect(result.body.data).toEqual({
     id: 'listing',
     price: 10,
+    editVersion: 0,
   });
   expect(mockUpdate).toHaveBeenCalledWith(
     'listing',
-    { name: 'New title' },
+    { expectedEditVersion: 0, name: 'New title' },
     'seller',
   );
 });
@@ -66,13 +67,13 @@ test('unauthenticated and forbidden requests never reach the service', async () 
     (
       await request(app)
         .put('/api/products/listing')
-        .send({ name: 'Title' })
+        .send({ expectedEditVersion: 0, name: 'Title' })
     ).status,
   ).toBe(401);
   const result = await request(app)
     .put('/api/products/listing')
     .set('Authorization', 'Bearer seller')
-    .send({ name: 'Title', charityId: 'forbidden' });
+    .send({ expectedEditVersion: 0, name: 'Title', charityId: 'forbidden' });
   expect(result.status).toBe(400);
   expect(result.body.code).toBe('LISTING_VALIDATION_FAILED');
   expect(mockUpdate).not.toHaveBeenCalled();
@@ -87,7 +88,7 @@ test.each([
   const result = await request(app)
     .put('/api/products/listing')
     .set('Authorization', 'Bearer seller')
-    .send({ name: 'Title' });
+    .send({ expectedEditVersion: 0, name: 'Title' });
   expect(result.status).toBe(status);
   expect(result.body.code).toBe(code);
 });

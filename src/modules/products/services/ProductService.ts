@@ -1,4 +1,5 @@
 import { parseListingEdit } from '../validators/productValidator';
+import { ListingMediaService } from './ListingMediaService';
 import {
   assertOwner,
   ListingSafetyError,
@@ -19,19 +20,9 @@ import { CategoryRepository } from '../../categories/repositories/CategoryReposi
 import { CharityRepository } from '../../charities/repositories/CharityRepository';
 import { PostageSize } from '../../postage-sizes/model/PostageSize';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
-import { getStorage } from 'firebase-admin/storage';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_PRODUCT_PAGE_SIZE = 50;
-
-interface StorageFileLike {
-  delete(): Promise<unknown>;
-}
-
-interface StorageBucketLike {
-  name?: string;
-  file(path: string): StorageFileLike;
-}
 
 export class ProductService {
   constructor(
@@ -40,7 +31,7 @@ export class ProductService {
     private categoryRepo: CategoryRepository,
     private charityRepo: CharityRepository,
     private postageSizeRepo: PostageSizeRepository,
-    private mediaBucket?: StorageBucketLike,
+    private mediaService = new ListingMediaService(),
   ) {}
 
   async getAllProducts(): Promise<Product[]> {
@@ -173,6 +164,8 @@ export class ProductService {
       data.charityId,
       data.postageSize,
     );
+    if (process.env.LISTING_EDIT_ENABLED === 'true')
+      await this.mediaService.validatePhotos(data.product_images, data.userId);
     const product: Product = {
       ...data,
       likes: data.likes || 0,
@@ -304,6 +297,12 @@ export class ProductService {
     uid: string,
   ): Promise<Product> {
     const validated = parseListingEdit(data);
+    if (process.env.LISTING_EDIT_ENABLED !== 'true')
+      throw new ListingSafetyError(
+        503,
+        'LISTING_EDIT_DISABLED',
+        'Listing editing is not available yet.',
+      );
     const existing = await this.productRepo.getById(id);
     if (!existing)
       throw new ListingSafetyError(
@@ -312,93 +311,16 @@ export class ProductService {
         'Listing not found.',
       );
     assertOwner(existing, uid);
-    const updated = await this.productRepo.update(id, validated, uid);
-    if (validated.product_images) {
-      const retainedImages = new Set(validated.product_images);
-      const removedImages = existing.product_images.filter(
-        (image) => !retainedImages.has(image),
-      );
-      await this.deleteProductMedia(id, removedImages, uid);
-    }
-    return updated;
+    await this.mediaService.validatePhotos(
+      validated.product_images ?? existing.product_images,
+      uid,
+    );
+    return this.productRepo.update(id, validated, uid);
   }
 
   async deleteProduct(id: string, uid: string): Promise<boolean> {
-    const product = await this.productRepo.getById(id);
     await this.productRepo.changeAvailability(id, uid, 'delete');
-    if (product) {
-      await this.deleteProductMedia(id, product.product_images, uid);
-    }
     return true;
-  }
-
-  private async deleteProductMedia(
-    productId: string,
-    imageUrls: string[],
-    uid: string,
-  ): Promise<void> {
-    const configuredBucket = this.mediaBucket;
-    const paths = [...new Set(
-      imageUrls
-        .map((url) => this.storagePathForOwnedMedia(url, uid, configuredBucket?.name))
-        .filter((path): path is string => path !== null),
-    )];
-    if (paths.length === 0) return;
-
-    const bucket = configuredBucket ?? (getStorage().bucket() as StorageBucketLike);
-
-    const results = await Promise.allSettled(
-      paths.map((path) => bucket.file(path).delete()),
-    );
-    const failures = results.filter((result) => result.status === 'rejected');
-    if (failures.length > 0) {
-      console.error('Product media cleanup failed', {
-        productId,
-        failedFiles: failures.length,
-        totalFiles: paths.length,
-      });
-    }
-  }
-
-  private storagePathForOwnedMedia(
-    value: string,
-    uid: string,
-    bucketName?: string,
-  ): string | null {
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch {
-      return null;
-    }
-
-    let urlBucket: string | undefined;
-    let objectPath: string | undefined;
-    if (parsed.protocol === 'gs:') {
-      urlBucket = parsed.hostname;
-      objectPath = decodeURIComponent(parsed.pathname.slice(1));
-    } else if (parsed.hostname === 'firebasestorage.googleapis.com') {
-      const match = parsed.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
-      if (match) {
-        urlBucket = decodeURIComponent(match[1]);
-        objectPath = decodeURIComponent(match[2]);
-      }
-    } else if (parsed.hostname === 'storage.googleapis.com') {
-      const parts = parsed.pathname.split('/').filter(Boolean);
-      if (parts.length > 1) {
-        urlBucket = decodeURIComponent(parts[0]);
-        objectPath = decodeURIComponent(parts.slice(1).join('/'));
-      }
-    }
-
-    if (!objectPath || (bucketName && urlBucket && urlBucket !== bucketName)) {
-      return null;
-    }
-
-    const allowedPrefixes = [`products/${uid}/`];
-    return allowedPrefixes.some((prefix) => objectPath.startsWith(prefix))
-      ? objectPath
-      : null;
   }
 
   async unlistProduct(id: string, uid: string): Promise<Product | null> {
@@ -841,6 +763,7 @@ export interface CreateProductData {
 }
 
 export interface UpdateProductData {
+  expectedEditVersion: number;
   name?: string;
   description?: string;
   categoryId?: string;
