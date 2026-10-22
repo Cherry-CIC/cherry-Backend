@@ -23,7 +23,6 @@ export class ListingCleanupStorage implements CleanupStorage {
     const cutoff = Date.parse(this.env.LISTING_MEDIA_POLICY_START ?? '');
     const [namespace, owner, filename, extra] = photo.name.split('/');
     if (
-      this.env.LISTING_CLEANUP_STORAGE_ENABLED !== 'true' ||
       this.env.LISTING_CLEANUP_REFERENCES_VERIFIED !== 'true' ||
       this.env.LISTING_MEDIA_RULES_VERIFIED !== 'true' ||
       photo.bucket !== this.env.LISTING_MEDIA_BUCKET ||
@@ -57,7 +56,6 @@ export class ListingCleanupStorage implements CleanupStorage {
 
   async remove(photo: MediaObject, generation: string): Promise<void> {
     if (
-      this.env.LISTING_CLEANUP_STORAGE_ENABLED !== 'true' ||
       this.env.LISTING_CLEANUP_REFERENCES_VERIFIED !== 'true' ||
       this.env.LISTING_MEDIA_RULES_VERIFIED !== 'true' ||
       photo.bucket !== this.env.LISTING_MEDIA_BUCKET ||

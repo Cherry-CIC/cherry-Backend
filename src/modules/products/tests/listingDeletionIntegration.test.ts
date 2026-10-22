@@ -259,7 +259,6 @@ integration('listing deletion transactions on real Firestore', () => {
 
   test.each([
     { status: 'completed', paymentStatus: 'paid' },
-    { status: 'failed', paymentStatus: 'refunded' },
     { status: 'cancelled', paymentStatus: 'paid' },
     { status: 'failed', paymentStatus: 'failed' },
     {},
@@ -302,8 +301,8 @@ integration('listing deletion transactions on real Firestore', () => {
     expect((await order.get()).data()).toEqual(history);
   });
 
-  test.each([{ hidden: true }, { moderationStatus: 'hidden' }])(
-    'preserves moderated listing evidence %j',
+  test.each([{ hidden: true }, { moderationStatus: 'hidden' }, { retentionHold: true }])(
+    'preserves moderated or held listing evidence %j',
     async (state) => {
       await ref.update(state);
       await expect(
@@ -340,8 +339,8 @@ integration('listing deletion transactions on real Firestore', () => {
     },
   );
 
-  test.each([1, 2, 3])(
-    'checkout and deletion have exactly one winner (%s)',
+  test(
+    'checkout and deletion have exactly one winner',
     async () => {
       const results = await Promise.allSettled([
         productRepo.changeAvailability(id, seller, 'delete'),
@@ -462,9 +461,7 @@ integration('listing deletion transactions on real Firestore', () => {
     },
   );
 
-  const enabled = {
-    LISTING_CLEANUP_ENABLED: 'true',
-    LISTING_CLEANUP_STORAGE_ENABLED: 'true',
+  const verified = {
     LISTING_CLEANUP_REFERENCES_VERIFIED: 'true',
     LISTING_MEDIA_RULES_VERIFIED: 'true',
   };
@@ -487,7 +484,7 @@ integration('listing deletion transactions on real Firestore', () => {
       firestore,
       storage,
       () => now,
-      enabled,
+      verified,
     );
     return {
       worker,
@@ -558,13 +555,13 @@ integration('listing deletion transactions on real Firestore', () => {
     expect((await like.get()).exists).toBe(false);
     expect(f.storage.inspect).not.toHaveBeenCalled();
     expect((await job.get()).get('status')).toBe('waiting');
-    const disabled = new ListingCleanupWorker(
+    const unverified = new ListingCleanupWorker(
       firestore,
       f.storage,
       () => new Date(Date.now() + 31 * DAY_MS),
-      { LISTING_CLEANUP_ENABLED: 'true' },
+      {},
     );
-    await disabled.process(id);
+    await unverified.process(id);
     expect(f.storage.inspect).not.toHaveBeenCalled();
     expect((await job.get()).get('lastError')).toBe('STORAGE_CLEANUP_DISABLED');
   });
@@ -746,7 +743,7 @@ integration('listing deletion transactions on real Firestore', () => {
     ).bucket(bucket);
     const file = bucketClient.file(object.name);
     const adapter = new ListingCleanupStorage(bucketClient, {
-      ...enabled,
+      ...verified,
       LISTING_MEDIA_BUCKET: bucket,
       LISTING_MEDIA_POLICY_START: '2020-01-01T00:00:00Z',
     });

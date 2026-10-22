@@ -43,8 +43,6 @@ export class ListingCleanupWorker {
       .orderBy('nextAttemptAt')
       .limit(limit)
       .get();
-    if (apply && this.env.LISTING_CLEANUP_ENABLED !== 'true')
-      throw new Error('LISTING_CLEANUP_ENABLED is not true.');
     if (!apply) return { inspected: due.size, processed: 0 };
     let processed = 0;
     for (const doc of due.docs) if (await this.process(doc.id)) processed++;
@@ -52,8 +50,6 @@ export class ListingCleanupWorker {
   }
 
   async process(id: string): Promise<boolean> {
-    if (this.env.LISTING_CLEANUP_ENABLED !== 'true')
-      throw new Error('LISTING_CLEANUP_ENABLED is not true.');
     const ref = this.db.collection(DELETION_JOBS).doc(id);
     const token = randomUUID();
     const job = await this.db.runTransaction(async (tx) => {
@@ -146,8 +142,7 @@ export class ListingCleanupWorker {
       }
       if (
         photos.length &&
-        (this.env.LISTING_CLEANUP_STORAGE_ENABLED !== 'true' ||
-          this.env.LISTING_CLEANUP_REFERENCES_VERIFIED !== 'true' ||
+        (this.env.LISTING_CLEANUP_REFERENCES_VERIFIED !== 'true' ||
           this.env.LISTING_MEDIA_RULES_VERIFIED !== 'true')
       ) {
         await this.finish(ref, token, {

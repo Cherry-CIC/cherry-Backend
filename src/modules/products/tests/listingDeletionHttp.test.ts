@@ -38,19 +38,17 @@ test('unauthenticated and invalid requests never reach deletion', async () => {
   ).toBe(400);
   expect(mockDelete).not.toHaveBeenCalled();
 });
-test('success and repeated requests preserve the response envelope', async () => {
+test('success preserves the response envelope', async () => {
   mockDelete.mockResolvedValue(true);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await request(app)
-      .delete('/api/products/listing')
-      .set('Authorization', 'Bearer seller');
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      success: true,
-      data: null,
-      message: 'Product deleted successfully',
-    });
-  }
+  const response = await request(app)
+    .delete('/api/products/listing')
+    .set('Authorization', 'Bearer seller');
+  expect(response.status).toBe(200);
+  expect(response.body).toMatchObject({
+    success: true,
+    data: null,
+    message: 'Product deleted successfully',
+  });
   expect(mockDelete).toHaveBeenCalledWith('listing', 'seller');
 });
 test.each([

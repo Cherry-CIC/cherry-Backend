@@ -27,8 +27,6 @@ export function cleanupArguments(args: string[], env: NodeJS.ProcessEnv) {
       'Use isolated emulators or an explicitly configured production job.',
     );
   const apply = values.has('--apply');
-  if (apply && env.LISTING_CLEANUP_ENABLED !== 'true')
-    throw new Error('LISTING_CLEANUP_ENABLED is not true.');
   const limit = Number(values.get('--limit') ?? 20);
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
     throw new Error('Use a limit between 1 and 100.');

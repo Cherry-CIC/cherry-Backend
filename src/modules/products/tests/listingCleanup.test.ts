@@ -50,7 +50,6 @@ test('manifest deduplicates aliases, drops tokens and counts uncertain photos', 
 });
 
 const config = {
-  LISTING_CLEANUP_STORAGE_ENABLED: 'true',
   LISTING_CLEANUP_REFERENCES_VERIFIED: 'true',
   LISTING_MEDIA_RULES_VERIFIED: 'true',
   LISTING_MEDIA_BUCKET: photo.bucket,
@@ -81,10 +80,9 @@ test('deletes only the inspected object generation', async () => {
 });
 
 test.each([
-  'LISTING_CLEANUP_STORAGE_ENABLED',
   'LISTING_CLEANUP_REFERENCES_VERIFIED',
   'LISTING_MEDIA_RULES_VERIFIED',
-])('disabled %s prevents Storage access', async (key) => {
+])('unverified %s prevents Storage access', async (key) => {
   const { storage, file } = storageFixture({ ...config, [key]: 'false' });
   expect(await storage.inspect(photo, 'seller')).toBe('review');
   await expect(storage.remove(photo, '123')).rejects.toThrow(
@@ -141,9 +139,6 @@ test('worker CLI defaults to read-only and requires exact explicit target and wr
   ).toMatchObject({ apply: false, limit: 20 });
   expect(() => cleanupArguments(['--project', 'wrong'], localEnv)).toThrow();
   expect(() =>
-    cleanupArguments(['--project', 'demo-cleanup', '--apply'], localEnv),
-  ).toThrow();
-  expect(() =>
     cleanupArguments(['--project', 'demo-cleanup', '--limit', '101'], localEnv),
   ).toThrow();
   expect(() =>
@@ -156,9 +151,6 @@ test('worker CLI defaults to read-only and requires exact explicit target and wr
     }),
   ).toThrow();
   expect(
-    cleanupArguments(['--project', 'demo-cleanup', '--apply'], {
-      ...localEnv,
-      LISTING_CLEANUP_ENABLED: 'true',
-    }).apply,
+    cleanupArguments(['--project', 'demo-cleanup', '--apply'], localEnv).apply,
   ).toBe(true);
 });
