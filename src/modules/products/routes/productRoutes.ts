@@ -5,6 +5,7 @@ import {
   getProductById,
   getProductWithDetails,
   getAllProductsWithDetails,
+  getRecommendedProducts,
   getMyLikedProducts,
   getMyProducts,
   updateProduct,
@@ -267,6 +268,90 @@ router.get(
   authMiddleware,
   validateRequest(productListQuerySchema, 'query'),
   getAllProductsWithDetails,
+);
+
+/**
+ * @swagger
+ * /api/products/recommended:
+ *   get:
+ *     summary: Get the logged-in user's recommended feed
+ *     description: |
+ *       Products for sale, sorted by how well they match the user's likes and
+ *       purchases (a purchase counts 3 times as much as a like). The user's own
+ *       listings, items they already liked or bought, and items from sellers
+ *       they blocked are left out. Every 5th item comes from a category outside
+ *       their usual taste. Users with no likes or purchases get newest first.
+ *       The order is worked out on the first page and stays the same until a
+ *       request without a cursor. Only limit and cursor are used.
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         description: The nextCursor from the previous page. Leave it out to start again.
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Recommended products, in the same shape as /api/products/with-details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Recommended products fetched successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/Product'
+ *                           - type: object
+ *                             properties:
+ *                               category:
+ *                                 $ref: '#/components/schemas/Category'
+ *                               charity:
+ *                                 $ref: '#/components/schemas/Charity'
+ *                               postageSizeDetails:
+ *                                 $ref: '#/components/schemas/PostageSize'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
+ *       400:
+ *         description: Invalid cursor or query
+ *       401:
+ *         description: Missing or invalid login token
+ *       500:
+ *         description: Server error
+ */
+router.get(
+  '/recommended',
+  authMiddleware,
+  validateRequest(productListQuerySchema, 'query'),
+  getRecommendedProducts,
 );
 
 router.get(

@@ -1,12 +1,18 @@
 const mockGetProductService = jest.fn();
+const mockGetRecommendationService = jest.fn();
 
 jest.mock('../services/ServiceFactory', () => ({
   ServiceFactory: {
     getProductService: mockGetProductService,
+    getRecommendationService: mockGetRecommendationService,
   },
 }));
 
-import { relistProduct, unlistProduct } from '../controllers/productController';
+import {
+  getRecommendedProducts,
+  relistProduct,
+  unlistProduct,
+} from '../controllers/productController';
 
 const createResponse = () => {
   const res: any = {};
@@ -137,4 +143,44 @@ describe('productController listing status actions', () => {
 
     expect(res.status).toHaveBeenCalledWith(409);
   });
+});
+
+describe('productController.getRecommendedProducts', () => {
+  const recommendationService = { getRecommendedPage: jest.fn() };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetRecommendationService.mockReturnValue(recommendationService);
+  });
+
+  it("returns the user's recommended page in the usual shape", async () => {
+    recommendationService.getRecommendedPage.mockResolvedValue({
+      items: [{ id: 'product-1', price: 5 }],
+      limit: 20,
+      nextCursor: 'eyJwb3NpdGlvbiI6MjB9',
+      hasMore: true,
+    });
+    const req: any = { user: { uid: 'buyer-1' }, query: { limit: 20 } };
+    const res = createResponse();
+
+    await getRecommendedProducts(req, res);
+
+    expect(recommendationService.getRecommendedPage).toHaveBeenCalledWith(
+      'buyer-1',
+      { limit: 20 },
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: { products: [expect.objectContaining({ id: 'product-1' })] },
+        meta: {
+          limit: 20,
+          nextCursor: 'eyJwb3NpdGlvbiI6MjB9',
+          hasMore: true,
+        },
+      }),
+    );
+  });
+
 });
