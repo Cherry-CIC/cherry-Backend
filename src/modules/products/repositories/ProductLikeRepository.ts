@@ -131,6 +131,30 @@ export class ProductLikeRepository {
         };
     }
 
+    // The ids of every product a user has liked, newest like first, for the
+    // recommended feed. select() asks Firestore for just these two fields.
+    // Sorting here, not in the query, means Firestore needs no extra index.
+    async getLikedProductIds(userId: string): Promise<string[]> {
+        const snapshot = await this.db
+            .collection(this.likesCollection)
+            .where('userId', '==', userId)
+            .select('productId', 'createdAt')
+            .get();
+
+        return snapshot.docs
+            .map((doc) => {
+                const likedAt = doc.get('createdAt');
+                return {
+                    productId: doc.get('productId'),
+                    likedAt: likedAt instanceof Timestamp ? likedAt.toMillis() : 0,
+                };
+            })
+            .filter((like): like is { productId: string; likedAt: number } =>
+                typeof like.productId === 'string')
+            .sort((a, b) => b.likedAt - a.likedAt)
+            .map((like) => like.productId);
+    }
+
     async deleteLikesByUserId(firebaseUid: string): Promise<number> {
         const snapshot = await this.db
             .collection(this.likesCollection)
