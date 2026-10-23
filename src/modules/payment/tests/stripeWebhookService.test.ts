@@ -12,6 +12,10 @@ jest.mock('../repositories/PaymentRecordRepository', () => ({
   PaymentRecordRepository: jest.fn(),
 }));
 
+jest.mock('../../order/repositories/OrderRepository', () => ({
+  OrderRepository: jest.fn(),
+}));
+
 import { StripeWebhookService } from '../services/StripeWebhookService';
 
 const checkoutMetadata = {

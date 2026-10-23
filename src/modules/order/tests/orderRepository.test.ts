@@ -132,6 +132,7 @@ describe('OrderRepository.finalizePendingOrder', () => {
         paymentIntentId: 'pi_123',
         paymentStatus: 'succeeded',
         status: 'paid',
+        payoutStatus: 'held',
       }),
     );
     expect(transaction.create).toHaveBeenCalledWith(

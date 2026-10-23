@@ -8,6 +8,15 @@ export type OrderDisputeStatus =
   | 'raised'
   | 'in_progress'
   | 'resolved';
+// Funds lifecycle, separate from the fulfilment `status`. Later payout states
+// (payout_processing, paid_to_charity, payout_failed) belong to the payout issue.
+export type PayoutStatus = 'held' | 'ready_for_payout';
+export type PayoutHoldReason = 'dispute' | 'refund' | 'chargeback' | 'fraud' | 'admin';
+export type PayoutReleaseTrigger =
+  | 'buyer_confirmation'
+  | 'hold_expired'
+  | 'dispute_resolution'
+  | 'admin_override';
 export type ShipmentStatus =
   | 'pending'
   | 'announced'
@@ -84,6 +93,21 @@ export interface Order {
   reservationActive?: boolean;
   paidAt?: Date;
   refundedAt?: Date;
+  // Set once, when the carrier first reports delivery. The dispute window and
+  // payout hold both run from this moment.
+  deliveredAt?: Date;
+  payoutStatus?: PayoutStatus;
+  // Every hold currently blocking the payout; it is released only once empty.
+  payoutHoldReasons?: PayoutHoldReason[];
+  // The first active reason, kept for display and export.
+  payoutHoldReason?: PayoutHoldReason;
+  releaseAt?: Date;
+  // releaseAt while the order may be released automatically; absent while any
+  // hold or dispute blocks it, so reconciliation only scans releasable orders.
+  autoReleaseAt?: Date;
+  releaseTaskEnqueuedAt?: Date;
+  readyForPayoutAt?: Date;
+  payoutReleaseTrigger?: PayoutReleaseTrigger;
   updatedAt?: Date;
   buyerConfirmedReceived?: boolean;
   buyerConfirmedReceivedAt?: Date;

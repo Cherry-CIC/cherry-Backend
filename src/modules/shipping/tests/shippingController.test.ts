@@ -8,6 +8,13 @@ const mockGetUserById = jest.fn();
 const mockGetProductById = jest.fn();
 const mockGetPostageSizeById = jest.fn();
 const mockSendBuyerDeliveredEmail = jest.fn();
+const mockStartHoldOnDelivery = jest.fn();
+
+jest.mock('../../order/services/OrderReleaseService', () => ({
+  OrderReleaseService: jest.fn().mockImplementation(() => ({
+    startHoldOnDelivery: mockStartHoldOnDelivery,
+  })),
+}));
 
 jest.mock('../services/CheckoutShippingService', () => ({
   CheckoutShippingService: jest.fn().mockImplementation(() => ({
@@ -92,6 +99,9 @@ describe('shippingController', () => {
       sent: true,
       skipped: false,
     });
+    mockStartHoldOnDelivery.mockResolvedValue(
+      new Date('2026-10-22T10:00:00.000Z'),
+    );
   });
 
   it('returns checkout shipping options', async () => {
@@ -211,10 +221,40 @@ describe('shippingController', () => {
       buyerName: 'Buyer',
       productName: 'Winter Coat',
       orderId: 'order-1',
+      disputeWindowEndsAt: new Date('2026-10-22T10:00:00.000Z'),
     });
     expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
       buyerDeliveryEmailSentAt: expect.any(Date),
     });
+    expect(mockStartHoldOnDelivery).toHaveBeenCalledWith('order-1');
+    expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: 'order-1',
+        disputeWindowEndsAt: new Date('2026-10-22T10:00:00.000Z'),
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('does not start the payout hold for a non-delivered status', async () => {
+    mockGetShipmentBySendcloudId.mockResolvedValue({
+      id: 'shipment-1',
+      orderId: 'order-1',
+      status: 'announced',
+    });
+
+    const res = createResponse();
+    await handleSendcloudWebhook(
+      {
+        body: {
+          action: 'parcel_status_changed',
+          parcel: { id: 123, status: { message: 'In transit' } },
+        },
+      } as any,
+      res,
+    );
+
+    expect(mockStartHoldOnDelivery).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });
 

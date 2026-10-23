@@ -16,6 +16,13 @@ export type AdminModerationStatus = Extract<
   'in_progress' | 'resolved'
 >;
 
+// What happens to the held funds when an admin resolves a dispute.
+export type DisputeResolutionOutcome = 'release_to_charity' | 'refund_buyer';
+export const DISPUTE_RESOLUTION_OUTCOMES: DisputeResolutionOutcome[] = [
+  'release_to_charity',
+  'refund_buyer',
+];
+
 export interface Dispute {
   disputeId: string;
   orderId: string;
@@ -30,6 +37,7 @@ export interface Dispute {
   claimedAt?: Date;
   resolution?: {
     note: string;
+    outcome?: DisputeResolutionOutcome;
     resolvedBy: string;
     resolvedAt: Date;
   };
@@ -48,7 +56,8 @@ export interface Dispute {
 export type DisputeSubmissionErrorCode =
   | 'order_not_found'
   | 'not_order_owner'
-  | 'order_not_eligible';
+  | 'order_not_eligible'
+  | 'dispute_window_closed';
 
 export class DisputeSubmissionError extends Error {
   constructor(readonly code: DisputeSubmissionErrorCode) {
@@ -72,6 +81,7 @@ export type DisputeAdminErrorCode =
   | 'dispute_not_found'
   | 'idempotency_key_reused'
   | 'invalid_status_transition'
+  | 'release_blocked'
   | 'cursor_not_found';
 
 export class DisputeAdminError extends Error {

@@ -15,6 +15,7 @@ import { requireSingleParam } from '../../../shared/utils/requestParam';
 import { DisputeRepository } from '../../../disputes/DisputeRepository';
 import { DisputeSubmissionError } from '../../../disputes/Dispute';
 import { OrderFulfillmentService } from '../services/OrderFulfillmentService';
+import { scheduleFulfillmentRecovery } from '../services/FulfillmentRecovery';
 
 const getDeliveryState = (
   order: Order,
@@ -117,7 +118,7 @@ const buildDeliveryAddressSummary = (order: Order): string =>
     .join(', ');
 
 const canBuyerConfirmReceived = (order: Order): boolean => {
-  if (order.buyerConfirmedReceived) {
+  if (order.buyerConfirmedReceived || order.buyerDisputeStatus) {
     return false;
   }
 
@@ -149,6 +150,11 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
+    // Buyers can raise a dispute until this time; null once the hold has ended.
+    disputeWindowEndsAt:
+      order.payoutStatus === 'held' && !order.buyerConfirmedReceived
+        ? (order.releaseAt ?? null)
+        : null,
     canTrack: Boolean(shipment?.trackingUrl),
     trackingNumber: shipment?.trackingNumber ?? null,
     trackingUrl: shipment?.trackingUrl ?? null,
@@ -331,6 +337,7 @@ export const createOrder = async (
     } catch (err) {
       if (!(err instanceof FulfillmentJobBusyError)) {
         console.error('Order fulfillment is pending retry:', err);
+        await scheduleFulfillmentRecovery(savedOrder.id);
       }
 
       ResponseHandler.custom(
@@ -526,6 +533,23 @@ export const confirmOrderReceived = async (
       buyerConfirmedReceivedAt,
       status: 'delivered' as const,
     };
+
+    // The confirmation is already saved. If the release fails, the scheduled
+    // expiry task still releases the order, so the buyer's request succeeds.
+    try {
+      const release = await orderRepo.releaseOrderForPayout(
+        order.id,
+        'buyer_confirmation',
+      );
+      if (release.status === 'released') {
+        updatedOrder.payoutStatus = 'ready_for_payout';
+      }
+    } catch (releaseErr) {
+      console.error(
+        `Failed to release order ${order.id} after buyer confirmation:`,
+        releaseErr,
+      );
+    }
     const shipment = await shipmentRepo.getShipmentByOrderId(order.id);
 
     ResponseHandler.success(
@@ -632,6 +656,13 @@ export const submitOrderDispute = async (
             res,
             'Order cannot be disputed',
             'The order is not eligible for buyer dispute submission',
+          );
+          return;
+        case 'dispute_window_closed':
+          ResponseHandler.conflict(
+            res,
+            'Dispute window closed',
+            'The period for raising a dispute on this order has ended',
           );
           return;
       }

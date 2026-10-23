@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { OrderRepository } from '../repositories/OrderRepository';
+import { getActiveHoldReasons } from '../services/holdReasons';
 import { admin } from '../../../shared/config/firebaseConfig';
 import { format } from '@fast-csv/format';
 
@@ -94,6 +95,10 @@ export const exportOrdersCsv = async (req: Request, res: Response): Promise<void
         'Donation Amount (£)',
         'Date of Order/Donation',
         'Status',
+        'Payout Status',
+        'Payout Hold Reason',
+        'Delivered At',
+        'Release At',
       ],
       writeBOM: true, // Add BOM for proper Excel encoding
     });
@@ -151,6 +156,10 @@ export const exportOrdersCsv = async (req: Request, res: Response): Promise<void
           amountInPounds,
           orderDate,
           order.status,
+          order.payoutStatus || '',
+          getActiveHoldReasons(order).join(';'),
+          order.deliveredAt ? new Date(order.deliveredAt).toISOString() : '',
+          order.releaseAt ? new Date(order.releaseAt).toISOString() : '',
         ]);
       }
     }

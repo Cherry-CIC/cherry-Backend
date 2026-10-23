@@ -5,9 +5,13 @@ export const createFakeFirestore = (seed: Record<string, Data> = {}) => {
   const store = new Map<string, Data>(Object.entries(seed));
   let autoId = 0;
 
-  const docRef = (collection: string, id: string) => ({
+  const docRef = (collection: string, id: string): any => ({
     id,
     path: `${collection}/${id}`,
+    collection: (name: string) => ({
+      doc: (childId?: string) =>
+        docRef(`${collection}/${id}/${name}`, childId ?? `auto-${++autoId}`),
+    }),
   });
 
   const snapshot = (path: string) => {
@@ -28,6 +32,14 @@ export const createFakeFirestore = (seed: Record<string, Data> = {}) => {
         get: async (ref: { path: string }) => snapshot(ref.path),
         set: (ref: { path: string }, data: Data) => {
           writes.push(() => store.set(ref.path, { ...data }));
+        },
+        create: (ref: { path: string }, data: Data) => {
+          writes.push(() => {
+            if (store.has(ref.path)) {
+              throw new Error(`Document already exists: ${ref.path}`);
+            }
+            store.set(ref.path, { ...data });
+          });
         },
         update: (ref: { path: string }, data: Data) => {
           writes.push(() => {

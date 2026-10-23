@@ -13,6 +13,7 @@ import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageS
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { EmailService } from '../../notifications/services/EmailService';
 import { Order } from '../../order/model/Order';
+import { OrderReleaseService } from '../../order/services/OrderReleaseService';
 
 const checkoutShippingService = new CheckoutShippingService();
 const postcodeLookupService = new PostcodeLookupService();
@@ -239,6 +240,13 @@ export const handleSendcloudWebhook = async (
 
         await orderRepo.updateOrder(shipment.orderId, orderUpdates);
 
+        let disputeWindowEndsAt: Date | null = null;
+        if (status === 'delivered') {
+          disputeWindowEndsAt = await new OrderReleaseService(
+            orderRepo,
+          ).startHoldOnDelivery(shipment.orderId);
+        }
+
         if (
           status === 'delivered' &&
           order &&
@@ -251,6 +259,7 @@ export const handleSendcloudWebhook = async (
               buyerName: buyer?.firstname || buyer?.displayName,
               productName: order.productName,
               orderId: order.id,
+              disputeWindowEndsAt,
             });
 
             if (result.sent) {

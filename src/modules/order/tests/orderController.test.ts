@@ -2,6 +2,13 @@ const mockGetUserById = jest.fn();
 const mockVerifySucceededPaymentIntentForUser = jest.fn();
 const mockFinalizePendingOrder = jest.fn();
 const mockUpdateOrder = jest.fn();
+const mockReleaseOrderForPayout = jest.fn();
+const mockScheduleFulfillmentRecovery = jest.fn();
+
+jest.mock('../services/FulfillmentRecovery', () => ({
+  scheduleFulfillmentRecovery: (...args: unknown[]) =>
+    mockScheduleFulfillmentRecovery(...args),
+}));
 const mockCreateBuyerDispute = jest.fn();
 const mockGetOrdersByUserId = jest.fn();
 const mockGetOrderById = jest.fn();
@@ -21,6 +28,7 @@ jest.mock('../repositories/OrderRepository', () => ({
   OrderRepository: jest.fn().mockImplementation(() => ({
     finalizePendingOrder: mockFinalizePendingOrder,
     updateOrder: mockUpdateOrder,
+    releaseOrderForPayout: mockReleaseOrderForPayout,
     getOrdersByUserId: mockGetOrdersByUserId,
     getOrderById: mockGetOrderById,
   })),
@@ -251,6 +259,26 @@ describe('orderController.createOrder', () => {
     await createOrder(req, res);
 
     expect(res.status).toHaveBeenCalledWith(202);
+    expect(mockScheduleFulfillmentRecovery).toHaveBeenCalledWith('order-1');
+  });
+
+  it('does not schedule recovery when another worker holds the fulfillment job', async () => {
+    const { FulfillmentJobBusyError } = jest.requireMock(
+      '../repositories/OrderRepository',
+    );
+    mockProcessPaidOrder.mockRejectedValue(new FulfillmentJobBusyError());
+    const res = createResponse();
+
+    await createOrder(
+      {
+        user: { uid: 'user-1' },
+        body: { orderId: 'order-1', paymentIntentId: 'pi_123' },
+      } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(mockScheduleFulfillmentRecovery).not.toHaveBeenCalled();
   });
 
   it('returns 400 when payment verification fails', async () => {
@@ -602,6 +630,7 @@ describe('orderController.confirmOrderReceived', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetShipmentByOrderId.mockResolvedValue(null);
+    mockReleaseOrderForPayout.mockResolvedValue({ status: 'released' });
   });
 
     it('lets the buyer confirm a delivered order as received', async () => {
@@ -647,10 +676,61 @@ describe('orderController.confirmOrderReceived', () => {
             buyerConfirmedReceived: true,
             deliveryState: 'confirmed',
             deliveryLabel: 'Confirmed',
+            payoutStatus: 'ready_for_payout',
           }),
         },
       }),
     );
+    expect(mockReleaseOrderForPayout).toHaveBeenCalledWith(
+      'order-1',
+      'buyer_confirmation',
+    );
+  });
+
+  it('still confirms receipt when the payout release fails', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+    mockGetOrderById.mockResolvedValue({
+      ...shippedOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+      payoutStatus: 'held',
+    });
+    mockReleaseOrderForPayout.mockRejectedValue(new Error('firestore down'));
+    const res = createResponse();
+
+    await confirmOrderReceived(
+      { user: { uid: 'user-1' }, params: { id: 'order-1' } } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          order: expect.objectContaining({ payoutStatus: 'held' }),
+        },
+      }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('does not confirm an order that has an open dispute', async () => {
+    mockGetOrderById.mockResolvedValue({
+      ...shippedOrder,
+      status: 'delivered',
+      shipmentStatus: 'delivered',
+      buyerDisputeStatus: 'raised',
+    });
+    const res = createResponse();
+
+    await confirmOrderReceived(
+      { user: { uid: 'user-1' }, params: { id: 'order-1' } } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+    expect(mockReleaseOrderForPayout).not.toHaveBeenCalled();
   });
 
   it('forbids confirming another user’s order', async () => {
@@ -889,13 +969,13 @@ describe('orderController.submitOrderDispute', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  it('lets a buyer dispute a delivered order after confirming receipt', async () => {
-    mockGetOrderById.mockResolvedValue({
-      ...disputableOrder,
-      status: 'delivered',
-      shipmentStatus: 'delivered',
-      buyerConfirmedReceived: true,
-    });
+  it('rejects a dispute once the dispute window has closed', async () => {
+    const { DisputeSubmissionError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockCreateBuyerDispute.mockRejectedValue(
+      new DisputeSubmissionError('dispute_window_closed'),
+    );
     const req: any = {
       user: {
         uid: 'user-1',
@@ -911,13 +991,10 @@ describe('orderController.submitOrderDispute', () => {
 
     await submitOrderDispute(req, res);
 
-    expect(mockCreateBuyerDispute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        orderId: 'order-1',
-        reason: 'item_arrived_damaged',
-      }),
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Dispute window closed' }),
     );
-    expect(res.status).toHaveBeenCalledWith(200);
   });
 
   it('rejects a duplicate unresolved dispute', async () => {

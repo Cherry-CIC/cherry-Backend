@@ -101,4 +101,42 @@ describe('stripeWebhook', () => {
 
     expect(res.status).toBe(500);
   });
+
+  it.each([
+    'charge.refunded',
+    'charge.dispute.created',
+    'charge.dispute.closed',
+    'radar.early_fraud_warning.created',
+  ])('routes %s to the payout hold handler only', async (type) => {
+    const body = JSON.stringify({
+      id: 'evt_hold_1',
+      object: 'event',
+      type,
+      created: 1_791_000_000,
+      data: { object: { id: 'obj_1', payment_intent: 'pi_test_1' } },
+    });
+
+    const res = await post(body, sign(body));
+
+    expect(res.status).toBe(200);
+    expect(mockHandleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'evt_hold_1', type }),
+    );
+    expect(mockHandleSucceededPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when a hold cannot be recorded so Stripe retries', async () => {
+    mockHandleEvent.mockRejectedValue(new Error('Firestore unavailable'));
+    const body = JSON.stringify({
+      id: 'evt_hold_2',
+      object: 'event',
+      type: 'charge.refunded',
+      created: 1_791_000_000,
+      data: { object: { id: 'ch_1', payment_intent: 'pi_test_1' } },
+    });
+
+    const res = await post(body, sign(body));
+
+    expect(res.status).toBe(500);
+  });
 });

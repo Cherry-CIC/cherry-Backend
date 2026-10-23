@@ -3,6 +3,13 @@ import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
 import { exportOrdersCsv } from '../controllers/exportController';
 import {
+	getAdminOrderPayout,
+	holdAdminOrderPayout,
+	reconcileAdminOrderReleases,
+	releaseAdminOrderPayout,
+	unholdAdminOrderPayout,
+} from '../controllers/adminPayoutController';
+import {
 	getAdminDisputeDetails,
 	getAdminDisputeDetailsByOrderId,
 	getAdminDisputeSummary,
@@ -99,6 +106,205 @@ const router = Router();
  *         description: Internal server error
  */
 router.get('/export/orders', authMiddleware, adminMiddleware, exportOrdersCsv);
+
+/**
+ * @swagger
+ * /api/admin/orders/{orderId}/payout:
+ *   get:
+ *     summary: Get an order's payout hold state and its audit history
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: payoutStatus, hold reason, release timing and ordered payout events
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Order not found
+ */
+router.get(
+	'/orders/:orderId/payout',
+	authMiddleware,
+	adminMiddleware,
+	getAdminOrderPayout,
+);
+
+/**
+ * @swagger
+ * /api/admin/orders/{orderId}/payout/hold:
+ *   post:
+ *     summary: Place an admin hold on an order's funds
+ *     description: Works on held and ready_for_payout orders; a ready order returns to held.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [note]
+ *             properties:
+ *               note:
+ *                 type: string
+ *                 maxLength: 2000
+ *     responses:
+ *       200:
+ *         description: Hold recorded (result is placed, or unchanged when already on hold for this reason)
+ *       400:
+ *         description: Missing or oversized note
+ *       409:
+ *         description: Order has no payout state to hold
+ */
+router.post(
+	'/orders/:orderId/payout/hold',
+	authMiddleware,
+	adminMiddleware,
+	holdAdminOrderPayout,
+);
+
+/**
+ * @swagger
+ * /api/admin/orders/{orderId}/payout/unhold:
+ *   post:
+ *     summary: Remove an admin hold
+ *     description: >
+ *       Removes only a hold placed by an admin, then releases the order if its
+ *       hold period has already ended. Other holds are lifted by their own flow
+ *       or by the release override.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [note]
+ *             properties:
+ *               note:
+ *                 type: string
+ *                 maxLength: 2000
+ *     responses:
+ *       200:
+ *         description: Hold removed
+ *       400:
+ *         description: Missing or oversized note
+ *       409:
+ *         description: The order has no admin hold
+ */
+router.post(
+	'/orders/:orderId/payout/unhold',
+	authMiddleware,
+	adminMiddleware,
+	unholdAdminOrderPayout,
+);
+
+/**
+ * @swagger
+ * /api/admin/orders/{orderId}/payout/release:
+ *   post:
+ *     summary: Release an order for payout now (admin override)
+ *     description: >
+ *       Skips the hold period and any refund, chargeback, fraud or admin hold. It
+ *       never overrides an unresolved buyer dispute, an unconfirmed or flagged
+ *       payment, or an order that has not been delivered.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [note]
+ *             properties:
+ *               note:
+ *                 type: string
+ *                 maxLength: 2000
+ *     responses:
+ *       200:
+ *         description: Order released (or already released)
+ *       400:
+ *         description: Missing or oversized note
+ *       404:
+ *         description: Order not found
+ *       409:
+ *         description: Release is blocked
+ */
+router.post(
+	'/orders/:orderId/payout/release',
+	authMiddleware,
+	adminMiddleware,
+	releaseAdminOrderPayout,
+);
+
+/**
+ * @swagger
+ * /api/admin/payouts/reconcile:
+ *   post:
+ *     summary: Reconcile held orders against their release time
+ *     description: >
+ *       Releases held orders that are past their release time and have no hold or
+ *       dispute, and schedules a release task for held orders that never got one.
+ *       Safe to repeat. The same run is available to Cloud Scheduler at
+ *       POST /api/internal/order-release/reconcile.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               limit:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 1000
+ *                 default: 200
+ *     responses:
+ *       200:
+ *         description: Counts of scanned, released, already released, blocked, newly scheduled and failed orders
+ *       400:
+ *         description: Invalid limit
+ */
+router.post(
+	'/payouts/reconcile',
+	authMiddleware,
+	adminMiddleware,
+	reconcileAdminOrderReleases,
+);
 
 /**
  * @swagger
@@ -253,6 +459,12 @@ router.get(
  *               status:
  *                 type: string
  *                 enum: [in_progress, resolved]
+ *               outcome:
+ *                 type: string
+ *                 enum: [release_to_charity, refund_buyer]
+ *                 description: >
+ *                   Required when status is resolved. release_to_charity moves the
+ *                   held order to ready_for_payout; refund_buyer keeps the funds held.
  *               note:
  *                 type: string
  *                 maxLength: 2000

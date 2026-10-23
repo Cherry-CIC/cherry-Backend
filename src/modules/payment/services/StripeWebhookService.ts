@@ -7,9 +7,17 @@ import {
   parseCheckoutPaymentIntent,
 } from '../utils/checkoutPaymentIntent';
 import { calculateFinancialBreakdown } from './financialBreakdown';
+import { OrderRepository } from '../../order/repositories/OrderRepository';
 
 export type WebhookOutcome =
   | { action: 'ignored'; eventType: string }
+  | {
+      action: 'payout_hold';
+      change: 'placed' | 'cleared' | 'unchanged' | 'no_order';
+      eventType: string;
+      paymentIntentId: string | null;
+      orderId: string | null;
+    }
   | {
       action: 'recorded';
       status: 'paid' | 'flagged';
@@ -31,6 +39,7 @@ const idOf = (value: string | { id: string } | null | undefined) =>
 export class StripeWebhookService {
   constructor(
     private readonly paymentRecordRepo = new PaymentRecordRepository(),
+    private readonly orderRepo = new OrderRepository(),
   ) {}
 
   async handleEvent(event: Stripe.Event): Promise<WebhookOutcome> {
@@ -40,9 +49,104 @@ export class StripeWebhookService {
           event,
           event.data.object as Stripe.PaymentIntent,
         );
+      case 'charge.refunded':
+        return this.placeHold(
+          event,
+          (event.data.object as Stripe.Charge).payment_intent,
+          'refund',
+        );
+      case 'charge.dispute.created':
+        return this.placeHold(
+          event,
+          (event.data.object as Stripe.Dispute).payment_intent,
+          'chargeback',
+        );
+      case 'radar.early_fraud_warning.created':
+        return this.placeHold(
+          event,
+          (event.data.object as { payment_intent?: string | null })
+            .payment_intent,
+          'fraud',
+        );
+      case 'charge.dispute.closed': {
+        const dispute = event.data.object as Stripe.Dispute;
+        // A lost chargeback stays on hold for an admin to decide.
+        return dispute.status === 'won'
+          ? this.clearHold(event, dispute.payment_intent, 'chargeback')
+          : this.placeHold(event, dispute.payment_intent, 'chargeback');
+      }
       default:
         return { action: 'ignored', eventType: event.type };
     }
+  }
+
+  private async placeHold(
+    event: Stripe.Event,
+    paymentIntent: string | { id: string } | null | undefined,
+    reason: 'refund' | 'chargeback' | 'fraud',
+  ): Promise<WebhookOutcome> {
+    const paymentIntentId = idOf(paymentIntent);
+    const orderId = paymentIntentId
+      ? await this.orderRepo.getOrderIdByPaymentIntent(paymentIntentId)
+      : null;
+    if (!orderId) {
+      console.warn(
+        `Stripe ${event.type} (${event.id}) matches no order; no hold placed`,
+      );
+      return this.holdOutcome(event, 'no_order', paymentIntentId, null);
+    }
+
+    const result = await this.orderRepo.placePayoutHold(orderId, {
+      reason,
+      actorRole: 'stripe',
+      stripeEventId: event.id,
+    });
+    return this.holdOutcome(
+      event,
+      result === 'placed' ? 'placed' : 'unchanged',
+      paymentIntentId,
+      orderId,
+    );
+  }
+
+  private async clearHold(
+    event: Stripe.Event,
+    paymentIntent: string | { id: string } | null | undefined,
+    reason: 'chargeback',
+  ): Promise<WebhookOutcome> {
+    const paymentIntentId = idOf(paymentIntent);
+    const orderId = paymentIntentId
+      ? await this.orderRepo.getOrderIdByPaymentIntent(paymentIntentId)
+      : null;
+    if (!orderId) {
+      return this.holdOutcome(event, 'no_order', paymentIntentId, null);
+    }
+
+    const result = await this.orderRepo.clearPayoutHold(orderId, {
+      reason,
+      actorRole: 'stripe',
+      stripeEventId: event.id,
+    });
+    if (result === 'cleared') {
+      // The hold may have outlasted releaseAt, when no task is left to release.
+      await this.orderRepo.releaseOrderForPayout(orderId, 'hold_expired');
+    }
+    return this.holdOutcome(event, result, paymentIntentId, orderId);
+  }
+
+  private holdOutcome(
+    event: Stripe.Event,
+    change: 'placed' | 'cleared' | 'unchanged' | 'no_order',
+    paymentIntentId: string | null,
+    orderId: string | null,
+  ): WebhookOutcome {
+    return {
+      action: 'payout_hold',
+      change,
+      eventType: event.type,
+      paymentIntentId,
+      orderId,
+    };
   }
 
   private async handlePaymentSucceeded(

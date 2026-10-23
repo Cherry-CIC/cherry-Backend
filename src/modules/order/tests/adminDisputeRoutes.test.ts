@@ -175,7 +175,11 @@ describe('Admin dispute routes', () => {
       .patch('/api/admin/disputes/dispute-1/status')
       .set('Authorization', `Bearer ${adminToken}`)
       .set('Idempotency-Key', 'resolve-dispute-1')
-      .send({ status: 'resolved', note: 'Decision recorded.' });
+      .send({
+        status: 'resolved',
+        note: 'Decision recorded.',
+        outcome: 'release_to_charity',
+      });
 
     expect(response.status).toBe(200);
     expect(mockModerateDispute).toHaveBeenCalledWith(
@@ -184,7 +188,52 @@ describe('Admin dispute routes', () => {
       'resolved',
       'Decision recorded.',
       'resolve-dispute-1',
+      'release_to_charity',
     );
+  });
+
+  it('requires an outcome when resolving a dispute', async () => {
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', 'resolve-dispute-1')
+      .send({ status: 'resolved', note: 'Decision recorded.' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('outcome');
+    expect(mockModerateDispute).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown resolution outcome', async () => {
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', 'resolve-dispute-1')
+      .send({ status: 'resolved', note: 'Decision recorded.', outcome: 'keep' });
+
+    expect(response.status).toBe(400);
+    expect(mockModerateDispute).not.toHaveBeenCalled();
+  });
+
+  it('returns conflict when the order cannot be released on resolution', async () => {
+    const { DisputeAdminError } = jest.requireActual(
+      '../../../disputes/Dispute',
+    );
+    mockModerateDispute.mockRejectedValue(
+      new DisputeAdminError('release_blocked'),
+    );
+
+    const response = await request(app)
+      .patch('/api/admin/disputes/dispute-1/status')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', 'resolve-dispute-1')
+      .send({
+        status: 'resolved',
+        note: 'Decision recorded.',
+        outcome: 'release_to_charity',
+      });
+
+    expect(response.status).toBe(409);
   });
 
   it('allows an admin to mark a dispute in progress through the status endpoint', async () => {
@@ -207,6 +256,7 @@ describe('Admin dispute routes', () => {
       'in_progress',
       undefined,
       'progress-dispute-1',
+      undefined,
     );
   });
 
@@ -232,7 +282,11 @@ describe('Admin dispute routes', () => {
       .patch('/api/admin/disputes/dispute-1/status')
       .set('Authorization', `Bearer ${adminToken}`)
       .set('Idempotency-Key', 'resolve-dispute-1')
-      .send({ status: 'resolved', note: 'Different decision.' });
+      .send({
+        status: 'resolved',
+        note: 'Different decision.',
+        outcome: 'refund_buyer',
+      });
 
     expect(response.status).toBe(409);
     expect(response.body.message).toContain('different request');

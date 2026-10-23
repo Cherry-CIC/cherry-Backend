@@ -4,6 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "dependencies": {
+    "@google-cloud/tasks": "^7.3.0",
     "@types/axios": "^0.9.36",
     "@types/node-fetch": "^2.6.12",
     "axios": "^1.13.2",
@@ -13,6 +14,7 @@
     "fast-csv": "^5.0.5",
     "firebase": "^11.10.0",
     "firebase-admin": "^13.4.0",
+    "google-auth-library": "^11.3.0",
     "joi": "^17.13.3",
     "node-fetch": "^3.3.2",
     "resend": "^6.26.0",
@@ -46,6 +48,8 @@
     "lint": "eslint 'src/**/*.{ts,js}' --fix",
     "format": "prettier --write .",
     "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",
-    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list"
+    "admin:list": "npm run build && node dist/scripts/setAdminClaim.js list",
+    "payout:backfill": "npm run build && node dist/scripts/backfillPayoutStatus.js",
+    "stripe:webhook:events": "npm run build && node dist/scripts/configureStripeWebhookEvents.js"
   }
 }

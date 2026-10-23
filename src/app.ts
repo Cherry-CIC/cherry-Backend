@@ -35,6 +35,8 @@ import postageSizeRoutes from './modules/postage-sizes/routes/postageSizeRoutes'
 import notificationRoutes from './modules/notifications/routes/notificationRoutes';
 import reportRoutes from './modules/reports/routes/reportRoutes';
 import blockRoutes from './modules/blocks/routes/blockRoutes';
+import orderReleaseTaskRoutes from './modules/order/routes/orderReleaseTaskRoutes';
+import fulfillmentTaskRoutes from './modules/order/routes/fulfillmentTaskRoutes';
 
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -49,6 +51,8 @@ app.use('/api/postage-sizes', postageSizeRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/blocks', blockRoutes);
+app.use('/api/internal/order-release', orderReleaseTaskRoutes);
+app.use('/api/internal/fulfillment', fulfillmentTaskRoutes);
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 

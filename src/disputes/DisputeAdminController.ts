@@ -3,8 +3,10 @@ import { requireSingleParam } from '../shared/utils/requestParam';
 import { ResponseHandler } from '../shared/utils/responseHandler';
 import {
   AdminModerationStatus,
+  DISPUTE_RESOLUTION_OUTCOMES,
   DISPUTE_STATUSES,
   DisputeAdminError,
+  DisputeResolutionOutcome,
   DisputeStatus,
 } from './Dispute';
 import { DisputeRepository } from './DisputeRepository';
@@ -170,6 +172,23 @@ export const moderateAdminDispute = async (
     return;
   }
 
+  const outcome = req.body?.outcome;
+  if (status === 'resolved') {
+    if (
+      typeof outcome !== 'string' ||
+      !DISPUTE_RESOLUTION_OUTCOMES.includes(outcome as DisputeResolutionOutcome)
+    ) {
+      ResponseHandler.badRequest(
+        res,
+        `Resolving a dispute requires an outcome: ${DISPUTE_RESOLUTION_OUTCOMES.join(', ')}`,
+      );
+      return;
+    }
+  } else if (outcome !== undefined) {
+    ResponseHandler.badRequest(res, 'An outcome is only valid when resolving');
+    return;
+  }
+
   const idempotencyKey = req.header('Idempotency-Key');
   if (
     !idempotencyKey ||
@@ -196,6 +215,7 @@ export const moderateAdminDispute = async (
       status as AdminModerationStatus,
       note || undefined,
       idempotencyKey,
+      outcome as DisputeResolutionOutcome | undefined,
     );
     ResponseHandler.success(res, { dispute }, 'Dispute moderation saved');
   } catch (error) {
@@ -206,6 +226,14 @@ export const moderateAdminDispute = async (
       }
       if (error.code === 'invalid_status_transition') {
         ResponseHandler.conflict(res, 'Dispute cannot transition to that status');
+        return;
+      }
+      if (error.code === 'release_blocked') {
+        ResponseHandler.conflict(
+          res,
+          'Funds cannot be released for this order',
+          'The payment is not in a state that allows release to the charity',
+        );
         return;
       }
       if (error.code === 'idempotency_key_reused') {

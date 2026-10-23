@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { createWebhook } from '../../../shared/config/stripeConfig';
 import { PaymentService } from '../services/PaymentService';
+import { isPayoutHoldEvent } from '../services/payoutHoldEvents';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
 import Stripe from 'stripe';
 
@@ -63,6 +64,11 @@ export const stripeWebhook = async (req: Request, res: Response): Promise<void> 
         paymentIntent.id,
         paymentIntent.metadata.orderId,
       );
+    } else if (isPayoutHoldEvent(event.type)) {
+      const { StripeWebhookService } = await import(
+        '../services/StripeWebhookService'
+      );
+      await new StripeWebhookService().handleEvent(event);
     }
 
     ResponseHandler.success(res, {}, 'Webhook received');

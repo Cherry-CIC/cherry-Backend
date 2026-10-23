@@ -2,11 +2,27 @@ import { createHash } from 'crypto';
 import { firestore } from '../shared/config/firebaseConfig';
 import { OrderDisputeReason } from '../modules/order/model/Order';
 import {
+  evaluatePayoutRelease,
+  toDateOrNull,
+} from '../modules/order/services/payoutRelease';
+import { FieldValue } from 'firebase-admin/firestore';
+import {
+  addHoldReason,
+  getActiveHoldReasons,
+  holdReasonFields,
+  removeHoldReason,
+} from '../modules/order/services/holdReasons';
+import {
+  NewPayoutEvent,
+  recordPayoutEvent,
+} from '../modules/order/services/payoutEvents';
+import {
   AdminModerationStatus,
   DISPUTE_STATUSES,
   Dispute,
   DisputeAdminError,
   DisputeEvent,
+  DisputeResolutionOutcome,
   DisputeStatus,
   DisputeSubmissionError,
 } from './Dispute';
@@ -92,6 +108,18 @@ export class DisputeRepository {
         throw new DisputeSubmissionError('order_not_eligible');
       }
 
+      // The window ends on confirmation, on release, or at releaseAt even if
+      // the release task has not run yet.
+      const releaseAt = toDateOrNull(order.releaseAt);
+      const submittedAt = new Date();
+      if (
+        order.buyerConfirmedReceived ||
+        order.payoutStatus === 'ready_for_payout' ||
+        (releaseAt && releaseAt.getTime() <= submittedAt.getTime())
+      ) {
+        throw new DisputeSubmissionError('dispute_window_closed');
+      }
+
       const productSnapshot = await transaction.get(
         firestore.collection('products').doc(order.productId),
       );
@@ -137,7 +165,31 @@ export class DisputeRepository {
         buyerDisputeStatus: 'raised',
         ...(dispute.message ? { buyerDisputeMessage: dispute.message } : {}),
         buyerDisputedAt: now,
+        // Blocks both buyer confirmation and the expiry task from releasing funds.
+        ...(order.payoutStatus === 'held'
+          ? {
+              ...holdReasonFields(
+                addHoldReason(getActiveHoldReasons(order), 'dispute'),
+              ),
+              autoReleaseAt: FieldValue.delete(),
+            }
+          : {}),
       });
+      if (order.payoutStatus === 'held') {
+        recordPayoutEvent(
+          transaction,
+          orderRef,
+          {
+            type: 'hold_placed',
+            actorRole: 'buyer',
+            actorId: input.buyerId,
+            fromStatus: 'held',
+            toStatus: 'held',
+            reason: 'dispute',
+          },
+          now,
+        );
+      }
 
       return dispute;
     });
@@ -222,6 +274,7 @@ export class DisputeRepository {
     status: AdminModerationStatus,
     note: string | undefined,
     idempotencyKey: string,
+    outcome?: DisputeResolutionOutcome,
   ): Promise<Dispute> {
     const disputeRef = firestore.collection('disputes').doc(disputeId);
     const eventRef = disputeRef.collection('events').doc();
@@ -229,7 +282,14 @@ export class DisputeRepository {
       .collection('idempotency_keys')
       .doc(createHash('sha256').update(idempotencyKey).digest('hex'));
     const requestHash = createHash('sha256')
-      .update(JSON.stringify({ adminId, status, note: note ?? null }))
+      .update(
+        JSON.stringify({
+          adminId,
+          status,
+          note: note ?? null,
+          ...(outcome ? { outcome } : {}),
+        }),
+      )
       .digest('hex');
 
     return firestore.runTransaction(async (transaction) => {
@@ -257,6 +317,71 @@ export class DisputeRepository {
       }
 
       const now = new Date();
+      const orderUpdates: Record<string, unknown> = { buyerDisputeStatus: status };
+      let payoutEvent: NewPayoutEvent | null = null;
+      if (status === 'resolved' && outcome && orderSnapshot.exists) {
+        const orderData = orderSnapshot.data()!;
+        if (outcome === 'release_to_charity') {
+          const paymentSnapshot =
+            typeof orderData.paymentIntentId === 'string'
+              ? await transaction.get(
+                  firestore.collection('payments').doc(orderData.paymentIntentId),
+                )
+              : null;
+          const decision = evaluatePayoutRelease({
+            order: orderData,
+            payment: paymentSnapshot?.exists ? paymentSnapshot.data()! : null,
+            trigger: 'dispute_resolution',
+            now,
+          });
+          if (decision.canRelease) {
+            Object.assign(orderUpdates, {
+              payoutStatus: 'ready_for_payout',
+              readyForPayoutAt: now,
+              payoutReleaseTrigger: 'dispute_resolution',
+              ...holdReasonFields([]),
+              autoReleaseAt: FieldValue.delete(),
+            });
+            payoutEvent = {
+              type: 'released',
+              actorRole: 'admin',
+              actorId: adminId,
+              fromStatus: 'held',
+              toStatus: 'ready_for_payout',
+              trigger: 'dispute_resolution',
+              note,
+            };
+          } else if (
+            decision.result.status === 'blocked' &&
+            decision.result.reason !== 'not_held'
+          ) {
+            throw new DisputeAdminError('release_blocked');
+          }
+        } else if (orderData.payoutStatus === 'held') {
+          // Refund execution is separate; the funds just stay held. The dispute
+          // hold ends with its resolution; any other active hold is kept.
+          Object.assign(
+            orderUpdates,
+            holdReasonFields(
+              addHoldReason(
+                removeHoldReason(getActiveHoldReasons(orderData), 'dispute'),
+                'refund',
+              ),
+            ),
+          );
+          orderUpdates.autoReleaseAt = FieldValue.delete();
+          payoutEvent = {
+            type: 'hold_placed',
+            actorRole: 'admin',
+            actorId: adminId,
+            fromStatus: 'held',
+            toStatus: 'held',
+            reason: 'refund',
+            note,
+          };
+        }
+      }
+
       const updates: Record<string, unknown> = {
         status,
         updatedAt: now,
@@ -271,6 +396,7 @@ export class DisputeRepository {
         }
         updates.resolution = {
           note: note!,
+          ...(outcome ? { outcome } : {}),
           resolvedBy: adminId,
           resolvedAt: now,
         };
@@ -293,7 +419,10 @@ export class DisputeRepository {
         createdAt: now,
       });
       if (orderSnapshot.exists) {
-        transaction.update(orderRef, { buyerDisputeStatus: status });
+        transaction.update(orderRef, orderUpdates);
+        if (payoutEvent) {
+          recordPayoutEvent(transaction, orderRef, payoutEvent, now);
+        }
       }
 
       return result;

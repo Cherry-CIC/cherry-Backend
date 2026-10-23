@@ -1,8 +1,24 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { gbpToPence } from '../../../shared/utils/money';
 import { FulfillmentJob } from '../model/FulfillmentJob';
-import { Order } from '../model/Order';
+import { Order, PayoutHoldReason, PayoutReleaseTrigger } from '../model/Order';
+import {
+  evaluatePayoutRelease,
+  PayoutReleaseResult,
+} from '../services/payoutRelease';
+import { calculateReleaseAt } from '../../../shared/config/orderReleaseConfig';
+import {
+  addHoldReason,
+  getActiveHoldReasons,
+  holdReasonFields,
+  removeHoldReason,
+} from '../services/holdReasons';
+import {
+  PayoutEvent,
+  PayoutEventActorRole,
+  recordPayoutEvent,
+} from '../services/payoutEvents';
 
 const PAYMENT_RESERVATION_MS = 15 * 60 * 1000;
 const FULFILLMENT_LEASE_MS = 10 * 60 * 1000;
@@ -370,6 +386,7 @@ export class OrderRepository {
         paymentIntentId,
         paymentStatus: 'succeeded',
         status: 'paid',
+        payoutStatus: 'held',
         reservationActive: false,
         paidAt: now,
         updatedAt: now,
@@ -401,6 +418,7 @@ export class OrderRepository {
         paymentIntentId,
         paymentStatus: 'succeeded',
         status: 'paid',
+        payoutStatus: 'held',
         reservationActive: false,
         paidAt: now,
         updatedAt: now,
@@ -575,6 +593,335 @@ export class OrderRepository {
       .update(removeUndefinedValues(updates as Record<string, unknown>));
   }
 
+  // Idempotent: only the first delivery report starts the hold, so repeated
+  // carrier webhooks cannot extend the dispute window.
+  async recordDelivery(
+    orderId: string,
+    now = new Date(),
+  ): Promise<{ releaseAt: Date | null; releaseTaskPending: boolean }> {
+    const orderRef = firestore.collection('orders').doc(orderId);
+
+    return firestore.runTransaction(async (transaction) => {
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        return { releaseAt: null, releaseTaskPending: false };
+      }
+
+      const orderData = orderDoc.data()!;
+      if (orderData.deliveredAt) {
+        // A repeat report lets a release task that failed to enqueue be retried.
+        return {
+          releaseAt: this.toDate(orderData.releaseAt) ?? null,
+          releaseTaskPending:
+            orderData.payoutStatus === 'held' &&
+            !orderData.releaseTaskEnqueuedAt,
+        };
+      }
+
+      const isHeld =
+        orderData.paymentStatus === 'succeeded' &&
+        [undefined, 'held'].includes(orderData.payoutStatus);
+      const releaseAt = isHeld ? calculateReleaseAt(now) : null;
+
+      transaction.update(orderRef, {
+        deliveredAt: now,
+        updatedAt: now,
+        ...(releaseAt
+          ? {
+              payoutStatus: 'held',
+              releaseAt,
+              // A hold placed before delivery (for example a refund) keeps the
+              // order out of the reconciliation scan until it is cleared.
+              ...(getActiveHoldReasons(orderData).length > 0
+                ? {}
+                : { autoReleaseAt: releaseAt }),
+            }
+          : {}),
+      });
+      if (releaseAt) {
+        recordPayoutEvent(
+          transaction,
+          orderRef,
+          {
+            type: 'hold_started',
+            actorRole: 'system',
+            fromStatus: orderData.payoutStatus ?? null,
+            toStatus: 'held',
+            releaseAt,
+          },
+          now,
+        );
+      }
+      return { releaseAt, releaseTaskPending: releaseAt !== null };
+    });
+  }
+
+  async markReleaseTaskEnqueued(orderId: string): Promise<void> {
+    await this.updateOrder(orderId, { releaseTaskEnqueuedAt: new Date() });
+  }
+
+  // Maps a Stripe PaymentIntent back to the order created for it at checkout.
+  async getOrderIdByPaymentIntent(
+    paymentIntentId: string,
+  ): Promise<string | null> {
+    const lock = await firestore
+      .collection('order_payment_intents')
+      .doc(paymentIntentId)
+      .get();
+    const orderId = lock.exists ? lock.data()?.orderId : null;
+    return typeof orderId === 'string' ? orderId : null;
+  }
+
+  // Idempotent. An order that was already released but not yet paid out goes
+  // back to held, so the payout step never sees a refunded or disputed order.
+  async placePayoutHold(
+    orderId: string,
+    hold: {
+      reason: PayoutHoldReason;
+      actorRole: PayoutEventActorRole;
+      actorId?: string;
+      stripeEventId?: string;
+      note?: string;
+    },
+    now = new Date(),
+  ): Promise<'placed' | 'unchanged' | 'not_applicable'> {
+    const orderRef = firestore.collection('orders').doc(orderId);
+
+    return firestore.runTransaction(async (transaction) => {
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        return 'not_applicable' as const;
+      }
+
+      const orderData = orderDoc.data()!;
+      if (!['held', 'ready_for_payout'].includes(orderData.payoutStatus)) {
+        return 'not_applicable' as const;
+      }
+      const active = getActiveHoldReasons(orderData);
+      if (orderData.payoutStatus === 'held' && active.includes(hold.reason)) {
+        return 'unchanged' as const;
+      }
+
+      transaction.update(orderRef, {
+        payoutStatus: 'held',
+        ...holdReasonFields(addHoldReason(active, hold.reason)),
+        autoReleaseAt: FieldValue.delete(),
+        readyForPayoutAt: FieldValue.delete(),
+        payoutReleaseTrigger: FieldValue.delete(),
+        updatedAt: now,
+      });
+      recordPayoutEvent(
+        transaction,
+        orderRef,
+        {
+          type: 'hold_placed',
+          actorRole: hold.actorRole,
+          actorId: hold.actorId,
+          fromStatus: orderData.payoutStatus,
+          toStatus: 'held',
+          reason: hold.reason,
+          stripeEventId: hold.stripeEventId,
+          note: hold.note,
+        },
+        now,
+      );
+      return 'placed' as const;
+    });
+  }
+
+  // Only clears the hold it is asked to; it never releases the order itself.
+  // Other active holds keep the order out of the reconciliation scan.
+  async clearPayoutHold(
+    orderId: string,
+    clear: {
+      reason: PayoutHoldReason;
+      actorRole: PayoutEventActorRole;
+      actorId?: string;
+      stripeEventId?: string;
+      note?: string;
+    },
+    now = new Date(),
+  ): Promise<'cleared' | 'unchanged'> {
+    const orderRef = firestore.collection('orders').doc(orderId);
+
+    return firestore.runTransaction(async (transaction) => {
+      const orderDoc = await transaction.get(orderRef);
+      const orderData = orderDoc.exists ? orderDoc.data()! : undefined;
+      const active = orderData ? getActiveHoldReasons(orderData) : [];
+      if (
+        !orderData ||
+        orderData.payoutStatus !== 'held' ||
+        !active.includes(clear.reason)
+      ) {
+        return 'unchanged' as const;
+      }
+
+      const remaining = removeHoldReason(active, clear.reason);
+      transaction.update(orderRef, {
+        ...holdReasonFields(remaining),
+        // Back in the reconciliation scan, unless another hold or a buyer
+        // dispute is still open.
+        ...(remaining.length === 0 &&
+        orderData.releaseAt &&
+        !(
+          orderData.buyerDisputeId &&
+          orderData.buyerDisputeStatus !== 'resolved'
+        )
+          ? { autoReleaseAt: orderData.releaseAt }
+          : {}),
+        updatedAt: now,
+      });
+      recordPayoutEvent(
+        transaction,
+        orderRef,
+        {
+          type: 'hold_cleared',
+          actorRole: clear.actorRole,
+          actorId: clear.actorId,
+          fromStatus: 'held',
+          toStatus: 'held',
+          reason: clear.reason,
+          stripeEventId: clear.stripeEventId,
+          note: clear.note,
+        },
+        now,
+      );
+      return 'cleared' as const;
+    });
+  }
+
+  // Orders the reconciliation run may act on, oldest first: those whose
+  // autoReleaseAt has passed ('due') or not yet ('upcoming'). The field is
+  // removed while any hold or dispute applies and when the order is released, so
+  // blocked orders are never rescanned and cannot crowd out newer overdue ones.
+  // The cursor guards against an order that keeps failing.
+  async getOrdersByAutoRelease(
+    window: 'due' | 'upcoming',
+    now: Date,
+    limit: number,
+    startAfter?: { autoReleaseAt: Date; id: string },
+  ): Promise<Order[]> {
+    let query = firestore
+      .collection('orders')
+      .where('autoReleaseAt', window === 'due' ? '<=' : '>', now)
+      .orderBy('autoReleaseAt', 'asc')
+      .orderBy(FieldPath.documentId(), 'asc');
+    if (startAfter) {
+      query = query.startAfter(startAfter.autoReleaseAt, startAfter.id);
+    }
+
+    const snapshot = await query.limit(limit).get();
+    return snapshot.docs.map((doc) => this.mapToOrder(doc.id, doc.data()));
+  }
+
+  async getPayoutEvents(orderId: string): Promise<PayoutEvent[]> {
+    const snapshot = await firestore
+      .collection('orders')
+      .doc(orderId)
+      .collection('payout_events')
+      .orderBy('createdAt', 'asc')
+      .get();
+
+    return snapshot.docs.map(
+      (doc) =>
+        ({
+          ...doc.data(),
+          eventId: doc.id,
+          createdAt: this.toDate(doc.data().createdAt) ?? new Date(0),
+          ...(doc.data().releaseAt
+            ? { releaseAt: this.toDate(doc.data().releaseAt) }
+            : {}),
+        }) as PayoutEvent,
+    );
+  }
+
+  // The single gate from HELD to READY_FOR_PAYOUT. Every trigger runs the same
+  // checks inside one transaction, so a dispute or refund hold that lands first
+  // always wins over buyer confirmation or the expiry task.
+  async releaseOrderForPayout(
+    orderId: string,
+    trigger: PayoutReleaseTrigger,
+    now = new Date(),
+    admin?: { adminId: string; note?: string },
+  ): Promise<PayoutReleaseResult> {
+    const orderRef = firestore.collection('orders').doc(orderId);
+
+    return firestore.runTransaction(async (transaction) => {
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        return { status: 'blocked', reason: 'order_not_found' } as const;
+      }
+
+      const orderData = orderDoc.data()!;
+      const paymentDoc =
+        typeof orderData.paymentIntentId === 'string'
+          ? await transaction.get(
+              firestore.collection('payments').doc(orderData.paymentIntentId),
+            )
+          : null;
+
+      const decision = evaluatePayoutRelease({
+        order: orderData,
+        payment: paymentDoc?.exists ? paymentDoc.data()! : null,
+        trigger,
+        now,
+      });
+      if (!decision.canRelease) {
+        // Stop reconciliation rescanning an order that is blocked for a
+        // reason it cannot wait out; the hold, dispute or admin action that
+        // resolves the block puts it back.
+        if (
+          trigger === 'hold_expired' &&
+          orderData.autoReleaseAt &&
+          !(
+            decision.result.status === 'blocked' &&
+            decision.result.reason === 'not_due'
+          )
+        ) {
+          transaction.update(orderRef, { autoReleaseAt: FieldValue.delete() });
+        }
+        return decision.result;
+      }
+
+      transaction.update(orderRef, {
+        payoutStatus: 'ready_for_payout',
+        readyForPayoutAt: now,
+        payoutReleaseTrigger: trigger,
+        ...holdReasonFields([]),
+        autoReleaseAt: FieldValue.delete(),
+        updatedAt: now,
+      });
+      recordPayoutEvent(
+        transaction,
+        orderRef,
+        {
+          type: 'released',
+          actorRole: admin
+            ? 'admin'
+            : trigger === 'buyer_confirmation'
+              ? 'buyer'
+              : 'system',
+          actorId: admin
+            ? admin.adminId
+            : trigger === 'buyer_confirmation' &&
+                typeof orderData.userId === 'string'
+              ? orderData.userId
+              : undefined,
+          fromStatus: 'held',
+          toStatus: 'ready_for_payout',
+          trigger,
+          note: admin?.note,
+          reason:
+            trigger === 'admin_override'
+              ? getActiveHoldReasons(orderData)[0]
+              : undefined,
+        },
+        now,
+      );
+      return { status: 'released' } as const;
+    });
+  }
+
   async getAllOrders(): Promise<Order[]> {
     const snapshot = await firestore.collection('orders').get();
     return snapshot.docs.map((doc) => this.mapToOrder(doc.id, doc.data()));
@@ -642,6 +989,11 @@ export class OrderRepository {
       ),
       buyerDeliveryEmailSentAt: this.toDate(data.buyerDeliveryEmailSentAt),
       buyerDisputedAt: this.toDate(data.buyerDisputedAt),
+      deliveredAt: this.toDate(data.deliveredAt),
+      releaseAt: this.toDate(data.releaseAt),
+      autoReleaseAt: this.toDate(data.autoReleaseAt),
+      releaseTaskEnqueuedAt: this.toDate(data.releaseTaskEnqueuedAt),
+      readyForPayoutAt: this.toDate(data.readyForPayoutAt),
     } as Order;
   }
 

@@ -32,6 +32,8 @@ interface BuyerDeliveredEmailInput {
   buyerName?: string | null;
   productName: string;
   orderId: string;
+  // When the buyer's confirm-or-dispute window ends; omitted when there is no hold.
+  disputeWindowEndsAt?: Date | null;
 }
 
 interface TestEmailInput {
@@ -143,6 +145,11 @@ export class EmailService {
     input: BuyerDeliveredEmailInput,
   ): Promise<EmailResult> {
     const greeting = input.buyerName ? `Hi ${input.buyerName},` : 'Hi,';
+    const action =
+      'Please open the Cherry app to confirm you received it. If there is a problem, you can raise a dispute from the order screen.';
+    const windowText = input.disputeWindowEndsAt
+      ? `You have until ${this.formatDeadline(input.disputeWindowEndsAt)} to confirm delivery or raise a dispute. Confirming sends your donation on to the charity straight away. Once this time has passed, the order is closed and a dispute can no longer be raised.`
+      : null;
 
     return this.sendEmail({
       to: input.to,
@@ -152,7 +159,8 @@ export class EmailService {
         <p>The courier has marked your item as delivered.</p>
         <p><strong>${this.escapeHtml(input.productName)}</strong></p>
         <p>Order: ${this.escapeHtml(input.orderId)}</p>
-        <p>Please open the Cherry app to confirm you received it. If there is a problem, you can raise a dispute from the order screen.</p>
+        <p>${this.escapeHtml(action)}</p>
+        ${windowText ? `<p>${this.escapeHtml(windowText)}</p>` : ''}
       `,
       text: [
         greeting,
@@ -160,9 +168,20 @@ export class EmailService {
         'The courier has marked your item as delivered.',
         `Item: ${input.productName}`,
         `Order: ${input.orderId}`,
-        'Please open the Cherry app to confirm you received it. If there is a problem, you can raise a dispute from the order screen.',
-      ].join('\n'),
+        action,
+        windowText,
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n'),
     });
+  }
+
+  private formatDeadline(date: Date): string {
+    return `${date.toLocaleString('en-GB', {
+      timeZone: 'Europe/London',
+      dateStyle: 'long',
+      timeStyle: 'short',
+    })} (UK time)`;
   }
 
   async sendTestEmail(input: TestEmailInput): Promise<EmailResult> {

@@ -71,6 +71,7 @@ Important vars for local work:
 - `SENDCLOUD_SECRET_KEY`
 - `SENDCLOUD_LABEL_MODE`
 - `SENDCLOUD_WEBHOOK_SIGNATURE_KEY` (optional; falls back to `SENDCLOUD_SECRET_KEY`)
+- `ORDER_HOLD_PERIOD_HOURS` (optional, default 48) and `ORDER_RELEASE_WORKER_URL` — see [docs/order-hold-and-release.md](docs/order-hold-and-release.md)
 - `EMAIL_MODE`
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
