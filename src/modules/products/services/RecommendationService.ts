@@ -65,7 +65,7 @@ export class RecommendationService {
     this.saveFeed(userId, feed);
 
     const pageIds = feed.slice(position, position + limit);
-    const products = await this.loadStillForSale(pageIds);
+    const products = await this.loadStillForSale(userId, pageIds);
     const items = await this.productService.enrichProductsWithDetails(products);
     const nextPosition = position + limit;
     const hasMore = nextPosition < feed.length;
@@ -133,13 +133,21 @@ export class RecommendationService {
     return products.filter((product): product is Product => product !== null);
   }
 
-  // Something on a later page may have sold or been hidden since page 1.
-  private async loadStillForSale(ids: string[]): Promise<Product[]> {
-    const products = await this.loadProducts(ids);
+  // Something on a later page may have sold or been hidden since page 1, or
+  // the user may have blocked its seller since then.
+  private async loadStillForSale(
+    userId: string,
+    ids: string[],
+  ): Promise<Product[]> {
+    const [products, blockedUserIds] = await Promise.all([
+      this.loadProducts(ids),
+      this.blockRepo.getBlockedUserIds(userId),
+    ]);
     return products.filter(
       (product) =>
         this.productService.isAvailableForPurchase(product) &&
-        !this.productService.isModerationHidden(product),
+        !this.productService.isModerationHidden(product) &&
+        !blockedUserIds.has(product.userId),
     );
   }
 }

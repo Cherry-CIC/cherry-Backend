@@ -138,17 +138,20 @@ describe('RecommendationService', () => {
     expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
   });
 
-  it('drops an item that sold after page 1', async () => {
-    const { service, store } = setUp(shop());
+  it('drops an item that sold, or whose seller was blocked, after page 1', async () => {
+    const blocked: string[] = [];
+    const { service, store } = setUp(shop(), { blocked });
+    store.set('p24', { ...store.get('p24')!, userId: 'rude-seller' });
     const pageOne = await service.getRecommendedPage('newbie', { limit: 20 });
 
     store.set('p22', { ...store.get('p22')!, status: 'sold', number: 0 });
+    blocked.push('rude-seller');
 
     const pageTwo = await service.getRecommendedPage('newbie', {
       limit: 20,
       cursor: pageOne.nextCursor!,
     });
-    expect(ids(pageTwo.items)).toEqual(['p21', 'p23', 'p24', 'p25']);
+    expect(ids(pageTwo.items)).toEqual(['p21', 'p23', 'p25']);
   });
 
   it('sorts again when the saved order is missing', async () => {
