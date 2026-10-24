@@ -3,6 +3,7 @@ import { ProductService } from '../services/ProductService';
 import {
   decodeCursor,
   encodeCursor,
+  MAX_PROFILE_LIKES,
   RecommendationService,
 } from '../services/RecommendationService';
 
@@ -89,6 +90,29 @@ describe('RecommendationService', () => {
     const page = await service.getRecommendedPage('buyer', { limit: 50 });
 
     expect(ids(page.items).sort()).toEqual(['ok-1', 'ok-2']);
+  });
+
+  it('builds the taste from the newest 100 likes, but hides every like', async () => {
+    // 120 likes, newest first, plus 2 items they haven't liked.
+    const likedIds = Array.from(
+      { length: MAX_PROFILE_LIKES + 20 },
+      (_, index) => `liked-${index + 1}`,
+    );
+    const { service, productService } = setUp(
+      [
+        ...likedIds.map((id) => makeProduct(id)),
+        makeProduct('ok-1'),
+        makeProduct('ok-2'),
+      ],
+      { liked: likedIds },
+    );
+
+    const page = await service.getRecommendedPage('buyer', { limit: 50 });
+
+    expect(ids(page.items).sort()).toEqual(['ok-1', 'ok-2']);
+    const loaded = productService.getProductById.mock.calls.map(([id]) => id);
+    expect(loaded).toContain('liked-100');
+    expect(loaded).not.toContain('liked-101');
   });
 
   it('pages through the saved order with no duplicates', async () => {

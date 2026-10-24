@@ -17,6 +17,11 @@ import { buildTasteProfile, rankProducts } from './recommendationScoring';
 // How many of the newest products are considered for one feed.
 export const MAX_CANDIDATES = 200;
 
+// How many of the newest likes build the taste. Each older like counts a
+// little less, so likes past 100 add up to under 1% of it. Skipping them
+// saves one product read per like.
+export const MAX_PROFILE_LIKES = 100;
+
 // Same page sizes as /with-details.
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -82,9 +87,10 @@ export class RecommendationService {
     );
 
     // likedIds come newest first, and loadProducts keeps that order, which
-    // buildTasteProfile needs so newer likes count more.
+    // buildTasteProfile needs so newer likes count more. Every like is still
+    // left out of the feed below, not just these.
     const [liked, bought] = await Promise.all([
-      this.loadProducts(likedIds),
+      this.loadProducts(likedIds.slice(0, MAX_PROFILE_LIKES)),
       this.loadProducts(boughtIds),
     ]);
     const profile = buildTasteProfile(liked, bought, userId);
