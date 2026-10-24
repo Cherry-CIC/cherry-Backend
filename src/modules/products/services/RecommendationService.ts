@@ -22,6 +22,10 @@ export const MAX_CANDIDATES = 200;
 // saves one product read per like.
 export const MAX_PROFILE_LIKES = 100;
 
+// How many users' feed orders are kept in memory at once. When it's full,
+// the one used longest ago is dropped, and their next page sorts again.
+export const MAX_SAVED_FEEDS = 1000;
+
 // Same page sizes as /with-details.
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -33,8 +37,8 @@ export interface RecommendedQuery {
 
 export class RecommendationService {
   // user id -> that user's sorted product ids, from their last page 1.
-  // Kept in memory only and never saved. A refresh replaces it, and a server
-  // restart empties it.
+  // Kept in memory only and never saved. A refresh replaces it, a server
+  // restart empties it, and it holds at most MAX_SAVED_FEEDS users.
   private feeds = new Map<string, string[]>();
 
   constructor(
@@ -57,8 +61,8 @@ export class RecommendationService {
     let feed = query.cursor ? this.feeds.get(userId) : undefined;
     if (!feed) {
       feed = await this.buildFeed(userId);
-      this.feeds.set(userId, feed);
     }
+    this.saveFeed(userId, feed);
 
     const pageIds = feed.slice(position, position + limit);
     const products = await this.loadStillForSale(pageIds);
@@ -72,6 +76,18 @@ export class RecommendationService {
       nextCursor: hasMore ? encodeCursor(nextPosition) : null,
       hasMore,
     };
+  }
+
+  // A Map keeps the order items were added. Taking this user out and adding
+  // them back moves them to the end, so the first one is always the user
+  // served longest ago, and that's the one dropped when there are too many.
+  private saveFeed(userId: string, feed: string[]): void {
+    this.feeds.delete(userId);
+    this.feeds.set(userId, feed);
+    if (this.feeds.size > MAX_SAVED_FEEDS) {
+      const [oldest] = this.feeds.keys();
+      this.feeds.delete(oldest);
+    }
   }
 
   // Works out the whole feed order for one user, as a list of product ids.

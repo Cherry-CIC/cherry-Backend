@@ -4,6 +4,7 @@ import {
   decodeCursor,
   encodeCursor,
   MAX_PROFILE_LIKES,
+  MAX_SAVED_FEEDS,
   RecommendationService,
 } from '../services/RecommendationService';
 
@@ -161,6 +162,26 @@ describe('RecommendationService', () => {
 
     expect(ids(page.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
     expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the user served longest ago when too many are saved', async () => {
+    const { service, productService } = setUp(shop());
+    const pageOne = await service.getRecommendedPage('first', { limit: 20 });
+
+    // 1,000 more users push 'first' out of the saved orders.
+    for (let user = 1; user <= MAX_SAVED_FEEDS; user++) {
+      await service.getRecommendedPage(`user-${user}`, { limit: 20 });
+    }
+    productService.getNewestAvailableProducts.mockClear();
+
+    const pageTwo = await service.getRecommendedPage('first', {
+      limit: 20,
+      cursor: pageOne.nextCursor!,
+    });
+
+    // Their order was dropped, so it sorts again, and page 2 still works.
+    expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
+    expect(ids(pageTwo.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
   });
 
   it('rejects a broken cursor', async () => {
