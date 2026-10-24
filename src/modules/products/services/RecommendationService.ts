@@ -54,13 +54,22 @@ export class RecommendationService {
     query: RecommendedQuery,
   ): Promise<PaginatedResult<ProductWithDetails>> {
     const limit = normaliseLimit(query.limit);
-    const position = query.cursor ? decodeCursor(query.cursor) : 0;
+    const cursor: Cursor = query.cursor
+      ? decodeCursor(query.cursor)
+      : { position: 0 };
+    let position = cursor.position;
 
     // No cursor means page 1 or a refresh: sort again. Later pages reuse the
     // saved order, unless it's missing (for example after a server restart).
     let feed = query.cursor ? this.feeds.get(userId) : undefined;
     if (!feed) {
       feed = await this.buildFeed(userId);
+      // The new order may have moved, so carry on after the last item they
+      // saw, if it's still there.
+      const lastSeen = cursor.lastId ? feed.indexOf(cursor.lastId) : -1;
+      if (lastSeen >= 0) {
+        position = lastSeen + 1;
+      }
     }
     this.saveFeed(userId, feed);
 
@@ -69,11 +78,12 @@ export class RecommendationService {
     const items = await this.productService.enrichProductsWithDetails(products);
     const nextPosition = position + limit;
     const hasMore = nextPosition < feed.length;
+    const lastId = items[items.length - 1]?.id;
 
     return {
       items,
       limit,
-      nextCursor: hasMore ? encodeCursor(nextPosition) : null,
+      nextCursor: hasMore ? encodeCursor(nextPosition, lastId) : null,
       hasMore,
     };
   }
@@ -160,17 +170,28 @@ function normaliseLimit(limit: number | undefined): number {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
 }
 
-// The cursor is a bookmark: { "position": 20 } written in base64, the same
-// style as the /with-details cursor. The app passes it back unread.
-export function encodeCursor(position: number): string {
-  return Buffer.from(JSON.stringify({ position }), 'utf8').toString('base64');
+// The cursor is a bookmark: { "position": 20, "lastId": "abc" } written in
+// base64, the same style as the /with-details cursor. The app passes it back
+// unread. lastId is the last item they saw, used only if the order is sorted
+// again.
+export interface Cursor {
+  position: number;
+  lastId?: string;
 }
 
-export function decodeCursor(cursor: string): number {
+export function encodeCursor(position: number, lastId?: string): string {
+  return Buffer.from(JSON.stringify({ position, lastId }), 'utf8').toString(
+    'base64',
+  );
+}
+
+export function decodeCursor(cursor: string): Cursor {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
     if (Number.isInteger(parsed?.position) && parsed.position >= 0) {
-      return parsed.position;
+      const lastId =
+        typeof parsed.lastId === 'string' ? parsed.lastId : undefined;
+      return { position: parsed.position, lastId };
     }
   } catch {
     // Not base64 JSON: handled below.

@@ -122,7 +122,10 @@ describe('RecommendationService', () => {
     const pageOne = await service.getRecommendedPage('newbie', { limit: 20 });
     expect(pageOne.items).toHaveLength(20);
     expect(pageOne.hasMore).toBe(true);
-    expect(decodeCursor(pageOne.nextCursor!)).toBe(20);
+    expect(decodeCursor(pageOne.nextCursor!)).toEqual({
+      position: 20,
+      lastId: 'p20',
+    });
 
     const pageTwo = await service.getRecommendedPage('newbie', {
       limit: 20,
@@ -165,6 +168,23 @@ describe('RecommendationService', () => {
 
     expect(ids(page.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
     expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries on after the last item seen when the order is sorted again', async () => {
+    const { service: before } = setUp(shop());
+    const pageOne = await before.getRecommendedPage('newbie', { limit: 20 });
+
+    // After a restart, a new listing now sits at the top of the order.
+    const { service: after } = setUp([
+      makeProduct('new', { createdAt: now }),
+      ...shop(),
+    ]);
+    const pageTwo = await after.getRecommendedPage('newbie', {
+      limit: 20,
+      cursor: pageOne.nextCursor!,
+    });
+
+    expect(ids(pageTwo.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
   });
 
   it('drops the user served longest ago when too many are saved', async () => {
