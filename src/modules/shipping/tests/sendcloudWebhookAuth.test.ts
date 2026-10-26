@@ -4,6 +4,7 @@ import { verifySendcloudWebhookSignature } from '../middleware/sendcloudWebhookA
 jest.mock('../../../shared/config/sendcloudConfig', () => ({
   sendcloudConfig: {
     webhookSignatureKey: 'test-webhook-secret',
+    secretKey: 'test-api-secret',
   },
 }));
 
@@ -69,5 +70,28 @@ describe('verifySendcloudWebhookSignature', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  it('accepts a signature made with the API secret for classic integrations', () => {
+    const payload = Buffer.from(JSON.stringify({ action: 'integration_updated' }));
+    const req: any = {
+      rawBody: payload,
+      body: JSON.parse(payload.toString()),
+      get: jest.fn((header: string) =>
+        header === 'Sendcloud-Signature'
+          ? crypto
+              .createHmac('sha256', 'test-api-secret')
+              .update(payload)
+              .digest('hex')
+          : undefined,
+      ),
+    };
+    const res = createResponse();
+    const next = jest.fn();
+
+    verifySendcloudWebhookSignature(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
   });
 });

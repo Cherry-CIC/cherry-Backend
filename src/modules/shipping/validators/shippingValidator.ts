@@ -107,5 +107,5 @@ export const sendcloudWebhookValidator = Joi.object({
     status: Joi.object({
       message: Joi.string().allow('', null).optional(),
     }).optional(),
-  }).required(),
+  }).optional(),
 });

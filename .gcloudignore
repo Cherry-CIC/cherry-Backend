@@ -1,0 +1,14 @@
+.git/
+.github/
+.env
+.env.*
+node_modules/
+coverage/
+dist/
+build/
+*.log
+deploy-dev.sh
+deploy-prod.sh
+README.md
+*.test.ts
+src/**/tests/

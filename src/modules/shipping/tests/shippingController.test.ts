@@ -218,6 +218,27 @@ describe('shippingController', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
+  it('acknowledges Sendcloud integration events without a parcel', async () => {
+    const req: any = {
+      body: {
+        action: 'integration_updated',
+        timestamp: 1793049749154,
+        integration: {
+          id: 562479,
+          system: 'api',
+        },
+      },
+    };
+    const res = createResponse();
+
+    await handleSendcloudWebhook(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ received: true });
+    expect(mockUpdateShipment).not.toHaveBeenCalled();
+    expect(mockUpdateOrder).not.toHaveBeenCalled();
+  });
+
   it('does not resend delivered email when it was already sent', async () => {
     mockGetShipmentBySendcloudId.mockResolvedValue({
       id: 'shipment-1',

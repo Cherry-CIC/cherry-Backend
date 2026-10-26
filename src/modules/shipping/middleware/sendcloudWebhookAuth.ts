@@ -23,9 +23,16 @@ export const verifySendcloudWebhookSignature = (
   next: NextFunction,
 ): void => {
   const signature = req.get('Sendcloud-Signature');
-  const signatureKey = sendcloudConfig.webhookSignatureKey;
+  const signatureKeys = [
+    sendcloudConfig.webhookSignatureKey,
+    sendcloudConfig.secretKey,
+  ]
+    .map((key) => key?.trim())
+    .filter((key, index, keys): key is string =>
+      Boolean(key) && keys.indexOf(key) === index,
+    );
 
-  if (!signatureKey) {
+  if (signatureKeys.length === 0) {
     ResponseHandler.internalServerError(
       res,
       'Sendcloud webhook signature key is not configured',
@@ -46,12 +53,16 @@ export const verifySendcloudWebhookSignature = (
   const payload = Buffer.isBuffer(rawBody)
     ? rawBody
     : Buffer.from(JSON.stringify(req.body));
-  const expectedSignature = crypto
-    .createHmac('sha256', signatureKey)
-    .update(payload)
-    .digest('hex');
+  const matchesSignature = signatureKeys.some((signatureKey) => {
+    const expectedSignature = crypto
+      .createHmac('sha256', signatureKey)
+      .update(payload)
+      .digest('hex');
 
-  if (!isValidSignature(signature, expectedSignature)) {
+    return isValidSignature(signature, expectedSignature);
+  });
+
+  if (!matchesSignature) {
     ResponseHandler.unauthorized(
       res,
       'Invalid Sendcloud signature',
