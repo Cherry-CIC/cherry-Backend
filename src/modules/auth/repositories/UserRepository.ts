@@ -55,9 +55,7 @@ export class UserRepository {
     cursor?: string,
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
-    let query: FirebaseFirestore.Query = collection
-      .orderBy(FieldPath.documentId(), 'desc')
-      .limit(limit * 2 + 1);
+    let query: FirebaseFirestore.Query = collection.limit(limit * 3);
     if (cursor) {
       query = query.startAfter(cursor);
     }
@@ -68,13 +66,11 @@ export class UserRepository {
       return data.isAdmin !== true;
     });
 
-    const docs = nonAdminDocs.slice(0, limit);
-
     const allUsersSnapshot = await collection.get();
     const totalNonAdmins = allUsersSnapshot.docs.filter((doc) => doc.data().isAdmin !== true).length;
 
-    const items = await Promise.all(
-      docs.map(async (doc) => {
+    const enrichedUsers = await Promise.all(
+      nonAdminDocs.map(async (doc) => {
         const data = doc.data();
         let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
 
@@ -96,10 +92,18 @@ export class UserRepository {
       }),
     );
 
+    enrichedUsers.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    const items = enrichedUsers.slice(0, limit);
+
     return {
       items,
-      hasMore: nonAdminDocs.length > limit,
-      nextCursor: nonAdminDocs.length > limit ? docs[docs.length - 1].id : null,
+      hasMore: enrichedUsers.length > limit,
+      nextCursor: enrichedUsers.length > limit ? items[items.length - 1].id : null,
       total: totalNonAdmins,
     };
   }
