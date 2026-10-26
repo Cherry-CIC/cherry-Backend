@@ -77,24 +77,25 @@ export class UserRepository {
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
     const snapshot = await collection.get();
-    const nonAdminDocs = snapshot.docs.filter((doc) => {
-      const data = doc.data();
-      return data.isAdmin !== true;
-    });
-
     const enrichedUsers = await Promise.all(
-      nonAdminDocs.map(async (doc) => {
+      snapshot.docs.map(async (doc) => {
         const data = doc.data();
-        let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
-
         const firebaseUid = typeof data.id === 'string' ? data.id : doc.id;
-        if (!createdAt && firebaseUid) {
+        if (data.isAdmin === true) return null;
+
+        let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
+        let authUser: admin.auth.UserRecord | undefined;
+        if (firebaseUid) {
           try {
-            const authUser = await admin.auth().getUser(firebaseUid);
-            createdAt = new Date(authUser.metadata.creationTime);
+            authUser = await admin.auth().getUser(firebaseUid);
           } catch {
-            createdAt = undefined;
+            authUser = undefined;
           }
+        }
+
+        if (authUser?.customClaims?.admin === true) return null;
+        if (!createdAt && authUser?.metadata.creationTime) {
+          createdAt = new Date(authUser.metadata.creationTime);
         }
 
         return {
@@ -106,7 +107,9 @@ export class UserRepository {
       }),
     );
 
-    enrichedUsers.sort((a, b) => {
+    const visibleUsers = enrichedUsers.filter((user): user is User => user !== null);
+
+    visibleUsers.sort((a, b) => {
       const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return timeB - timeA || (b.id ?? '').localeCompare(a.id ?? '');
@@ -114,7 +117,7 @@ export class UserRepository {
 
     const decodedCursor = cursor ? decodeUserCursor(cursor) : null;
     const startIndex = decodedCursor
-      ? enrichedUsers.findIndex((user) => {
+      ? visibleUsers.findIndex((user) => {
           const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : 0;
           const id = user.id ?? '';
           return createdAt < decodedCursor.createdAt ||
@@ -122,19 +125,19 @@ export class UserRepository {
         })
       : 0;
     if (decodedCursor && startIndex < 0) {
-      return { items: [], hasMore: false, nextCursor: null, total: nonAdminDocs.length };
+      return { items: [], hasMore: false, nextCursor: null, total: visibleUsers.length };
     }
 
     const pageStart = decodedCursor ? startIndex : 0;
-    const items = enrichedUsers.slice(pageStart, pageStart + limit);
-    const hasMore = pageStart + items.length < enrichedUsers.length;
+    const items = visibleUsers.slice(pageStart, pageStart + limit);
+    const hasMore = pageStart + items.length < visibleUsers.length;
     const lastItem = items[items.length - 1];
 
     return {
       items,
       hasMore,
       nextCursor: hasMore && lastItem ? encodeUserCursor(lastItem.createdAt, lastItem.id ?? '') : null,
-      total: nonAdminDocs.length,
+      total: visibleUsers.length,
     };
   }
 
