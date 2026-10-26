@@ -57,21 +57,6 @@ npm run build       # Build for production
 npm test            # Run tests
 ```
 
-## Admin User Management
-
-To grant admin privileges:
-
-```bash
-# Make a user admin
-npm run admin:set <firebase-uid> true
-
-# Remove admin privileges
-npm run admin:set <firebase-uid> false
-
-# List all admins
-npm run admin:list
-```
-
 ## Contributing
 
 See `CONTRIBUTING.md` for development workflows and guidelines.
