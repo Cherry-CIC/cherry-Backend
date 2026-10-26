@@ -624,7 +624,10 @@ router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
  * @swagger
  * /api/products/{id}:
  *   delete:
- *     summary: Delete a product by ID
+ *     summary: Delete an owned, unsold listing
+ *     description: Removes the listing and its associated likes after the deletion is committed.
+ *     security:
+ *       - bearerAuth: []
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -651,6 +654,12 @@ router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
  *                 timestamp:
  *                   type: string
  *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/ListingAuthenticationError'
+ *       403:
+ *         $ref: '#/components/responses/ListingOwnershipError'
+ *       409:
+ *         $ref: '#/components/responses/ListingConflictError'
  *       400:
  *         description: Invalid product ID
  *         content:

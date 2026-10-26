@@ -181,7 +181,7 @@ export class ProductRepository {
     status: 'active' | 'unlisted' | 'delete',
   ): Promise<Product | null> {
     const ref = this.db.collection(this.collectionName).doc(id);
-    return this.db.runTransaction(async (tx) => {
+    const result = await this.db.runTransaction(async (tx): Promise<Product | null> => {
       const doc = await tx.get(ref);
       if (!doc.exists)
         throw new ListingSafetyError(
@@ -219,6 +219,24 @@ export class ProductRepository {
           'This listing has no available stock.',
         );
       if (status === 'delete') {
+        const reports = await tx.get(
+          this.db.collection('reports').where('targetId', '==', id),
+        );
+        if (
+          data.hidden === true ||
+          data.moderationStatus === 'hidden' ||
+          data.retentionHold === true ||
+          reports.docs.some(
+            (report) =>
+              report.get('targetType') === 'product' &&
+              !['resolved', 'rejected'].includes(report.get('status')),
+          )
+        )
+          throw new ListingSafetyError(
+            409,
+            'LISTING_REVIEW_REQUIRED',
+            'This listing needs to be reviewed before it can be deleted.',
+          );
         tx.delete(ref);
         return null;
       }
@@ -230,6 +248,23 @@ export class ProductRepository {
       tx.update(ref, updates);
       return this.mapToProduct(id, { ...data, ...updates });
     });
+    if (status === 'delete') await this.deleteLikesByProductId(id);
+    return result;
+  }
+
+  private async deleteLikesByProductId(productId: string): Promise<void> {
+    while (true) {
+      const snapshot = await this.db
+        .collection('user_likes')
+        .where('productId', '==', productId)
+        .limit(450)
+        .get();
+      if (snapshot.empty) return;
+      const batch = this.db.batch();
+      snapshot.docs.forEach((like) => batch.delete(like.ref));
+      await batch.commit();
+      if (snapshot.size < 450) return;
+    }
   }
 
   async getProductsByCategory(categoryId: string): Promise<Product[]> {
