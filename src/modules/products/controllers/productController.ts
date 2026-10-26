@@ -326,7 +326,7 @@ export const deleteProduct = async (
     }
     const user = (req as any).user;
 
-    // Ownership and eligibility, including repeat requests, are checked atomically.
+    // Ownership and eligibility are checked atomically with listing deletion.
     await productService.deleteProduct(id, user.uid);
     ResponseHandler.success(res, null, 'Product deleted successfully');
   } catch (err) {

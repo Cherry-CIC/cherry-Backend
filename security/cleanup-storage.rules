@@ -1,8 +1,0 @@
-// Emulator fixture only. The Admin SDK exercises cleanup; all clients are denied.
-// Do not deploy this as the app's production Storage policy.
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /{allPaths=**} { allow read, write: if false; }
-  }
-}

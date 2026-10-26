@@ -624,8 +624,8 @@ router.post('/:id/relist', authMiddleware, validateProductId, relistProduct);
  * @swagger
  * /api/products/{id}:
  *   delete:
- *     summary: Delete an owned, unsold listing and record durable cleanup
- *     description: Returns after listing removal and cleanup recording commit together. Photos are retained for at least 30 days before eligible cleanup. Repeat requests by the owner succeed while the receipt is retained.
+ *     summary: Delete an owned, unsold listing
+ *     description: Removes the listing and its associated likes after the deletion is committed.
  *     security:
  *       - bearerAuth: []
  *     tags: [Products]

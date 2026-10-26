@@ -3,7 +3,6 @@ import {
   assertOwnedProductImages,
   ListingSafetyError,
 } from '../../../shared/utils/listingSafety';
-import { DELETION_JOBS, newDeletionJob } from '../cleanup/jobs';
 import { parseListingEdit } from '../validators/productValidator';
 import type { UpdateProductData } from '../services/ProductService';
 import { firestore } from '../../../shared/config/firebaseConfig';
@@ -156,15 +155,8 @@ export class ProductRepository {
     status: 'active' | 'unlisted' | 'delete',
   ): Promise<Product | null> {
     const ref = this.db.collection(this.collectionName).doc(id);
-    return this.db.runTransaction(async (tx): Promise<Product | null> => {
+    const result = await this.db.runTransaction(async (tx): Promise<Product | null> => {
       const doc = await tx.get(ref);
-      if (!doc.exists && status === 'delete') {
-        const receipt = await tx.get(this.db.collection(DELETION_JOBS).doc(id));
-        if (receipt.exists) {
-          assertOwner({ userId: receipt.get('ownerUid') }, uid);
-          return null;
-        }
-      }
       if (!doc.exists)
         throw new ListingSafetyError(
           404,
@@ -219,10 +211,6 @@ export class ProductRepository {
             'LISTING_REVIEW_REQUIRED',
             'This listing needs to be reviewed before it can be deleted.',
           );
-        tx.create(
-          this.db.collection(DELETION_JOBS).doc(id),
-          newDeletionJob(id, uid, data.product_images),
-        );
         tx.delete(ref);
         return null;
       }
@@ -234,6 +222,23 @@ export class ProductRepository {
       tx.update(ref, updates);
       return this.mapToProduct(id, { ...data, ...updates });
     });
+    if (status === 'delete') await this.deleteLikesByProductId(id);
+    return result;
+  }
+
+  private async deleteLikesByProductId(productId: string): Promise<void> {
+    while (true) {
+      const snapshot = await this.db
+        .collection('user_likes')
+        .where('productId', '==', productId)
+        .limit(450)
+        .get();
+      if (snapshot.empty) return;
+      const batch = this.db.batch();
+      snapshot.docs.forEach((like) => batch.delete(like.ref));
+      await batch.commit();
+      if (snapshot.size < 450) return;
+    }
   }
 
   async getProductsByCategory(categoryId: string): Promise<Product[]> {
