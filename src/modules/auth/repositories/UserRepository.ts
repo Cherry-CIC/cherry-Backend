@@ -50,6 +50,40 @@ export class UserRepository {
     });
   }
 
+  async getAdminPage(
+    limit: number,
+    cursor?: string,
+  ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
+    const collection = this.db.collection(this.collectionName);
+    let query: FirebaseFirestore.Query = collection
+      .orderBy('createdAt', 'desc')
+      .limit(limit + 1);
+    if (cursor) {
+      const cursorDoc = await collection.doc(cursor).get();
+      if (!cursorDoc.exists) throw new Error('Invalid cursor');
+      query = query.startAfter(cursorDoc);
+    }
+    const [snapshot, countSnapshot] = await Promise.all([
+      query.get(),
+      collection.count().get(),
+    ]);
+    const docs = snapshot.docs.slice(0, limit);
+    return {
+      items: docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
+        } as User;
+      }),
+      hasMore: snapshot.docs.length > limit,
+      nextCursor: snapshot.docs.length > limit ? docs[docs.length - 1].id : null,
+      total: countSnapshot.data().count,
+    };
+  }
+
   async getById(id: string): Promise<User | null> {
     const querySnap = await this.db
       .collection(this.collectionName)

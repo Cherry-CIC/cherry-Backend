@@ -69,6 +69,9 @@ export class ShipmentService {
       await this.sendcloudService.findParcelByOrderNumber(order.id);
     const sendcloudParcel =
       recoveredParcel ?? await this.sendcloudService.createParcel(parcelData);
+    const qrDocument = sendcloudParcel.documents?.find(
+      (document) => document.type === 'qr' && document.link,
+    );
 
     const shipment = await this.shipmentRepository.createShipment({
       orderId: order.id,
@@ -83,8 +86,9 @@ export class ShipmentService {
       carrier: sendcloudParcel.carrier?.name ?? order.shippingCarrier ?? null,
       status: 'announced',
       labelUrl:
-        sendcloudParcel.label?.normal_printer?.[0] ??
+        qrDocument?.link ??
         sendcloudParcel.label?.label_printer ??
+        sendcloudParcel.label?.normal_printer?.[0] ??
         null,
       parcel: parcelData,
       createdAt: new Date(),

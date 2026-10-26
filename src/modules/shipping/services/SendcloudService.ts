@@ -322,9 +322,17 @@ export class SendcloudService {
 
     if (
       label.protocol !== 'https:' ||
-      label.hostname !== api.hostname ||
-      !label.pathname.startsWith(`${api.pathname}/labels/`)
+      label.hostname !== api.hostname
     ) {
+      throw new Error('Invalid Sendcloud label URL');
+    }
+
+    const isLabelUrl = label.pathname.startsWith(`${api.pathname}/labels/`);
+    const isQrDocumentUrl =
+      label.pathname.startsWith(`${api.pathname}/parcels/`) &&
+      label.pathname.endsWith('/documents/qr');
+
+    if (!isLabelUrl && !isQrDocumentUrl) {
       throw new Error('Invalid Sendcloud label URL');
     }
   }
