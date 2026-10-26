@@ -59,6 +59,23 @@ Swagger is available at:
 http://localhost:3000/api-docs
 ```
 
+## API Documentation (Swagger)
+
+Interactive API documentation is available via Swagger UI:
+
+**Local Development:**
+```text
+http://localhost:3000/api-docs
+```
+
+**Dev Environment:**
+- Backend: https://cherry-backend-401854471349.europe-west2.run.app/api
+- Swagger UI: https://cherry-backend-401854471349.europe-west2.run.app/api-docs
+
+**Production Environment:**
+- Backend: https://cherry-backend-166746898861.europe-west2.run.app/api
+- Swagger UI: https://cherry-backend-166746898861.europe-west2.run.app/api-docs
+
 ## Environment notes
 
 Important vars for local work:
