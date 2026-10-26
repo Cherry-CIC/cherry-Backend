@@ -51,8 +51,13 @@ export interface SendcloudParcel {
   };
   label?: {
     normal_printer?: string[];
-    label_printer: string;
+    label_printer?: string;
   };
+  documents?: Array<{
+    type?: string;
+    size?: string;
+    link?: string;
+  }>;
 }
 
 export interface SendcloudShippingMethod {

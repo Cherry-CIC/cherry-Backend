@@ -134,6 +134,32 @@ export class ShipmentRepository {
     });
   }
 
+  async getAdminPage(
+    limit: number,
+    cursor?: string,
+  ): Promise<{ items: Shipment[]; hasMore: boolean; nextCursor: string | null; total: number }> {
+    const collection = firestore.collection(this.collection);
+    let query: FirebaseFirestore.Query = collection
+      .orderBy('createdAt', 'desc')
+      .limit(limit + 1);
+    if (cursor) {
+      const cursorDoc = await collection.doc(cursor).get();
+      if (!cursorDoc.exists) throw new Error('Invalid cursor');
+      query = query.startAfter(cursorDoc);
+    }
+    const [snapshot, countSnapshot] = await Promise.all([
+      query.get(),
+      collection.count().get(),
+    ]);
+    const docs = snapshot.docs.slice(0, limit);
+    return {
+      items: docs.map((doc) => this.mapToShipment(doc.id, doc.data())),
+      hasMore: snapshot.docs.length > limit,
+      nextCursor: snapshot.docs.length > limit ? docs[docs.length - 1].id : null,
+      total: countSnapshot.data().count,
+    };
+  }
+
   /**
    * Delete a shipment
    * @param id - Shipment ID

@@ -12,10 +12,11 @@ interface SellerItemSoldEmailInput {
   sellerName?: string | null;
   productName: string;
   orderId: string;
-  labelAttachment: EmailAttachment;
+  labelAttachment?: EmailAttachment;
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   carrier?: string | null;
+  idempotencyKey?: string;
 }
 
 interface BuyerShipmentStartedEmailInput {
@@ -44,6 +45,7 @@ interface SendEmailInput {
   html: string;
   text: string;
   attachments?: EmailAttachment[];
+  idempotencyKey?: string;
 }
 
 interface EmailAttachment {
@@ -74,6 +76,21 @@ export class EmailService {
       input.trackingUrl,
       input.trackingNumber,
     );
+    const shippingInstructions = input.labelAttachment
+      ? {
+          html: '<p>Your shipping QR code is attached. Show it when dropping off the parcel at an InPost point.</p>',
+          text: [
+            'Your shipping QR code is attached.',
+            'Show it when dropping off the parcel at an InPost point.',
+          ],
+        }
+      : {
+          html: '<p>Your shipping QR code is being prepared. Please wait for it to arrive, then ship the parcel.</p>',
+          text: [
+            'Your shipping QR code is being prepared.',
+            'Please wait for the QR code to arrive, then ship the parcel.',
+          ],
+        };
 
     return this.sendEmail({
       to: input.to,
@@ -82,9 +99,8 @@ export class EmailService {
         <p>${this.escapeHtml(greeting)}</p>
         <p>Your item has sold on Cherry.</p>
         <p><strong>${this.escapeHtml(input.productName)}</strong></p>
+        ${shippingInstructions.html}
         <p>Order: ${this.escapeHtml(input.orderId)}</p>
-        <p>Your shipping label is attached to this email.</p>
-        <p>Please print the label, attach it to the parcel, and drop the parcel at an InPost point.</p>
         ${trackingHtml}
       `,
       text: [
@@ -92,14 +108,16 @@ export class EmailService {
         '',
         'Your item has sold on Cherry.',
         `Item: ${input.productName}`,
+        ...shippingInstructions.text,
         `Order: ${input.orderId}`,
-        'Your shipping label is attached to this email.',
-        'Please print the label, attach it to the parcel, and drop the parcel at an InPost point.',
         trackingText,
       ]
         .filter(Boolean)
         .join('\n'),
-      attachments: [input.labelAttachment],
+      attachments: input.labelAttachment
+        ? [input.labelAttachment]
+        : undefined,
+      idempotencyKey: `seller-label-${input.orderId}-${input.idempotencyKey ?? 'default'}`,
     });
   }
 
@@ -190,17 +208,20 @@ export class EmailService {
       throw new Error('Resend email is not configured');
     }
 
+    const { idempotencyKey, attachments, ...payload } = input;
     const response = await this.resend.emails.send({
       from: emailConfig.fromEmail,
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      attachments: input.attachments?.map((attachment) => ({
+      to: payload.to,
+      subject: payload.subject,
+      html: payload.html,
+      text: payload.text,
+      attachments: attachments?.map((attachment) => ({
         filename: attachment.filename,
         content: attachment.content,
-        content_type: attachment.contentType,
+        content_type: attachment.contentType ?? 'application/octet-stream',
       })),
+    }, {
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
     if (response.error) {

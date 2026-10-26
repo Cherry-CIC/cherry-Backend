@@ -79,6 +79,13 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
           normal_printer: ['https://labels.example/normal.pdf'],
           label_printer: 'https://labels.example/label.pdf',
         },
+        documents: [
+          {
+            type: 'qr',
+            size: 'a6',
+            link: 'https://labels.example/qr.pdf',
+          },
+        ],
       }),
     };
 
@@ -105,6 +112,7 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
     expect(sendcloudService.createParcel).toHaveBeenCalledWith(
       expect.objectContaining({
         request_label: true,
+        email: 'buyer@example.com',
         shipment: {
           id: 8,
           name: 'Unstamped letter',
@@ -118,7 +126,7 @@ describe('ShipmentService.createShipmentForPaidOrder', () => {
     );
     expect(shipmentRepository.createShipment).toHaveBeenCalledWith(
       expect.objectContaining({
-        labelUrl: 'https://labels.example/normal.pdf',
+        labelUrl: 'https://labels.example/qr.pdf',
         trackingNumber: 'TRACK123',
         trackingUrl: 'https://track.example/123',
       }),
