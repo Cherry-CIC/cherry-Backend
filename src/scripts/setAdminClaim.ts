@@ -13,23 +13,34 @@
  *   node dist/scripts/setAdminClaim.js abc123xyz false  # Revoke admin
  */
 
-import { admin } from '../shared/config/firebaseConfig';
+import { admin, firestore } from '../shared/config/firebaseConfig';
 
 async function setAdminClaim(uid: string, isAdmin: boolean = true): Promise<void> {
   try {
     console.log(`Setting admin claim for user ${uid} to ${isAdmin}...`);
-    
-    // Set custom claims
+
+    // Set custom claims in Firebase Auth
     await admin.auth().setCustomUserClaims(uid, { admin: isAdmin });
-    
+
+    // Also update Firestore user document
+    const usersSnapshot = await firestore.collection('users').where('id', '==', uid).get();
+    if (!usersSnapshot.empty) {
+      const userDoc = usersSnapshot.docs[0];
+      await userDoc.ref.update({
+        isAdmin: isAdmin,
+        updatedAt: new Date(),
+      });
+      console.log('✓ Updated Firestore user document');
+    }
+
     console.log(`✓ Successfully set admin claim for user ${uid}`);
     console.log(`  Admin status: ${isAdmin}`);
     console.log('\nNote: The user must refresh their authentication token for changes to take effect.');
-    
+
     // Verify the claim was set
     const user = await admin.auth().getUser(uid);
     console.log('\nCurrent custom claims:', user.customClaims);
-    
+
     process.exit(0);
   } catch (error) {
     console.error('✗ Error setting admin claim:', error);

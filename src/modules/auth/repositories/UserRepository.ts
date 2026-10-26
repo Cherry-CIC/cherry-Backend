@@ -56,14 +56,16 @@ export class UserRepository {
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
     let query: FirebaseFirestore.Query = collection
+      .where('isAdmin', '!=', true)
+      .orderBy('isAdmin', 'desc')
       .orderBy(FieldPath.documentId(), 'desc')
       .limit(limit + 1);
     if (cursor) {
-      query = query.startAfter(cursor);
+      query = query.startAfter(false, cursor);
     }
     const [snapshot, countSnapshot] = await Promise.all([
       query.get(),
-      collection.count().get(),
+      collection.where('isAdmin', '!=', true).count().get(),
     ]);
     const docs = snapshot.docs.slice(0, limit);
     return {
