@@ -1,6 +1,6 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
-import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
+import { Timestamp, FieldValue, WriteBatch, FieldPath } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 
 const DELETED_USER_MARKER = 'deleted_user';
@@ -56,12 +56,10 @@ export class UserRepository {
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
     let query: FirebaseFirestore.Query = collection
-      .orderBy('createdAt', 'desc')
+      .orderBy(FieldPath.documentId(), 'desc')
       .limit(limit + 1);
     if (cursor) {
-      const cursorDoc = await collection.doc(cursor).get();
-      if (!cursorDoc.exists) throw new Error('Invalid cursor');
-      query = query.startAfter(cursorDoc);
+      query = query.startAfter(cursor);
     }
     const [snapshot, countSnapshot] = await Promise.all([
       query.get(),
