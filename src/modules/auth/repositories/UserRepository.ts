@@ -1,4 +1,4 @@
-import { firestore } from '../../../shared/config/firebaseConfig';
+import { firestore, admin } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch, FieldPath } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -73,16 +73,31 @@ export class UserRepository {
     const allUsersSnapshot = await collection.get();
     const totalNonAdmins = allUsersSnapshot.docs.filter((doc) => doc.data().isAdmin !== true).length;
 
-    return {
-      items: docs.map((doc) => {
+    const items = await Promise.all(
+      docs.map(async (doc) => {
         const data = doc.data();
+        let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
+
+        if (!createdAt && data.id) {
+          try {
+            const authUser = await admin.auth().getUser(data.id);
+            createdAt = new Date(authUser.metadata.creationTime);
+          } catch (error) {
+            createdAt = undefined;
+          }
+        }
+
         return {
           id: doc.id,
           ...data,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
+          createdAt,
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
         } as User;
       }),
+    );
+
+    return {
+      items,
       hasMore: nonAdminDocs.length > limit,
       nextCursor: nonAdminDocs.length > limit ? docs[docs.length - 1].id : null,
       total: totalNonAdmins,
