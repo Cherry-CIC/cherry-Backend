@@ -56,18 +56,23 @@ export class UserRepository {
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
     let query: FirebaseFirestore.Query = collection
-      .where('isAdmin', '!=', true)
-      .orderBy('isAdmin', 'desc')
       .orderBy(FieldPath.documentId(), 'desc')
-      .limit(limit + 1);
+      .limit(limit * 2 + 1);
     if (cursor) {
-      query = query.startAfter(false, cursor);
+      query = query.startAfter(cursor);
     }
-    const [snapshot, countSnapshot] = await Promise.all([
-      query.get(),
-      collection.where('isAdmin', '!=', true).count().get(),
-    ]);
-    const docs = snapshot.docs.slice(0, limit);
+    const snapshot = await query.get();
+
+    const nonAdminDocs = snapshot.docs.filter((doc) => {
+      const data = doc.data();
+      return data.isAdmin !== true;
+    });
+
+    const docs = nonAdminDocs.slice(0, limit);
+
+    const allUsersSnapshot = await collection.get();
+    const totalNonAdmins = allUsersSnapshot.docs.filter((doc) => doc.data().isAdmin !== true).length;
+
     return {
       items: docs.map((doc) => {
         const data = doc.data();
@@ -78,9 +83,9 @@ export class UserRepository {
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
         } as User;
       }),
-      hasMore: snapshot.docs.length > limit,
-      nextCursor: snapshot.docs.length > limit ? docs[docs.length - 1].id : null,
-      total: countSnapshot.data().count,
+      hasMore: nonAdminDocs.length > limit,
+      nextCursor: nonAdminDocs.length > limit ? docs[docs.length - 1].id : null,
+      total: totalNonAdmins,
     };
   }
 
