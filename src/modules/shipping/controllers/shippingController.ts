@@ -199,6 +199,15 @@ export const handleSendcloudWebhook = async (
 
     const { action, parcel, timestamp } = value;
 
+    if (action === 'parcel_status_changed' && !parcel) {
+      ResponseHandler.badRequest(
+        res,
+        'Invalid webhook payload',
+        'Parcel is required for parcel status events',
+      );
+      return;
+    }
+
     console.log('Sendcloud webhook received:', {
       action,
       parcelId: parcel?.id,
