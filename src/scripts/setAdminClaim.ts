@@ -14,13 +14,18 @@
  */
 
 import { admin, firestore } from '../shared/config/firebaseConfig';
+import { UserRecord } from 'firebase-admin/auth';
 
 async function setAdminClaim(uid: string, isAdmin: boolean = true): Promise<void> {
   try {
     console.log(`Setting admin claim for user ${uid} to ${isAdmin}...`);
 
-    // Set custom claims in Firebase Auth
-    await admin.auth().setCustomUserClaims(uid, { admin: isAdmin });
+    // Preserve unrelated custom claims when changing admin access.
+    const existingUser = await admin.auth().getUser(uid);
+    await admin.auth().setCustomUserClaims(uid, {
+      ...(existingUser.customClaims ?? {}),
+      admin: isAdmin,
+    });
 
     // Also update Firestore user document
     const usersSnapshot = await firestore.collection('users').where('id', '==', uid).get();
@@ -54,11 +59,17 @@ async function setAdminClaim(uid: string, isAdmin: boolean = true): Promise<void
 async function listAdminUsers(): Promise<void> {
   try {
     console.log('Fetching users with admin privileges...\n');
-    
-    const listUsersResult = await admin.auth().listUsers(1000);
-    const adminUsers = listUsersResult.users.filter(
-      user => user.customClaims && (user.customClaims as any).admin === true
-    );
+    const adminUsers: UserRecord[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await admin.auth().listUsers(1000, pageToken);
+      adminUsers.push(
+        ...page.users.filter(
+          user => user.customClaims && (user.customClaims as any).admin === true,
+        ),
+      );
+      pageToken = page.pageToken;
+    } while (pageToken);
     
     if (adminUsers.length === 0) {
       console.log('No admin users found.');

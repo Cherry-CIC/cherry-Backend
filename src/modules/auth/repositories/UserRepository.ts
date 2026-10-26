@@ -1,12 +1,33 @@
 import { firestore, admin } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
-import { Timestamp, FieldValue, WriteBatch, FieldPath } from 'firebase-admin/firestore';
+import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 
 const DELETED_USER_MARKER = 'deleted_user';
 const DELETED_EMAIL_MARKER = 'deleted@anonymous.invalid';
 const REDACTED_VALUE = 'REDACTED';
 const FIRESTORE_BATCH_LIMIT = 450;
+
+const encodeUserCursor = (createdAt: Date | undefined, id: string): string =>
+  Buffer.from(JSON.stringify({
+    createdAt: createdAt?.getTime() ?? 0,
+    id,
+  })).toString('base64url');
+
+const decodeUserCursor = (cursor: string): { createdAt: number; id: string } => {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (!Number.isFinite(value.createdAt) || typeof value.id !== 'string' || !value.id) {
+      throw new Error('Invalid cursor');
+    }
+    return { createdAt: value.createdAt as number, id: value.id };
+  } catch {
+    throw new Error('Invalid cursor');
+  }
+};
 
 interface StorageFileLike {
   name: string;
@@ -55,30 +76,23 @@ export class UserRepository {
     cursor?: string,
   ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
     const collection = this.db.collection(this.collectionName);
-    let query: FirebaseFirestore.Query = collection.limit(limit * 3);
-    if (cursor) {
-      query = query.startAfter(cursor);
-    }
-    const snapshot = await query.get();
-
+    const snapshot = await collection.get();
     const nonAdminDocs = snapshot.docs.filter((doc) => {
       const data = doc.data();
       return data.isAdmin !== true;
     });
-
-    const allUsersSnapshot = await collection.get();
-    const totalNonAdmins = allUsersSnapshot.docs.filter((doc) => doc.data().isAdmin !== true).length;
 
     const enrichedUsers = await Promise.all(
       nonAdminDocs.map(async (doc) => {
         const data = doc.data();
         let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
 
-        if (!createdAt && data.id) {
+        const firebaseUid = typeof data.id === 'string' ? data.id : doc.id;
+        if (!createdAt && firebaseUid) {
           try {
-            const authUser = await admin.auth().getUser(data.id);
+            const authUser = await admin.auth().getUser(firebaseUid);
             createdAt = new Date(authUser.metadata.creationTime);
-          } catch (error) {
+          } catch {
             createdAt = undefined;
           }
         }
@@ -95,16 +109,32 @@ export class UserRepository {
     enrichedUsers.sort((a, b) => {
       const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return timeB - timeA;
+      return timeB - timeA || (b.id ?? '').localeCompare(a.id ?? '');
     });
 
-    const items = enrichedUsers.slice(0, limit);
+    const decodedCursor = cursor ? decodeUserCursor(cursor) : null;
+    const startIndex = decodedCursor
+      ? enrichedUsers.findIndex((user) => {
+          const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : 0;
+          const id = user.id ?? '';
+          return createdAt < decodedCursor.createdAt ||
+            (createdAt === decodedCursor.createdAt && id < decodedCursor.id);
+        })
+      : 0;
+    if (decodedCursor && startIndex < 0) {
+      return { items: [], hasMore: false, nextCursor: null, total: nonAdminDocs.length };
+    }
+
+    const pageStart = decodedCursor ? startIndex : 0;
+    const items = enrichedUsers.slice(pageStart, pageStart + limit);
+    const hasMore = pageStart + items.length < enrichedUsers.length;
+    const lastItem = items[items.length - 1];
 
     return {
       items,
-      hasMore: enrichedUsers.length > limit,
-      nextCursor: enrichedUsers.length > limit ? items[items.length - 1].id : null,
-      total: totalNonAdmins,
+      hasMore,
+      nextCursor: hasMore && lastItem ? encodeUserCursor(lastItem.createdAt, lastItem.id ?? '') : null,
+      total: nonAdminDocs.length,
     };
   }
 
