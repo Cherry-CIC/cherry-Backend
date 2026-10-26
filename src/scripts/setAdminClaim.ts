@@ -13,7 +13,7 @@
  *   node dist/scripts/setAdminClaim.js abc123xyz false  # Revoke admin
  */
 
-import { admin, firestore } from '../shared/config/firebaseConfig';
+import { admin } from '../shared/config/firebaseConfig';
 import { UserRecord } from 'firebase-admin/auth';
 
 async function setAdminClaim(uid: string, isAdmin: boolean = true): Promise<void> {
@@ -26,17 +26,6 @@ async function setAdminClaim(uid: string, isAdmin: boolean = true): Promise<void
       ...(existingUser.customClaims ?? {}),
       admin: isAdmin,
     });
-
-    // Also update Firestore user document
-    const usersSnapshot = await firestore.collection('users').where('id', '==', uid).get();
-    if (!usersSnapshot.empty) {
-      const userDoc = usersSnapshot.docs[0];
-      await userDoc.ref.update({
-        isAdmin: isAdmin,
-        updatedAt: new Date(),
-      });
-      console.log('✓ Updated Firestore user document');
-    }
 
     console.log(`✓ Successfully set admin claim for user ${uid}`);
     console.log(`  Admin status: ${isAdmin}`);

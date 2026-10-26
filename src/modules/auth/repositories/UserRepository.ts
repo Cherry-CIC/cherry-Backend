@@ -81,8 +81,6 @@ export class UserRepository {
       snapshot.docs.map(async (doc) => {
         const data = doc.data();
         const firebaseUid = typeof data.id === 'string' ? data.id : doc.id;
-        if (data.isAdmin === true) return null;
-
         let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
         let authUser: admin.auth.UserRecord | undefined;
         if (firebaseUid) {
