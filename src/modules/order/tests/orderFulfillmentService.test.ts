@@ -215,4 +215,32 @@ describe('OrderFulfillmentService', () => {
       dependencies.shipmentRepository.getShipmentByOrderId,
     ).toHaveBeenCalledWith(order.id);
   });
+
+  it('still sends the buyer email when the seller email fails', async () => {
+    const job = pendingJob();
+    const dependencies = createService(job);
+    dependencies.notificationService.sendSellerLabelEmail.mockRejectedValueOnce(
+      new Error('Seller email unavailable'),
+    );
+
+    await expect(
+      dependencies.service.processPaidOrder(order.id),
+    ).rejects.toThrow('Seller email unavailable');
+
+    expect(
+      dependencies.emailService.sendBuyerShipmentStartedEmail,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: order.email,
+        orderId: order.id,
+      }),
+    );
+    expect(job).toEqual(
+      expect.objectContaining({
+        shipmentCompleted: true,
+        sellerNotificationCompleted: false,
+        buyerNotificationCompleted: true,
+      }),
+    );
+  });
 });

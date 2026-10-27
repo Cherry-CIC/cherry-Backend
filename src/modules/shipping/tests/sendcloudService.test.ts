@@ -146,6 +146,23 @@ describe('SendcloudService.getPickupPoints()', () => {
     expect(axios.get).not.toHaveBeenCalled();
   });
 
+  it('downloads a QR PDF from a Sendcloud parcel document URL', async () => {
+    const pdf = Buffer.from('%PDF-QR');
+    const qrUrl =
+      'https://panel.sendcloud.sc/api/v2/parcels/732241016/documents/qr';
+    mockGet.mockResolvedValue({ data: pdf });
+
+    const result = await service.downloadLabelPdf(qrUrl);
+
+    expect(result).toEqual(pdf);
+    expect(mockGet).toHaveBeenCalledWith(qrUrl, {
+      responseType: 'arraybuffer',
+      headers: {
+        Accept: 'application/pdf',
+      },
+    });
+  });
+
   it('rejects non-Sendcloud label URLs before download', async () => {
     await expect(
       service.downloadLabelPdf('https://example.com/api/v2/labels/1'),

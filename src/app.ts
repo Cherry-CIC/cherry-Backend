@@ -12,6 +12,29 @@ import { stripeWebhook } from './modules/payment/controllers/paymentController';
 import './shared/config/firebaseConfig';
 
 const app = express();
+
+const allowedOrigins = new Set(
+    (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+);
+
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.has(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Vary', 'Origin');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.header('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
+    }
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(origin && allowedOrigins.has(origin) ? 204 : 403);
+        return;
+    }
+    next();
+});
+
 app.post(
     '/api/payment/webhook',
     express.raw({ type: 'application/json' }),

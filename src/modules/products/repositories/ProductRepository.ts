@@ -39,6 +39,32 @@ export class ProductRepository {
     return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
   }
 
+  async getAdminPage(
+    limit: number,
+    cursor?: string,
+  ): Promise<{ items: Product[]; hasMore: boolean; nextCursor: string | null; total: number }> {
+    const collection = this.db.collection(this.collectionName);
+    let query: FirebaseFirestore.Query = collection
+      .orderBy('updatedAt', 'desc')
+      .limit(limit + 1);
+    if (cursor) {
+      const cursorDoc = await collection.doc(cursor).get();
+      if (!cursorDoc.exists) throw new Error('Invalid cursor');
+      query = query.startAfter(cursorDoc);
+    }
+    const [snapshot, countSnapshot] = await Promise.all([
+      query.get(),
+      collection.count().get(),
+    ]);
+    const docs = snapshot.docs.slice(0, limit);
+    return {
+      items: docs.map((doc) => this.mapToProduct(doc.id, doc.data())),
+      hasMore: snapshot.docs.length > limit,
+      nextCursor: snapshot.docs.length > limit ? docs[docs.length - 1].id : null,
+      total: countSnapshot.data().count,
+    };
+  }
+
   async getById(id: string): Promise<Product | null> {
     const doc = await this.db.collection(this.collectionName).doc(id).get();
     if (!doc.exists) {
@@ -155,7 +181,7 @@ export class ProductRepository {
     status: 'active' | 'unlisted' | 'delete',
   ): Promise<Product | null> {
     const ref = this.db.collection(this.collectionName).doc(id);
-    return this.db.runTransaction(async (tx) => {
+    const result = await this.db.runTransaction(async (tx): Promise<Product | null> => {
       const doc = await tx.get(ref);
       if (!doc.exists)
         throw new ListingSafetyError(
@@ -193,6 +219,24 @@ export class ProductRepository {
           'This listing has no available stock.',
         );
       if (status === 'delete') {
+        const reports = await tx.get(
+          this.db.collection('reports').where('targetId', '==', id),
+        );
+        if (
+          data.hidden === true ||
+          data.moderationStatus === 'hidden' ||
+          data.retentionHold === true ||
+          reports.docs.some(
+            (report) =>
+              report.get('targetType') === 'product' &&
+              !['resolved', 'rejected'].includes(report.get('status')),
+          )
+        )
+          throw new ListingSafetyError(
+            409,
+            'LISTING_REVIEW_REQUIRED',
+            'This listing needs to be reviewed before it can be deleted.',
+          );
         tx.delete(ref);
         return null;
       }
@@ -204,6 +248,23 @@ export class ProductRepository {
       tx.update(ref, updates);
       return this.mapToProduct(id, { ...data, ...updates });
     });
+    if (status === 'delete') await this.deleteLikesByProductId(id);
+    return result;
+  }
+
+  private async deleteLikesByProductId(productId: string): Promise<void> {
+    while (true) {
+      const snapshot = await this.db
+        .collection('user_likes')
+        .where('productId', '==', productId)
+        .limit(450)
+        .get();
+      if (snapshot.empty) return;
+      const batch = this.db.batch();
+      snapshot.docs.forEach((like) => batch.delete(like.ref));
+      await batch.commit();
+      if (snapshot.size < 450) return;
+    }
   }
 
   async getProductsByCategory(categoryId: string): Promise<Product[]> {

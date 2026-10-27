@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
+import { sendListingSafetyError } from '../../../shared/utils/listingSafety';
 import {
   REPORT_STATUSES,
   REPORT_TARGET_TYPES,
@@ -11,7 +12,10 @@ import { ReportRepository } from '../repositories/ReportRepository';
 const safeString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
-export const createReport = async (req: Request, res: Response): Promise<void> => {
+export const createReport = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   const reporterId = (req as any).user?.uid;
   if (!reporterId) {
     ResponseHandler.unauthorized(res, 'Authentication required');
@@ -27,6 +31,7 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
     !targetType ||
     !REPORT_TARGET_TYPES.includes(targetType as ReportTargetType) ||
     !targetId ||
+    (targetType === 'product' && !/^[a-zA-Z0-9_-]{3,50}$/.test(targetId)) ||
     !reason ||
     reason.length > 100 ||
     (message && message.length > 2000)
@@ -48,7 +53,8 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
       message,
     });
     ResponseHandler.created(res, { report }, 'Report submitted');
-  } catch {
+  } catch (error) {
+    if (sendListingSafetyError(res, error)) return;
     console.error('reports.create_failed');
     ResponseHandler.internalServerError(res, 'Failed to submit report');
   }
@@ -65,7 +71,8 @@ export const listAdminReports = async (
 
   if (
     (status && !REPORT_STATUSES.includes(status as ReportStatus)) ||
-    (targetType && !REPORT_TARGET_TYPES.includes(targetType as ReportTargetType)) ||
+    (targetType &&
+      !REPORT_TARGET_TYPES.includes(targetType as ReportTargetType)) ||
     !Number.isInteger(limit) ||
     limit < 1 ||
     limit > 100
@@ -144,7 +151,8 @@ export const updateAdminReportStatus = async (
       return;
     }
     ResponseHandler.success(res, { report }, 'Report updated');
-  } catch {
+  } catch (error) {
+    if (sendListingSafetyError(res, error)) return;
     console.error('reports.update_failed');
     ResponseHandler.internalServerError(res, 'Failed to update report');
   }

@@ -1,5 +1,6 @@
 import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../../../shared/config/firebaseConfig';
+import { ListingSafetyError } from '../../../shared/utils/listingSafety';
 import { Report, ReportStatus, ReportTargetType } from '../model/Report';
 
 export interface CreateReportInput {
@@ -39,7 +40,22 @@ export class ReportRepository {
       createdAt: now,
       updatedAt: now,
     };
-    await ref.set(report);
+    if (input.targetType === 'product') {
+      await this.db.runTransaction(async (transaction) => {
+        const productRef = await this.requireProduct(
+          transaction,
+          input.targetId,
+        );
+        // Share a write with deletion as well as the product existence read.
+        // This prevents a report committing against a concurrently removed listing.
+        transaction.update(productRef, {
+          reportRevision: FieldValue.increment(1),
+        });
+        transaction.create(ref, report);
+      });
+    } else {
+      await ref.set(report);
+    }
     return { id: ref.id, ...report };
   }
 
@@ -49,9 +65,14 @@ export class ReportRepository {
     if (input.targetType) {
       query = query.where('targetType', '==', input.targetType);
     }
-    query = query.orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc');
+    query = query
+      .orderBy('createdAt', 'desc')
+      .orderBy(FieldPath.documentId(), 'desc');
     if (input.cursor) {
-      const cursor = await this.db.collection('reports').doc(input.cursor).get();
+      const cursor = await this.db
+        .collection('reports')
+        .doc(input.cursor)
+        .get();
       if (!cursor.exists) throw new Error('cursor_not_found');
       query = query.startAfter(cursor);
     }
@@ -59,7 +80,8 @@ export class ReportRepository {
     const docs = snapshot.docs.slice(0, input.limit);
     return {
       reports: docs.map((doc) => this.map(doc.id, doc.data())),
-      nextCursor: snapshot.docs.length > input.limit ? docs[docs.length - 1].id : null,
+      nextCursor:
+        snapshot.docs.length > input.limit ? docs[docs.length - 1].id : null,
       hasMore: snapshot.docs.length > input.limit,
     };
   }
@@ -76,8 +98,6 @@ export class ReportRepository {
     note?: string,
   ): Promise<Report | null> {
     const ref = this.db.collection('reports').doc(id);
-    const doc = await ref.get();
-    if (!doc.exists) return null;
     const updates: Record<string, unknown> = {
       status,
       updatedAt: FieldValue.serverTimestamp(),
@@ -90,8 +110,43 @@ export class ReportRepository {
       updates.resolvedAt = FieldValue.delete();
       updates.resolvedBy = FieldValue.delete();
     }
-    await ref.update(updates);
+    const exists = await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists) return false;
+      const data = doc.data()!;
+      if (
+        data.targetType === 'product' &&
+        (status === 'open' || status === 'reviewing')
+      ) {
+        const productRef = await this.requireProduct(
+          transaction,
+          data.targetId,
+        );
+        transaction.update(productRef, {
+          reportRevision: FieldValue.increment(1),
+        });
+      }
+      transaction.update(ref, updates);
+      return true;
+    });
+    if (!exists) return null;
     return this.getById(id);
+  }
+
+  private async requireProduct(
+    transaction: FirebaseFirestore.Transaction,
+    productId: string,
+  ): Promise<FirebaseFirestore.DocumentReference> {
+    const ref = this.db.collection('products').doc(productId);
+    const product = await transaction.get(ref);
+    if (!product.exists) {
+      throw new ListingSafetyError(
+        404,
+        'LISTING_NOT_FOUND',
+        'This listing is no longer available.',
+      );
+    }
+    return ref;
   }
 
   private map(id: string, data: FirebaseFirestore.DocumentData): Report {

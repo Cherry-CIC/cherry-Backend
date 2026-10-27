@@ -15,11 +15,24 @@ import {
 	updateAdminReportStatus,
 } from '../../reports/controllers/reportController';
 import {
-	moderateProduct,
-	moderateUser,
+  moderateProduct,
+  moderateUser,
 } from '../../moderation/controllers/moderationController';
+import { resendAdminSellerShippingEmail } from '../controllers/adminShippingEmailController';
+import { listAdminOrders, listAdminProducts, listAdminShipments, listAdminUsers } from '../controllers/adminDataController';
 
 const router = Router();
+
+router.post(
+  '/shipping-email-issues/:orderId/resend',
+  authMiddleware,
+  adminMiddleware,
+  resendAdminSellerShippingEmail,
+);
+router.get('/orders', authMiddleware, adminMiddleware, listAdminOrders);
+router.get('/users', authMiddleware, adminMiddleware, listAdminUsers);
+router.get('/products', authMiddleware, adminMiddleware, listAdminProducts);
+router.get('/shipments', authMiddleware, adminMiddleware, listAdminShipments);
 
 /**
  * @swagger

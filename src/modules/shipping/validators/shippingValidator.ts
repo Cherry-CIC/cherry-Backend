@@ -42,7 +42,7 @@ export const createTestParcelValidator = Joi.object({
     to_service_point: Joi.number().integer().optional(),
     weight: Joi.alternatives(Joi.string(), Joi.number()).required(),
     order_number: Joi.string().required(),
-  }).required(),
+  }).optional(),
 });
 
 export const checkoutShippingOptionsQueryValidator = Joi.object({
@@ -107,5 +107,5 @@ export const sendcloudWebhookValidator = Joi.object({
     status: Joi.object({
       message: Joi.string().allow('', null).optional(),
     }).optional(),
-  }).required(),
+  }).optional(),
 });

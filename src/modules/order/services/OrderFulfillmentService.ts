@@ -63,8 +63,10 @@ export class OrderFulfillmentService {
       let sendcloudParcel: Awaited<
         ReturnType<ShipmentService['createShipmentForPaidOrder']>
       >['sendcloudParcel'] = null;
+      let seller: Awaited<ReturnType<UserRepository['getById']>> | undefined;
 
       if (!job.shipmentCompleted) {
+        seller = await this.userRepository.getById(order.sellerId);
         const shipmentResult =
           await this.shipmentService.createShipmentForPaidOrder(order);
         shipment = shipmentResult.shipment;
@@ -87,46 +89,84 @@ export class OrderFulfillmentService {
         }
       }
 
+      const notificationErrors: unknown[] = [];
+
       if (!job.sellerNotificationCompleted) {
-        const seller = await this.userRepository.getById(order.sellerId);
-        if (!seller) {
-          console.warn(`Seller profile not found for order ${orderId}`);
-        } else {
-          const result = await this.notificationService.sendSellerLabelEmail(
-            order,
-            seller,
-            shipment,
-          );
-          if (result.sent) {
-            await this.orderRepository.updateOrder(orderId, {
-              sellerSoldEmailSentAt: new Date(),
+        try {
+          const sellerForNotification =
+            seller === undefined
+              ? await this.userRepository.getById(order.sellerId)
+              : seller;
+          if (!sellerForNotification) {
+            console.warn(`Seller profile not found for order ${orderId}`);
+            await this.orderRepository.updateFulfillmentJob(orderId, {
+              sellerEmailStatus: 'failed',
+              sellerNotificationCompleted: false,
+              labelAttachmentStatus: 'not_available',
+              labelAttachmentError: 'Seller profile not found',
+              lastSellerEmailAttemptAt: new Date(),
             });
+            notificationErrors.push(new Error('Seller profile not found'));
+          } else {
+            const result = await this.notificationService.sendSellerLabelEmail(
+              order,
+              sellerForNotification,
+              shipment,
+            );
+            if (result.sent) {
+              await this.orderRepository.updateOrder(orderId, {
+                sellerSoldEmailSentAt: new Date(),
+              });
+            }
+            await this.orderRepository.updateFulfillmentJob(orderId, {
+              sellerEmailStatus: result.sent ? 'sent' : 'skipped',
+              labelAttachmentStatus:
+                result.labelAttachmentStatus ?? 'not_available',
+              labelAttachmentError: result.labelAttachmentError ?? null,
+              lastSellerEmailAttemptAt: new Date(),
+              sellerNotificationCompleted:
+                result.sent || result.skipReason === 'email_disabled',
+            });
+            if (!result.sent && result.skipReason !== 'email_disabled') {
+              notificationErrors.push(
+                new Error(result.skipReason ?? 'Seller email was not sent'),
+              );
+            }
           }
+        } catch (error) {
+          console.error(`Seller notification failed for order ${orderId}:`, error);
+          notificationErrors.push(error);
         }
-        await this.orderRepository.updateFulfillmentJob(orderId, {
-          sellerNotificationCompleted: true,
-        });
       }
 
       if (!job.buyerNotificationCompleted) {
-        const buyer = await this.userRepository.getById(order.userId);
-        const result = await this.emailService.sendBuyerShipmentStartedEmail({
-          to: order.email,
-          buyerName:
-            buyer?.firstname || buyer?.displayName || order.shipping.name,
-          productName: order.productName,
-          orderId,
-          trackingNumber: shipment.trackingNumber,
-          trackingUrl: shipment.trackingUrl,
-        });
-        if (result.sent) {
-          await this.orderRepository.updateOrder(orderId, {
-            buyerShipmentStartedEmailSentAt: new Date(),
+        try {
+          const buyer = await this.userRepository.getById(order.userId);
+          const result = await this.emailService.sendBuyerShipmentStartedEmail({
+            to: order.email,
+            buyerName:
+              buyer?.firstname || buyer?.displayName || order.shipping.name,
+            productName: order.productName,
+            orderId,
+            trackingNumber: shipment.trackingNumber,
+            trackingUrl: shipment.trackingUrl,
           });
+          if (result.sent) {
+            await this.orderRepository.updateOrder(orderId, {
+              buyerShipmentStartedEmailSentAt: new Date(),
+            });
+          }
+          await this.orderRepository.updateFulfillmentJob(orderId, {
+            buyerNotificationCompleted: true,
+          });
+        } catch (error) {
+          console.error(`Buyer notification failed for order ${orderId}:`, error);
+          notificationErrors.push(error);
         }
-        await this.orderRepository.updateFulfillmentJob(orderId, {
-          buyerNotificationCompleted: true,
-        });
+      }
+
+      if (notificationErrors.length > 0) {
+        throw notificationErrors[0];
       }
 
       await this.orderRepository.completeFulfillmentJob(orderId);

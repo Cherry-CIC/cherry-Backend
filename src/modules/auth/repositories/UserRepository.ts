@@ -1,4 +1,4 @@
-import { firestore } from '../../../shared/config/firebaseConfig';
+import { firestore, admin } from '../../../shared/config/firebaseConfig';
 import { User } from '../model/User';
 import { Timestamp, FieldValue, WriteBatch } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -7,6 +7,27 @@ const DELETED_USER_MARKER = 'deleted_user';
 const DELETED_EMAIL_MARKER = 'deleted@anonymous.invalid';
 const REDACTED_VALUE = 'REDACTED';
 const FIRESTORE_BATCH_LIMIT = 450;
+
+const encodeUserCursor = (createdAt: Date | undefined, id: string): string =>
+  Buffer.from(JSON.stringify({
+    createdAt: createdAt?.getTime() ?? 0,
+    id,
+  })).toString('base64url');
+
+const decodeUserCursor = (cursor: string): { createdAt: number; id: string } => {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (!Number.isFinite(value.createdAt) || typeof value.id !== 'string' || !value.id) {
+      throw new Error('Invalid cursor');
+    }
+    return { createdAt: value.createdAt as number, id: value.id };
+  } catch {
+    throw new Error('Invalid cursor');
+  }
+};
 
 interface StorageFileLike {
   name: string;
@@ -48,6 +69,74 @@ export class UserRepository {
             : data.updatedAt,
       } as User;
     });
+  }
+
+  async getAdminPage(
+    limit: number,
+    cursor?: string,
+  ): Promise<{ items: User[]; hasMore: boolean; nextCursor: string | null; total: number }> {
+    const collection = this.db.collection(this.collectionName);
+    const snapshot = await collection.get();
+    const enrichedUsers = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const data = doc.data();
+        const firebaseUid = typeof data.id === 'string' ? data.id : doc.id;
+        let createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt;
+        let authUser: admin.auth.UserRecord | undefined;
+        if (firebaseUid) {
+          try {
+            authUser = await admin.auth().getUser(firebaseUid);
+          } catch {
+            authUser = undefined;
+          }
+        }
+
+        if (authUser?.customClaims?.admin === true) return null;
+        if (!createdAt && authUser?.metadata.creationTime) {
+          createdAt = new Date(authUser.metadata.creationTime);
+        }
+
+        return {
+          id: doc.id,
+          ...data,
+          createdAt,
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
+        } as User;
+      }),
+    );
+
+    const visibleUsers = enrichedUsers.filter((user): user is User => user !== null);
+
+    visibleUsers.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA || (b.id ?? '').localeCompare(a.id ?? '');
+    });
+
+    const decodedCursor = cursor ? decodeUserCursor(cursor) : null;
+    const startIndex = decodedCursor
+      ? visibleUsers.findIndex((user) => {
+          const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : 0;
+          const id = user.id ?? '';
+          return createdAt < decodedCursor.createdAt ||
+            (createdAt === decodedCursor.createdAt && id < decodedCursor.id);
+        })
+      : 0;
+    if (decodedCursor && startIndex < 0) {
+      return { items: [], hasMore: false, nextCursor: null, total: visibleUsers.length };
+    }
+
+    const pageStart = decodedCursor ? startIndex : 0;
+    const items = visibleUsers.slice(pageStart, pageStart + limit);
+    const hasMore = pageStart + items.length < visibleUsers.length;
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && lastItem ? encodeUserCursor(lastItem.createdAt, lastItem.id ?? '') : null,
+      total: visibleUsers.length,
+    };
   }
 
   async getById(id: string): Promise<User | null> {
