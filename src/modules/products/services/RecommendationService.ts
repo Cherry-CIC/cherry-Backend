@@ -47,7 +47,10 @@ export class RecommendationService {
 
   constructor(
     private productService: ProductService,
-    private productLikeRepo: Pick<ProductLikeRepository, 'getLikedProductIds'>,
+    private productLikeRepo: Pick<
+      ProductLikeRepository,
+      'getLikedProductIds' | 'getLikedProductIdsAmong'
+    >,
     private orderRepo: Pick<OrderRepository, 'getPurchasedProductIds'>,
     private blockRepo: Pick<UserBlockRepository, 'getBlockedUserIds'>,
     private now: () => Date = () => new Date(),
@@ -145,20 +148,24 @@ export class RecommendationService {
   }
 
   // Something on a later page may have sold or been hidden since page 1, or
-  // the user may have blocked its seller since then.
+  // the user may have blocked its seller, liked it or bought it since then.
   private async loadStillForSale(
     userId: string,
     ids: string[],
   ): Promise<Product[]> {
-    const [products, blockedUserIds] = await Promise.all([
+    const [products, blockedUserIds, likedIds, boughtIds] = await Promise.all([
       this.loadProducts(ids),
       this.blockRepo.getBlockedUserIds(userId),
+      this.productLikeRepo.getLikedProductIdsAmong(userId, ids),
+      this.orderRepo.getPurchasedProductIds(userId),
     ]);
+    const likedOrBought = new Set([...likedIds, ...boughtIds]);
     return products.filter(
       (product) =>
         this.productService.isAvailableForPurchase(product) &&
         !this.productService.isModerationHidden(product) &&
-        !blockedUserIds.has(product.userId),
+        !blockedUserIds.has(product.userId) &&
+        !likedOrBought.has(product.id as string),
     );
   }
 }

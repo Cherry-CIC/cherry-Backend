@@ -61,7 +61,12 @@ const setUp = (
 
   const service = new RecommendationService(
     productService as unknown as ProductService,
-    { getLikedProductIds: jest.fn(async () => [...liked]) },
+    {
+      getLikedProductIds: jest.fn(async () => [...liked]),
+      getLikedProductIdsAmong: jest.fn(async (_userId, productIds: string[]) =>
+        productIds.filter((id) => liked.includes(id)),
+      ),
+    },
     { getPurchasedProductIds: jest.fn(async () => options.bought ?? []) },
     { getBlockedUserIds: jest.fn(async () => new Set(options.blocked)) },
     () => now,
@@ -150,6 +155,22 @@ describe('RecommendationService', () => {
 
     store.set('p22', { ...store.get('p22')!, status: 'sold', number: 0 });
     blocked.push('rude-seller');
+
+    const pageTwo = await service.getRecommendedPage('newbie', {
+      limit: 20,
+      cursor: pageOne.nextCursor!,
+    });
+    expect(ids(pageTwo.items)).toEqual(['p21', 'p23', 'p25']);
+  });
+
+  it('drops an item they liked or bought after page 1', async () => {
+    const bought: string[] = [];
+    const { service, liked } = setUp(shop(), { bought });
+    const pageOne = await service.getRecommendedPage('newbie', { limit: 20 });
+
+    // Liked in search, and 1 of a few bought, so it's still for sale.
+    liked.push('p22');
+    bought.push('p24');
 
     const pageTwo = await service.getRecommendedPage('newbie', {
       limit: 20,

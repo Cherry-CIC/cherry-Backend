@@ -155,6 +155,27 @@ export class ProductLikeRepository {
             .map((like) => like.productId);
     }
 
+    // Which of these products the user has liked, for the recommended feed's
+    // later pages. Each like's id is made from the user and product ids, so
+    // this reads those likes directly instead of searching.
+    async getLikedProductIdsAmong(
+        userId: string,
+        productIds: string[],
+    ): Promise<string[]> {
+        // getAll needs at least one document.
+        if (productIds.length === 0) {
+            return [];
+        }
+        const likes = await this.db.getAll(
+            ...productIds.map((productId) =>
+                this.db
+                    .collection(this.likesCollection)
+                    .doc(this.buildLikeId(userId, productId)),
+            ),
+        );
+        return productIds.filter((_, index) => likes[index].exists);
+    }
+
     async deleteLikesByUserId(firebaseUid: string): Promise<number> {
         const snapshot = await this.db
             .collection(this.likesCollection)
