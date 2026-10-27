@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Product } from '../model/Product';
 import { ProductService } from '../services/ProductService';
 import {
@@ -124,7 +125,7 @@ describe('RecommendationService', () => {
     expect(pageOne.hasMore).toBe(true);
     expect(decodeCursor(pageOne.nextCursor!)).toEqual({
       position: 20,
-      lastId: 'p20',
+      feedId: expect.any(String),
     });
 
     const pageTwo = await service.getRecommendedPage('newbie', {
@@ -157,61 +158,78 @@ describe('RecommendationService', () => {
     expect(ids(pageTwo.items)).toEqual(['p21', 'p23', 'p25']);
   });
 
-  it('sorts again when the saved order is missing', async () => {
+  it('says the feed expired when its saved order is gone', async () => {
     // For example after a server restart: page 2 arrives with no page 1.
     const { service, productService } = setUp(shop());
 
-    const page = await service.getRecommendedPage('newbie', {
-      limit: 20,
-      cursor: encodeCursor(20),
-    });
-
-    expect(ids(page.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
-    expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
+    await expect(
+      service.getRecommendedPage('newbie', {
+        limit: 20,
+        cursor: encodeCursor(20, randomUUID()),
+      }),
+    ).rejects.toThrow('Feed expired');
+    // It didn't sort again, which could repeat or skip items.
+    expect(productService.getNewestAvailableProducts).not.toHaveBeenCalled();
   });
 
-  it('carries on after the last item seen when the order is sorted again', async () => {
-    const { service: before } = setUp(shop());
-    const pageOne = await before.getRecommendedPage('newbie', { limit: 20 });
+  it('keeps a separate order for each phone', async () => {
+    const { service, store } = setUp(shop());
+    const phone = await service.getRecommendedPage('newbie', { limit: 20 });
 
-    // After a restart, a new listing now sits at the top of the order.
-    const { service: after } = setUp([
-      makeProduct('new', { createdAt: now }),
-      ...shop(),
-    ]);
-    const pageTwo = await after.getRecommendedPage('newbie', {
+    // A new listing arrives, then the same user opens Home on a tablet. The
+    // tablet's order starts with the new item, so it's 1 behind the phone's.
+    store.set('new', makeProduct('new', { createdAt: now }));
+    await service.getRecommendedPage('newbie', { limit: 20 });
+
+    const phoneNext = await service.getRecommendedPage('newbie', {
       limit: 20,
-      cursor: pageOne.nextCursor!,
+      cursor: phone.nextCursor!,
     });
-
-    expect(ids(pageTwo.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
+    expect(ids(phoneNext.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
   });
 
-  it('drops the user served longest ago when too many are saved', async () => {
-    const { service, productService } = setUp(shop());
+  it("doesn't let a user page through someone else's feed", async () => {
+    const { service } = setUp(shop());
+    const theirs = await service.getRecommendedPage('newbie', { limit: 20 });
+
+    await expect(
+      service.getRecommendedPage('someone-else', {
+        limit: 20,
+        cursor: theirs.nextCursor!,
+      }),
+    ).rejects.toThrow('Feed expired');
+  });
+
+  it('drops the feed used longest ago when too many are saved', async () => {
+    const { service } = setUp(shop());
     const pageOne = await service.getRecommendedPage('first', { limit: 20 });
 
     // 1,000 more users push 'first' out of the saved orders.
     for (let user = 1; user <= MAX_SAVED_FEEDS; user++) {
       await service.getRecommendedPage(`user-${user}`, { limit: 20 });
     }
-    productService.getNewestAvailableProducts.mockClear();
 
-    const pageTwo = await service.getRecommendedPage('first', {
-      limit: 20,
-      cursor: pageOne.nextCursor!,
-    });
-
-    // Their order was dropped, so it sorts again, and page 2 still works.
-    expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
-    expect(ids(pageTwo.items)).toEqual(['p21', 'p22', 'p23', 'p24', 'p25']);
+    // Their feed was dropped, so page 2 says it expired.
+    await expect(
+      service.getRecommendedPage('first', {
+        limit: 20,
+        cursor: pageOne.nextCursor!,
+      }),
+    ).rejects.toThrow('Feed expired');
   });
 
   it('rejects a broken cursor', async () => {
     const { service } = setUp(shop());
-    const notANumber = Buffer.from('{"position":"x"}').toString('base64');
+    const base64 = (text: string) => Buffer.from(text).toString('base64');
+    const broken = [
+      'not a cursor',
+      encodeCursor(-1, randomUUID()),
+      base64('{"position":"x"}'),
+      base64('{"position":20}'), // no feed id
+      encodeCursor(20, 'someone:else'), // not a feed id we made
+    ];
 
-    for (const cursor of ['not a cursor', encodeCursor(-1), notANumber]) {
+    for (const cursor of broken) {
       await expect(
         service.getRecommendedPage('newbie', { cursor }),
       ).rejects.toThrow('Invalid cursor');

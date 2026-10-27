@@ -183,4 +183,19 @@ describe('productController.getRecommendedProducts', () => {
     );
   });
 
+  it('answers 410 when the feed expired, so the app loads page 1 again', async () => {
+    recommendationService.getRecommendedPage.mockRejectedValue(
+      new Error('Feed expired'),
+    );
+    const req: any = { user: { uid: 'buyer-1' }, query: { cursor: 'old' } };
+    const res = createResponse();
+
+    await getRecommendedProducts(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(410);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, message: 'Feed expired' }),
+    );
+  });
+
 });

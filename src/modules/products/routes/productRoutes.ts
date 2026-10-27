@@ -282,7 +282,9 @@ router.get(
  *       they blocked are left out. Every 5th item comes from a category outside
  *       their usual taste. Users with no likes or purchases get newest first.
  *       The order is worked out on the first page and stays the same until a
- *       request without a cursor. Only limit and cursor are used.
+ *       request without a cursor. Only limit and cursor are used. If the saved
+ *       order is gone (for example after a server restart), a later page
+ *       answers 410, and the app should load the first page again.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -344,6 +346,8 @@ router.get(
  *         description: Invalid cursor or query
  *       401:
  *         description: Missing or invalid login token
+ *       410:
+ *         description: Feed expired. Load the first page again, without a cursor
  *       500:
  *         description: Server error
  */

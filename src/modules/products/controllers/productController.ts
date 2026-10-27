@@ -230,6 +230,19 @@ export const getRecommendedProducts = async (
       ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
       return;
     }
+    // 410 Gone: this feed's saved order no longer exists, so the app loads
+    // page 1 again.
+    if (err instanceof Error && err.message === 'Feed expired') {
+      ResponseHandler.custom(
+        res,
+        410,
+        false,
+        'Feed expired',
+        undefined,
+        err.message,
+      );
+      return;
+    }
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch recommended products',

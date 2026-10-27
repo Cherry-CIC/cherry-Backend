@@ -3,6 +3,9 @@
 // Page 1 reads the user's likes, purchases and blocks, scores the newest
 // products against their taste, and remembers the order. Later pages walk
 // through that saved order, so it stays the same until the user refreshes.
+// If the saved order is gone, a later page answers "Feed expired", and the
+// app starts again from page 1.
+import { randomUUID } from 'crypto';
 import { Product } from '../model/Product';
 import { ProductLikeRepository } from '../repositories/ProductLikeRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
@@ -22,8 +25,9 @@ export const MAX_CANDIDATES = 200;
 // saves one product read per like.
 export const MAX_PROFILE_LIKES = 100;
 
-// How many users' feed orders are kept in memory at once. When it's full,
-// the one used longest ago is dropped, and their next page sorts again.
+// How many feed orders are kept in memory at once. Each page 1 starts a new
+// one, so a user on 2 phones has 2. When it's full, the one used longest ago
+// is dropped, and its next page answers "Feed expired".
 export const MAX_SAVED_FEEDS = 1000;
 
 // Same page sizes as /with-details.
@@ -36,9 +40,9 @@ export interface RecommendedQuery {
 }
 
 export class RecommendationService {
-  // user id -> that user's sorted product ids, from their last page 1.
-  // Kept in memory only and never saved. A refresh replaces it, a server
-  // restart empties it, and it holds at most MAX_SAVED_FEEDS users.
+  // "user id:feed id" -> that feed's sorted product ids, from its page 1.
+  // Kept in memory only and never saved. A server restart empties it, and it
+  // holds at most MAX_SAVED_FEEDS feeds.
   private feeds = new Map<string, string[]>();
 
   constructor(
@@ -54,46 +58,43 @@ export class RecommendationService {
     query: RecommendedQuery,
   ): Promise<PaginatedResult<ProductWithDetails>> {
     const limit = normaliseLimit(query.limit);
+
+    // No cursor means page 1 or a refresh: sort again, as a new feed with its
+    // own id. Later pages walk through that feed's saved order.
     const cursor: Cursor = query.cursor
       ? decodeCursor(query.cursor)
-      : { position: 0 };
-    let position = cursor.position;
-
-    // No cursor means page 1 or a refresh: sort again. Later pages reuse the
-    // saved order, unless it's missing (for example after a server restart).
-    let feed = query.cursor ? this.feeds.get(userId) : undefined;
+      : { position: 0, feedId: randomUUID() };
+    const key = `${userId}:${cursor.feedId}`;
+    const feed = query.cursor
+      ? this.feeds.get(key)
+      : await this.buildFeed(userId);
+    // The saved order is gone, for example after a server restart. Sorting
+    // again could repeat or skip items, so the app starts again from page 1.
     if (!feed) {
-      feed = await this.buildFeed(userId);
-      // The new order may have moved, so carry on after the last item they
-      // saw, if it's still there.
-      const lastSeen = cursor.lastId ? feed.indexOf(cursor.lastId) : -1;
-      if (lastSeen >= 0) {
-        position = lastSeen + 1;
-      }
+      throw new Error('Feed expired');
     }
-    this.saveFeed(userId, feed);
+    this.saveFeed(key, feed);
 
-    const pageIds = feed.slice(position, position + limit);
+    const pageIds = feed.slice(cursor.position, cursor.position + limit);
     const products = await this.loadStillForSale(userId, pageIds);
     const items = await this.productService.enrichProductsWithDetails(products);
-    const nextPosition = position + limit;
+    const nextPosition = cursor.position + limit;
     const hasMore = nextPosition < feed.length;
-    const lastId = items[items.length - 1]?.id;
 
     return {
       items,
       limit,
-      nextCursor: hasMore ? encodeCursor(nextPosition, lastId) : null,
+      nextCursor: hasMore ? encodeCursor(nextPosition, cursor.feedId) : null,
       hasMore,
     };
   }
 
-  // A Map keeps the order items were added. Taking this user out and adding
-  // them back moves them to the end, so the first one is always the user
-  // served longest ago, and that's the one dropped when there are too many.
-  private saveFeed(userId: string, feed: string[]): void {
-    this.feeds.delete(userId);
-    this.feeds.set(userId, feed);
+  // A Map keeps the order items were added. Taking this feed out and adding
+  // it back moves it to the end, so the first one is always the feed used
+  // longest ago, and that's the one dropped when there are too many.
+  private saveFeed(key: string, feed: string[]): void {
+    this.feeds.delete(key);
+    this.feeds.set(key, feed);
     if (this.feeds.size > MAX_SAVED_FEEDS) {
       const [oldest] = this.feeds.keys();
       this.feeds.delete(oldest);
@@ -170,17 +171,20 @@ function normaliseLimit(limit: number | undefined): number {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
 }
 
-// The cursor is a bookmark: { "position": 20, "lastId": "abc" } written in
-// base64, the same style as the /with-details cursor. The app passes it back
-// unread. lastId is the last item they saw, used only if the order is sorted
-// again.
+// The cursor is a bookmark: { "position": 20, "feedId": "1b9d6bcd-..." }
+// written in base64, the same style as the /with-details cursor. The app
+// passes it back unread. feedId says which saved order it belongs to.
 export interface Cursor {
   position: number;
-  lastId?: string;
+  feedId: string;
 }
 
-export function encodeCursor(position: number, lastId?: string): string {
-  return Buffer.from(JSON.stringify({ position, lastId }), 'utf8').toString(
+// The shape of the ids randomUUID makes. Checking it means a feed id can't
+// contain the ":" used in the saved orders' "user id:feed id" keys.
+const FEED_ID = /^[0-9a-f-]{36}$/;
+
+export function encodeCursor(position: number, feedId: string): string {
+  return Buffer.from(JSON.stringify({ position, feedId }), 'utf8').toString(
     'base64',
   );
 }
@@ -188,10 +192,13 @@ export function encodeCursor(position: number, lastId?: string): string {
 export function decodeCursor(cursor: string): Cursor {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
-    if (Number.isInteger(parsed?.position) && parsed.position >= 0) {
-      const lastId =
-        typeof parsed.lastId === 'string' ? parsed.lastId : undefined;
-      return { position: parsed.position, lastId };
+    if (
+      Number.isInteger(parsed?.position) &&
+      parsed.position >= 0 &&
+      typeof parsed.feedId === 'string' &&
+      FEED_ID.test(parsed.feedId)
+    ) {
+      return { position: parsed.position, feedId: parsed.feedId };
     }
   } catch {
     // Not base64 JSON: handled below.
