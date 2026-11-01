@@ -85,6 +85,7 @@ export interface Order {
   paidAt?: Date;
   refundedAt?: Date;
   updatedAt?: Date;
+  lockerDeliveredAt?: Date;
   buyerConfirmedReceived?: boolean;
   buyerConfirmedReceivedAt?: Date;
   sellerSoldEmailSentAt?: Date;

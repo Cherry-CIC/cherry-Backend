@@ -1,7 +1,7 @@
 const mockGetDeliveryOptions = jest.fn();
 const mockGetPickupPoints = jest.fn();
 const mockGetShipmentBySendcloudId = jest.fn();
-const mockUpdateShipment = jest.fn();
+const mockApplyTrackingEvent = jest.fn().mockResolvedValue(true);
 const mockUpdateOrder = jest.fn();
 const mockGetOrderById = jest.fn();
 const mockGetUserById = jest.fn();
@@ -19,7 +19,7 @@ jest.mock('../services/CheckoutShippingService', () => ({
 jest.mock('../repositories/ShipmentRepository', () => ({
   ShipmentRepository: jest.fn().mockImplementation(() => ({
     getShipmentBySendcloudId: mockGetShipmentBySendcloudId,
-    updateShipment: mockUpdateShipment,
+    applyTrackingEvent: mockApplyTrackingEvent,
     getShipmentByOrderId: jest.fn(),
     getAllShipments: jest.fn(),
   })),
@@ -181,13 +181,14 @@ describe('shippingController', () => {
     const req: any = {
       body: {
         action: 'parcel_status_changed',
-        timestamp: '2026-03-28T12:00:00Z',
+        timestamp: '2026-03-28T13:45:00Z',
+        carrier_status_change_timestamp: Date.parse('2026-03-28T12:00:00Z') / 1000,
         parcel: {
           id: 123,
           tracking_number: 'TRACK123',
           tracking_url: 'https://track.example/123',
           status: {
-            message: 'Delivered',
+            message: 'Awaiting customer pickup',
           },
         },
       },
@@ -196,16 +197,15 @@ describe('shippingController', () => {
 
     await handleSendcloudWebhook(req, res);
 
-    expect(mockUpdateShipment).toHaveBeenCalledWith('shipment-1', {
+    expect(mockApplyTrackingEvent).toHaveBeenCalledWith(expect.objectContaining({ id: 'shipment-1' }), {
       status: 'delivered',
       trackingNumber: 'TRACK123',
       trackingUrl: 'https://track.example/123',
-    });
-    expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
+    }, {
       shipmentStatus: 'delivered',
       shipmentId: 'shipment-1',
       status: 'delivered',
-    });
+    }, new Date('2026-03-28T12:00:00Z'), true);
     expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith({
       to: 'buyer@example.com',
       buyerName: 'Buyer',
@@ -235,7 +235,7 @@ describe('shippingController', () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ received: true });
-    expect(mockUpdateShipment).not.toHaveBeenCalled();
+    expect(mockApplyTrackingEvent).not.toHaveBeenCalled();
     expect(mockUpdateOrder).not.toHaveBeenCalled();
   });
 

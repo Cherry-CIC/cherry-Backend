@@ -149,6 +149,9 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
+    confirmationDeadline: order.lockerDeliveredAt
+      ? new Date(order.lockerDeliveredAt.getTime() + 48 * 60 * 60 * 1000).toISOString()
+      : null,
     canTrack: Boolean(shipment?.trackingUrl),
     trackingNumber: shipment?.trackingNumber ?? null,
     trackingUrl: shipment?.trackingUrl ?? null,
