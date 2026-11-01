@@ -205,7 +205,7 @@ describe('shippingController', () => {
       shipmentStatus: 'delivered',
       shipmentId: 'shipment-1',
       status: 'delivered',
-    }, new Date('2026-03-28T12:00:00Z'), true);
+    }, new Date('2026-03-28T13:45:00Z'), new Date('2026-03-28T12:00:00Z'));
     expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith({
       to: 'buyer@example.com',
       buyerName: 'Buyer',
