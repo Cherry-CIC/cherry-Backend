@@ -109,28 +109,28 @@ export class ShipmentRepository {
     shipment: Shipment,
     shipmentUpdates: Partial<Shipment>,
     orderUpdates: Partial<Order>,
-    eventTime: Date | null,
-    lockerArrival: boolean,
+    sendcloudTime: Date | null,
+    lockerArrival: Date | null,
   ): Promise<boolean> {
     const shipmentRef = firestore.collection(this.collection).doc(shipment.id);
     const orderRef = firestore.collection('orders').doc(shipment.orderId);
     return firestore.runTransaction(async (tx) => {
       const current = await tx.get(shipmentRef);
       const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
-      if (lockerArrival && eventTime) {
+      if (lockerArrival) {
         const order = await tx.get(orderRef);
         const arrival = order.get('lockerDeliveredAt')?.toMillis();
         if (order.get('deliveryType') === 'pickup_point' &&
-            (arrival == null || eventTime.getTime() < arrival)) {
-          tx.update(orderRef, { lockerDeliveredAt: eventTime });
+            (arrival == null || lockerArrival.getTime() < arrival)) {
+          tx.update(orderRef, { lockerDeliveredAt: lockerArrival });
         }
       }
-      if (lastEvent != null && (!eventTime || eventTime.getTime() < lastEvent)) {
+      if (lastEvent != null && (!sendcloudTime || sendcloudTime.getTime() < lastEvent)) {
         return false;
       }
       tx.update(shipmentRef, {
         ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),
-        ...(eventTime && { lastTrackingEventMs: eventTime.getTime() }),
+        ...(sendcloudTime && { lastTrackingEventMs: sendcloudTime.getTime() }),
         updatedAt: new Date(),
       });
       tx.update(orderRef, { ...orderUpdates });

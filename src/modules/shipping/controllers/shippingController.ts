@@ -255,8 +255,10 @@ export const handleSendcloudWebhook = async (
           shipment,
           { status, trackingNumber: parcel.tracking_number, trackingUrl: parcel.tracking_url },
           orderUpdates,
-          webhookTime(value.carrier_status_change_timestamp) ?? webhookTime(timestamp),
-          message === 'awaiting customer pickup' || message === 'delivered',
+          webhookTime(timestamp),
+          message === 'awaiting customer pickup' || message === 'delivered'
+            ? webhookTime(value.carrier_status_change_timestamp)
+            : null,
         );
 
         if (
