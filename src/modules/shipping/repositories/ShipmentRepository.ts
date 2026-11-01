@@ -1,4 +1,5 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
+import { Order } from '../../order/model/Order';
 import { Shipment } from '../models/Shipment';
 
 /**
@@ -100,6 +101,41 @@ export class ShipmentRepository {
     const doc = snapshot.docs[0];
     const data = doc.data();
     return this.mapToShipment(doc.id, data);
+  }
+
+  // Both records describe the same courier event. Retries must neither roll
+  // the status back nor extend the buyer's original confirmation window.
+  async applyTrackingEvent(
+    shipment: Shipment,
+    shipmentUpdates: Partial<Shipment>,
+    orderUpdates: Partial<Order>,
+    eventTime: Date | null,
+    lockerArrival: boolean,
+  ): Promise<boolean> {
+    const shipmentRef = firestore.collection(this.collection).doc(shipment.id);
+    const orderRef = firestore.collection('orders').doc(shipment.orderId);
+    return firestore.runTransaction(async (tx) => {
+      const current = await tx.get(shipmentRef);
+      const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
+      if (lockerArrival && eventTime) {
+        const order = await tx.get(orderRef);
+        const arrival = order.get('lockerDeliveredAt')?.toMillis();
+        if (order.get('deliveryType') === 'pickup_point' &&
+            (arrival == null || eventTime.getTime() < arrival)) {
+          tx.update(orderRef, { lockerDeliveredAt: eventTime });
+        }
+      }
+      if (lastEvent != null && (!eventTime || eventTime.getTime() < lastEvent)) {
+        return false;
+      }
+      tx.update(shipmentRef, {
+        ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),
+        ...(eventTime && { lastTrackingEventMs: eventTime.getTime() }),
+        updatedAt: new Date(),
+      });
+      tx.update(orderRef, { ...orderUpdates });
+      return true;
+    });
   }
 
   /**

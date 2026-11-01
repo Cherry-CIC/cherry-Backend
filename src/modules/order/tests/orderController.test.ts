@@ -484,6 +484,7 @@ describe('orderController order retrieval', () => {
       paymentIntentId: 'pi_123',
       paymentStatus: 'succeeded',
       status: 'delivered',
+      lockerDeliveredAt: new Date('2026-07-14T12:00:00.000Z'),
       shipmentStatus: 'delivered',
       shipmentId: 'shipment-1',
       createdAt: new Date('2026-07-14T10:00:00.000Z'),
@@ -524,6 +525,7 @@ describe('orderController order retrieval', () => {
         data: {
           order: expect.objectContaining({
             id: 'order-1',
+            confirmationDeadline: '2026-07-16T12:00:00.000Z',
             deliveryState: 'awaiting_confirmation',
             deliveryLabel: 'Awaiting your confirmation',
             canTrack: true,
