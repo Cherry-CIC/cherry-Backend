@@ -197,5 +197,4 @@ describe('productController.getRecommendedProducts', () => {
       expect.objectContaining({ success: false, message: 'Feed expired' }),
     );
   });
-
 });
