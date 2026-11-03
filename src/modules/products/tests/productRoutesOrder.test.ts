@@ -16,6 +16,9 @@ const mockUnlistProduct = jest.fn((req, res) => {
 const mockRelistProduct = jest.fn((req, res) => {
   res.status(200).json({ handler: 'relistProduct', id: req.params.id });
 });
+const mockGetRecommendedProducts = jest.fn((_req, res) => {
+  res.status(200).json({ handler: 'getRecommendedProducts' });
+});
 
 jest.mock('../../../shared/middleware/authMiddleWare', () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
@@ -52,6 +55,7 @@ jest.mock('../controllers/productController', () => ({
   getAllProductsWithDetails: jest.fn((_req, res) =>
     res.status(200).json({ handler: 'getAllProductsWithDetails' }),
   ),
+  getRecommendedProducts: mockGetRecommendedProducts,
   getMyProducts: mockGetMyProducts,
   getMyLikedProducts: mockGetMyLikedProducts,
   updateProduct: jest.fn((_req, res) =>
@@ -92,6 +96,15 @@ describe('product route ordering', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.handler).toBe('getMyLikedProducts');
     expect(mockGetMyLikedProducts).toHaveBeenCalledTimes(1);
+    expect(mockGetProductById).not.toHaveBeenCalled();
+  });
+
+  it('routes /recommended before the generic product id route', async () => {
+    const res = await request(app).get('/api/products/recommended');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.handler).toBe('getRecommendedProducts');
+    expect(mockGetRecommendedProducts).toHaveBeenCalledTimes(1);
     expect(mockGetProductById).not.toHaveBeenCalled();
   });
 

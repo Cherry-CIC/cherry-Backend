@@ -623,6 +623,24 @@ export class OrderRepository {
     });
   }
 
+  // The ids of products a user has paid for, for the recommended feed.
+  // select() keeps the address, phone and email out of the reply.
+  async getPurchasedProductIds(userId: string): Promise<string[]> {
+    const snapshot = await firestore
+      .collection('orders')
+      .where('userId', '==', userId)
+      .select('productId', 'paymentStatus')
+      .get();
+
+    const productIds = snapshot.docs
+      .filter((doc) => doc.get('paymentStatus') === 'succeeded')
+      .map((doc) => doc.get('productId'))
+      .filter(
+        (productId): productId is string => typeof productId === 'string',
+      );
+    return [...new Set(productIds)];
+  }
+
   async getOrdersByDateRange(startDate: Date, endDate: Date): Promise<Order[]> {
     const snapshot = await firestore
       .collection('orders')

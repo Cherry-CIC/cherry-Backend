@@ -278,6 +278,22 @@ export class ProductService {
     };
   }
 
+  // The newest products /with-details would show (for sale, not hidden), up
+  // to `max`. These are the candidates for the recommended feed.
+  async getNewestAvailableProducts(max: number): Promise<Product[]> {
+    const products: Product[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.getProductPage(
+        { limit: MAX_PRODUCT_PAGE_SIZE, cursor },
+        { availableOnly: true },
+      );
+      products.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && products.length < max);
+    return products.slice(0, max);
+  }
+
   async getProductsByCategory(categoryId: string): Promise<Product[]> {
     // Validate category exists
     const category = await this.categoryRepo.getById(categoryId);
@@ -467,7 +483,7 @@ export class ProductService {
     }
   }
 
-  private async enrichProductsWithDetails(
+  async enrichProductsWithDetails(
     products: Product[],
   ): Promise<ProductWithDetails[]> {
     return Promise.all(
@@ -653,11 +669,11 @@ export class ProductService {
     });
   }
 
-  private isAvailableForPurchase(product: Product): boolean {
+  isAvailableForPurchase(product: Product): boolean {
     return product.status === 'active' && this.hasStock(product);
   }
 
-  private isModerationHidden(product: Product): boolean {
+  isModerationHidden(product: Product): boolean {
     return (
       product.hidden === true ||
       product.moderationStatus === 'hidden' ||
