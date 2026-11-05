@@ -178,6 +178,16 @@ export const getPickupPoints = async (
   }
 };
 
+// Sendcloud uses Unix timestamps. Older integration payloads can use ISO dates.
+const webhookTime = (value: unknown): Date | null => {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const numeric = Number(value);
+  const time = Number.isFinite(numeric)
+    ? new Date(numeric < 1e11 ? numeric * 1000 : numeric)
+    : new Date(value);
+  return time.getTime() > 0 ? time : null;
+};
+
 export const handleSendcloudWebhook = async (
   req: Request,
   res: Response,
@@ -223,19 +233,13 @@ export const handleSendcloudWebhook = async (
           parcel.status?.message,
         );
 
-        await shipmentRepo.updateShipment(shipment.id, {
-          status,
-          trackingNumber: parcel.tracking_number,
-          trackingUrl: parcel.tracking_url,
-        });
-
         const orderRepo = new OrderRepository();
         const order = await orderRepo.getOrderById(shipment.orderId);
         const orderUpdates: Partial<Order> = {
           shipmentStatus: status,
           shipmentId: shipment.id,
           status:
-            status === 'delivered'
+            (status === 'delivered' || status === 'collected')
               ? 'delivered'
               : status === 'cancelled'
                 ? 'cancelled'
@@ -246,10 +250,18 @@ export const handleSendcloudWebhook = async (
                     : 'shipped',
         };
 
-        await orderRepo.updateOrder(shipment.orderId, orderUpdates);
+        const updated = await shipmentRepo.applyTrackingEvent(
+          shipment,
+          { status, trackingNumber: parcel.tracking_number, trackingUrl: parcel.tracking_url },
+          orderUpdates,
+          webhookTime(timestamp),
+          status === 'collected'
+            ? webhookTime(value.carrier_status_change_timestamp)
+            : null,
+        );
 
         if (
-          status === 'delivered' &&
+          updated && (status === 'delivered' || status === 'collected') &&
           order &&
           !order.buyerDeliveryEmailSentAt
         ) {

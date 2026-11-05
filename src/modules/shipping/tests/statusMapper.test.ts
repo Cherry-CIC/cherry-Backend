@@ -3,7 +3,7 @@ import { mapSendcloudStatusToShipmentStatus } from '../utils/statusMapper';
 describe('mapSendcloudStatusToShipmentStatus', () => {
   it.each([
     ['Delivered', 'delivered'],
-    ['Shipment collected by customer', 'delivered'],
+    ['Shipment collected by customer', 'collected'],
     ['Driver en route', 'out_for_delivery'],
     ['Address invalid', 'exception'],
     ['Announcement failed', 'exception'],
@@ -17,7 +17,8 @@ describe('mapSendcloudStatusToShipmentStatus', () => {
     ['Ready to send', 'announced'],
     ['At customs', 'en_route'],
     ['At sorting centre', 'en_route'],
-    ['Awaiting customer pickup', 'en_route'],
+    ['Awaiting customer pickup', 'awaiting_collection'],
+    ['Shipment picked up by driver', 'pending'],
     ['Delivery date changed', 'en_route'],
     ['No label', 'pending'],
   ])('maps "%s" to "%s"', (sendcloudStatus, expected) => {
