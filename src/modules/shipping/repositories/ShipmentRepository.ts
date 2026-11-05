@@ -110,19 +110,19 @@ export class ShipmentRepository {
     shipmentUpdates: Partial<Shipment>,
     orderUpdates: Partial<Order>,
     sendcloudTime: Date | null,
-    lockerArrival: Date | null,
+    collectionTime: Date | null,
   ): Promise<boolean> {
     const shipmentRef = firestore.collection(this.collection).doc(shipment.id);
     const orderRef = firestore.collection('orders').doc(shipment.orderId);
     return firestore.runTransaction(async (tx) => {
       const current = await tx.get(shipmentRef);
       const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
-      if (lockerArrival) {
+      if (collectionTime) {
         const order = await tx.get(orderRef);
-        const arrival = order.get('lockerDeliveredAt')?.toMillis();
+        const collected = order.get('collectedAt')?.toMillis();
         if (order.get('deliveryType') === 'pickup_point' &&
-            (arrival == null || lockerArrival.getTime() < arrival)) {
-          tx.update(orderRef, { lockerDeliveredAt: lockerArrival });
+            (collected == null || collectionTime.getTime() < collected)) {
+          tx.update(orderRef, { collectedAt: collectionTime });
         }
       }
       if (lastEvent != null && (!sendcloudTime || sendcloudTime.getTime() < lastEvent)) {

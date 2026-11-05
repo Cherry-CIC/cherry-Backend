@@ -239,7 +239,7 @@ export const handleSendcloudWebhook = async (
           shipmentStatus: status,
           shipmentId: shipment.id,
           status:
-            status === 'delivered'
+            (status === 'delivered' || status === 'collected')
               ? 'delivered'
               : status === 'cancelled'
                 ? 'cancelled'
@@ -250,19 +250,18 @@ export const handleSendcloudWebhook = async (
                     : 'shipped',
         };
 
-        const message = parcel.status?.message?.trim().toLowerCase();
         const updated = await shipmentRepo.applyTrackingEvent(
           shipment,
           { status, trackingNumber: parcel.tracking_number, trackingUrl: parcel.tracking_url },
           orderUpdates,
           webhookTime(timestamp),
-          message === 'awaiting customer pickup' || message === 'delivered'
+          status === 'collected'
             ? webhookTime(value.carrier_status_change_timestamp)
             : null,
         );
 
         if (
-          updated && status === 'delivered' &&
+          updated && (status === 'delivered' || status === 'collected') &&
           order &&
           !order.buyerDeliveryEmailSentAt
         ) {

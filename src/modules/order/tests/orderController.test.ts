@@ -445,6 +445,24 @@ describe('orderController order retrieval', () => {
     );
   });
 
+  it.each([
+    ['awaiting_collection', { lockerDeliveredAt: new Date('2026-07-14T10:00:00Z') }, 'awaiting_collection', null],
+    ['delivered', { lockerDeliveredAt: new Date('2026-07-14T10:00:00Z') }, 'awaiting_confirmation', null],
+    ['collected', {}, 'awaiting_confirmation', null],
+    ['collected', { collectedAt: new Date('2026-07-15T12:00:00Z') }, 'awaiting_confirmation', '2026-07-17T12:00:00.000Z'],
+  ])('returns a collection-based deadline for %s with %j', async (shipmentStatus, times, deliveryState, deadline) => {
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1', userId: 'user-1', status: 'delivered', deliveryType: 'pickup_point',
+      shipmentStatus, ...times, shipping: { address: {} },
+    });
+    mockGetShipmentByOrderId.mockResolvedValue(null);
+    const res = createResponse();
+    await getMyOrderById({ user: { uid: 'user-1' }, params: { id: 'order-1' } } as any, res);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: { order: expect.objectContaining({ deliveryState, confirmationDeadline: deadline }) },
+    }));
+  });
+
   it('returns a single enriched order for the owner', async () => {
     mockGetOrderById.mockResolvedValue({
       id: 'order-1',
@@ -484,7 +502,7 @@ describe('orderController order retrieval', () => {
       paymentIntentId: 'pi_123',
       paymentStatus: 'succeeded',
       status: 'delivered',
-      lockerDeliveredAt: new Date('2026-07-14T12:00:00.000Z'),
+      collectedAt: new Date('2026-07-14T12:00:00.000Z'),
       shipmentStatus: 'delivered',
       shipmentId: 'shipment-1',
       createdAt: new Date('2026-07-14T10:00:00.000Z'),
