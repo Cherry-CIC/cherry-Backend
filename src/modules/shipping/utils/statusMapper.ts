@@ -10,11 +10,15 @@ export const mapSendcloudStatusToShipmentStatus = (
   // documented family explicitly so new carrier wording cannot look like a
   // successful delivery or silently overwrite a shipment as pending.
 
-  if (normalized === 'awaiting customer pickup' || normalized.includes('delivered')) {
-    return 'delivered';
+  if (normalized === 'shipment collected by customer') {
+    return 'collected';
   }
 
-  if (normalized.includes('shipment collected by customer')) {
+  if (normalized === 'awaiting customer pickup') {
+    return 'awaiting_collection';
+  }
+
+  if (normalized === 'delivered') {
     return 'delivered';
   }
 

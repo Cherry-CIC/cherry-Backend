@@ -13,6 +13,8 @@ export type ShipmentStatus =
   | 'announced'
   | 'en_route'
   | 'out_for_delivery'
+  | 'awaiting_collection'
+  | 'collected'
   | 'delivered'
   | 'exception'
   | 'cancelled';
@@ -85,7 +87,7 @@ export interface Order {
   paidAt?: Date;
   refundedAt?: Date;
   updatedAt?: Date;
-  lockerDeliveredAt?: Date;
+  collectedAt?: Date;
   buyerConfirmedReceived?: boolean;
   buyerConfirmedReceivedAt?: Date;
   sellerSoldEmailSentAt?: Date;
