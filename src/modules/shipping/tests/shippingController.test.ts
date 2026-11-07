@@ -205,7 +205,7 @@ describe('shippingController', () => {
       shipmentStatus: 'collected',
       shipmentId: 'shipment-1',
       status: 'delivered',
-    }, new Date('2026-03-28T13:45:00Z'), new Date('2026-03-28T12:00:00Z'));
+    }, new Date('2026-03-28T13:45:00Z'), new Date('2026-03-28T12:00:00Z'), null);
     expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith({
       to: 'buyer@example.com',
       buyerName: 'Buyer',
@@ -236,8 +236,22 @@ describe('shippingController', () => {
       expect.objectContaining({ id: 's' }),
       expect.objectContaining({ status }),
       expect.objectContaining({ shipmentStatus: status, status: orderStatus }),
-      new Date('2026-03-28T13:45:00Z'), null,
+      new Date('2026-03-28T13:45:00Z'), null, null,
     );
+  });
+
+  it('passes ordering and locker arrival timestamps separately', async () => {
+    mockGetShipmentBySendcloudId.mockResolvedValue({ id: 's', orderId: 'o' });
+    const res = createResponse();
+    await handleSendcloudWebhook({ body: {
+      action: 'parcel_status_changed', timestamp: '2026-11-07T11:00:00Z',
+      carrier_status_change_timestamp: Date.parse('2026-11-07T09:00:00Z') / 1000,
+      parcel: { id: 123, status: { message: 'Awaiting customer pickup' } },
+    } } as any, res);
+    expect(mockApplyTrackingEvent).toHaveBeenCalledWith(expect.anything(),
+      expect.objectContaining({ status: 'awaiting_collection' }), expect.anything(),
+      new Date('2026-11-07T11:00:00Z'), null, new Date('2026-11-07T09:00:00Z'));
+    expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
   });
 
   it('acknowledges Sendcloud integration events without a parcel', async () => {

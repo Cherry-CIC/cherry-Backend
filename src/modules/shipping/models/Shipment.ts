@@ -19,6 +19,8 @@ export interface Shipment {
     | 'out_for_delivery'
     | 'awaiting_collection'
     | 'collected'
+    | 'returning'
+    | 'returned'
     | 'delivered'
     | 'exception'
     | 'cancelled';

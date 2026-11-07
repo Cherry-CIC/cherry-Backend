@@ -463,6 +463,30 @@ describe('orderController order retrieval', () => {
     }));
   });
 
+  it.each([
+    ['awaiting_collection', 'shipped', 'succeeded', 'awaiting_collection', '2026-11-10T09:00:00.000Z'],
+    ['collected', 'delivered', 'succeeded', 'awaiting_confirmation', null],
+    ['returned', 'failed', 'succeeded', 'returned', null],
+    ['returning', 'failed', 'succeeded', 'returning', null],
+    ['awaiting_collection', 'cancelled', 'succeeded', 'cancelled', null],
+    ['awaiting_collection', 'shipped', 'refunded', 'cancelled', null],
+  ])('exposes collection deadline only while eligible: %s %s %s', async (shipmentStatus, status, paymentStatus, state, deadline) => {
+    const point = { id: 'locker', name: 'InPost locker', addressLine1: '1 High Street', city: 'London', postalCode: 'SW1A 1AA', country: 'GB' };
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1', userId: 'user-1', deliveryType: 'pickup_point', shipmentStatus, status, paymentStatus,
+      readyForCollectionAt: new Date('2026-11-07T09:00:00Z'),
+      collectionDeadline: new Date('2026-11-10T09:00:00Z'),
+      pickupPoint: point, shipping: { address: {} },
+    });
+    mockGetShipmentByOrderId.mockResolvedValue(null);
+    const res = createResponse();
+    await getMyOrderById({ user: { uid: 'user-1' }, params: { id: 'order-1' } } as any, res);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ data: { order: expect.objectContaining({
+      deliveryState: state, collectionDeadline: deadline,
+      readyForCollectionAt: '2026-11-07T09:00:00.000Z', collectionPoint: point,
+    }) } }));
+  });
+
   it('returns a single enriched order for the owner', async () => {
     mockGetOrderById.mockResolvedValue({
       id: 'order-1',

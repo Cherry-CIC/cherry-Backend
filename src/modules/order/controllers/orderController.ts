@@ -30,6 +30,8 @@ const getDeliveryState = (
   | 'disputed'
   | 'delivered'
   | 'failed'
+  | 'returning'
+  | 'returned'
   | 'cancelled' => {
   if (order.buyerDisputeStatus) {
     return 'disputed';
@@ -38,6 +40,10 @@ const getDeliveryState = (
   if (order.buyerConfirmedReceived) {
     return 'confirmed';
   }
+
+  if (order.status === 'cancelled' || ['cancelled', 'refunded'].includes(order.paymentStatus)) return 'cancelled';
+  if (order.shipmentStatus === 'returned') return 'returned';
+  if (order.shipmentStatus === 'returning') return 'returning';
 
   if (order.shipmentStatus === 'awaiting_collection') {
     return 'awaiting_collection';
@@ -49,10 +55,6 @@ const getDeliveryState = (
 
   if (order.status === 'delivered') {
     return 'awaiting_confirmation';
-  }
-
-  if (order.status === 'cancelled') {
-    return 'cancelled';
   }
 
   if (order.status === 'failed' || order.shipmentStatus === 'exception') {
@@ -89,6 +91,8 @@ const getDeliveryLabel = (
     | 'disputed'
     | 'delivered'
     | 'failed'
+    | 'returning'
+    | 'returned'
     | 'cancelled',
 ): string => {
   switch (deliveryState) {
@@ -112,6 +116,8 @@ const getDeliveryLabel = (
       return 'Delivered';
     case 'failed':
       return 'Delivery issue';
+    case 'returned': return 'Returned to sender';
+    case 'returning': return 'Returning to sender';
     case 'cancelled':
       return 'Cancelled';
   }
@@ -163,6 +169,9 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
+    readyForCollectionAt: order.readyForCollectionAt?.toISOString() ?? null,
+    collectionDeadline: deliveryState === 'awaiting_collection' ? order.collectionDeadline?.toISOString() ?? null : null,
+    collectionPoint: shipment?.pickupPoint ?? order.pickupPoint ?? null,
     confirmationDeadline: order.collectedAt
       ? new Date(order.collectedAt.getTime() + 48 * 60 * 60 * 1000).toISOString()
       : null,
