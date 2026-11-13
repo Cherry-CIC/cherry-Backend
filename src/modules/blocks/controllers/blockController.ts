@@ -1,17 +1,26 @@
 import { Request, Response } from 'express';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { UserBlockRepository } from '../repositories/UserBlockRepository';
+import { CharityBlockRepository } from '../repositories/CharityBlockRepository';
 
-const safeUserId = (value: unknown): string | null => {
+const safeTargetId = (
+  value: unknown,
+  disallowed: readonly string[] = ['.', '..'],
+): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed &&
     trimmed.length <= 128 &&
-    !['.', '..', 'deleted_user'].includes(trimmed) &&
+    !disallowed.includes(trimmed) &&
     !/[\/\\\x00-\x1f\x7f-\x9f]/.test(trimmed)
     ? trimmed
     : null;
 };
+
+const safeUserId = (value: unknown): string | null =>
+  safeTargetId(value, ['.', '..', 'deleted_user']);
+
+const safeCharityId = (value: unknown): string | null => safeTargetId(value);
 
 export const blockUser = async (req: Request, res: Response): Promise<void> => {
   const blockerId = (req as any).user?.uid;
@@ -71,6 +80,84 @@ export const listBlockedUsers = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch blocked users',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+  }
+};
+
+export const blockCharity = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const blockerId = (req as any).user?.uid;
+  const blockedCharityId = safeCharityId(req.params.charityId);
+  if (!blockerId) {
+    ResponseHandler.unauthorized(res, 'Authentication required');
+    return;
+  }
+  if (!blockedCharityId) {
+    ResponseHandler.badRequest(res, 'Invalid charity to block');
+    return;
+  }
+  try {
+    const block = await new CharityBlockRepository().block(
+      blockerId,
+      blockedCharityId,
+    );
+    ResponseHandler.success(res, { block }, 'Charity blocked');
+  } catch (error) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to block charity',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+  }
+};
+
+export const unblockCharity = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const blockerId = (req as any).user?.uid;
+  const blockedCharityId = safeCharityId(req.params.charityId);
+  if (!blockerId) {
+    ResponseHandler.unauthorized(res, 'Authentication required');
+    return;
+  }
+  if (!blockedCharityId) {
+    ResponseHandler.badRequest(res, 'Invalid charity to unblock');
+    return;
+  }
+  try {
+    await new CharityBlockRepository().unblock(blockerId, blockedCharityId);
+    ResponseHandler.success(res, null, 'Charity unblocked');
+  } catch (error) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to unblock charity',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+  }
+};
+
+export const listBlockedCharities = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const blockerId = (req as any).user?.uid;
+  if (!blockerId) {
+    ResponseHandler.unauthorized(res, 'Authentication required');
+    return;
+  }
+  try {
+    const blocks = await new CharityBlockRepository().listBlockedCharities(
+      blockerId,
+    );
+    ResponseHandler.success(res, { blocks }, 'Blocked charities fetched');
+  } catch (error) {
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch blocked charities',
       error instanceof Error ? error.message : 'Unknown error',
     );
   }
