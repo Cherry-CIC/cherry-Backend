@@ -1,3 +1,4 @@
+import { COLLECTION_PUSH_JOBS, collectionPushJobId, newCollectionPushJob } from '../../notifications/models/CollectionPushJob';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Order } from '../../order/model/Order';
 import { Shipment } from '../models/Shipment';
@@ -118,6 +119,10 @@ export class ShipmentRepository {
     return firestore.runTransaction(async (tx) => {
       const current = await tx.get(shipmentRef);
       const order = await tx.get(orderRef);
+      const pushRef = process.env.COLLECTION_PUSH_ENABLED === 'true' && shipmentUpdates.status === 'awaiting_collection'
+        ? firestore.collection(COLLECTION_PUSH_JOBS).doc(collectionPushJobId(shipment.id)) : null;
+      // Read the outbox before any writes; Firestore can retry this transaction.
+      const push = pushRef ? await tx.get(pushRef) : null;
       const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
       const previousStatus = current.get('status');
       const nextStatus = shipmentUpdates.status;
@@ -157,6 +162,13 @@ export class ShipmentRepository {
       }
       if (lastEvent != null && sendcloudTime.getTime() <= lastEvent) return false;
       if (regression || arrivalRegression || (closed && nextStatus !== 'returned')) return false;
+      if (nextStatus === 'awaiting_collection' && pickup && inpost &&
+          order.get('paymentStatus') === 'succeeded' && !order.get('buyerConfirmedReceived') &&
+          !order.get('buyerDisputeStatus') && !['expired', 'failed'].includes(order.get('status')) &&
+          typeof order.get('userId') === 'string' && order.get('userId').length > 0 &&
+          pushRef && !push?.exists) {
+        tx.create(pushRef, newCollectionPushJob(shipment.id, shipment.orderId, order.get('userId'), new Date()));
+      }
       tx.update(shipmentRef, {
         ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),
         ...(sendcloudTime && { lastTrackingEventMs: sendcloudTime.getTime() }),

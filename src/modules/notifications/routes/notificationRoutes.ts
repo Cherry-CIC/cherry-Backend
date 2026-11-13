@@ -3,8 +3,14 @@ import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateRequest } from '../../../shared/middleware/validateRequest';
 import { sendTestResendEmail } from '../controllers/notificationController';
 import { testResendEmailSchema } from '../validators/notificationValidator';
+import { adminMiddleware } from '../../../shared/middleware/adminMiddleware';
+import { dispatchCollectionNotifications, registerPushDevice, removePushDevice } from '../controllers/pushController';
 
 const router = Router();
+
+router.post('/devices', authMiddleware, registerPushDevice);
+router.delete('/devices', authMiddleware, removePushDevice);
+router.post('/dispatch-collection', authMiddleware, adminMiddleware, dispatchCollectionNotifications);
 
 /**
  * @swagger

@@ -2,20 +2,35 @@ const mockFirestore = { collection: jest.fn(), runTransaction: jest.fn() };
 jest.mock('../../../shared/config/firebaseConfig', () => ({ firestore: mockFirestore }));
 import { ShipmentRepository } from '../repositories/ShipmentRepository';
 import { Shipment } from '../models/Shipment';
+import { collectionPushJobId } from '../../notifications/models/CollectionPushJob';
 
 describe('collection event persistence', () => {
   let documents: Record<string, Record<string, any>>;
   const timestamp = (time: Date) => ({ toMillis: () => time.getTime() });
   const shipment = { id: 's', orderId: 'o' } as Shipment;
   const repo = new ShipmentRepository();
+  const originalPushFlag = process.env.COLLECTION_PUSH_ENABLED;
+
+  afterAll(() => {
+    if (originalPushFlag === undefined) delete process.env.COLLECTION_PUSH_ENABLED;
+    else process.env.COLLECTION_PUSH_ENABLED = originalPushFlag;
+  });
 
   beforeEach(() => {
+    delete process.env.COLLECTION_PUSH_ENABLED;
     documents = { 'shipments/s': {}, 'orders/o': { deliveryType: 'pickup_point', shippingCarrier: 'inpost_gb' } };
     mockFirestore.collection.mockImplementation((name) => ({ doc: (id: string) => name + '/' + id }));
     mockFirestore.runTransaction.mockImplementation(async (fn) => {
       const writes: Array<() => void> = [];
       const result = await fn({
-        get: async (ref: string) => ({ get: (key: string) => documents[ref][key] }),
+        get: async (ref: string) => {
+          if (writes.length) throw new Error('Firestore reads must precede writes');
+          return { exists: !!documents[ref], get: (key: string) => documents[ref]?.[key] };
+        },
+        create: (ref: string, data: Record<string, any>) => writes.push(() => {
+          if (documents[ref]) throw new Error('Document already exists');
+          documents[ref] = data;
+        }),
         update: (ref: string, data: Record<string, any>) => writes.push(() => {
           Object.entries(data).forEach(([key, value]) => {
             documents[ref][key] = value instanceof Date ? timestamp(value) : value;
@@ -123,6 +138,66 @@ describe('collection event persistence', () => {
     await event('collected', 10, 9);
     expect(documents['orders/o'].shipmentStatus).toBe('awaiting_collection');
     expect(documents['orders/o'].collectedAt).toBeUndefined();
+  });
+
+  describe('collection push outbox', () => {
+    const jobPath = 'collectionPushJobs/' + collectionPushJobId('s');
+    beforeEach(() => {
+      process.env.COLLECTION_PUSH_ENABLED = 'true';
+      Object.assign(documents['orders/o'], { userId: 'buyer', paymentStatus: 'succeeded', status: 'shipped' });
+    });
+
+    it('atomically queues one deterministic job and preserves it across duplicate and older events', async () => {
+      await arrivalEvent(10, 9);
+      const initial = { ...documents[jobPath] };
+      expect(initial).toMatchObject({ eventId: collectionPushJobId('s'), shipmentId: 's', orderId: 'o', userId: 'buyer', status: 'pending', attempts: 0 });
+      await arrivalEvent(10, 9);
+      await arrivalEvent(12, 11);
+      await arrivalEvent(9, 8);
+      expect(documents[jobPath]).toEqual(initial);
+      expect(Object.keys(documents).filter(key => key.startsWith('collectionPushJobs/'))).toHaveLength(1);
+    });
+
+    it('can notify without a carrier arrival timestamp and never invents a collection deadline', async () => {
+      await arrivalEvent(10, null);
+      expect(documents[jobPath].status).toBe('pending');
+      expect(documents['orders/o'].collectionDeadline).toBeUndefined();
+      await arrivalEvent(10, 9);
+      expect(documents['orders/o'].collectionDeadline.toMillis()).toBe(time(81).getTime());
+      expect(documents[jobPath].attempts).toBe(0);
+    });
+
+    it('does not queue while disabled, including an equal retry after enabling', async () => {
+      delete process.env.COLLECTION_PUSH_ENABLED;
+      await arrivalEvent(10, 9);
+      expect(documents[jobPath]).toBeUndefined();
+      process.env.COLLECTION_PUSH_ENABLED = 'true';
+      await arrivalEvent(10, 9);
+      expect(documents[jobPath]).toBeUndefined();
+    });
+
+    it.each(['collected', 'cancelled', 'returned', 'returning'] as const)('does not queue an arrival after %s', async status => {
+      await event(status, 12, status === 'collected' ? 11 : null);
+      await arrivalEvent(13, 12);
+      await arrivalEvent(10, 9);
+      expect(documents[jobPath]).toBeUndefined();
+    });
+
+    it('does not queue a conflicting tied event', async () => {
+      await event('en_route', 10, null);
+      await arrivalEvent(10, 9);
+      expect(documents[jobPath]).toBeUndefined();
+    });
+
+    it.each([
+      { paymentStatus: 'refunded' }, { paymentStatus: 'failed' }, { buyerConfirmedReceived: true },
+      { buyerDisputeStatus: 'raised' }, { deliveryType: 'home' }, { shippingCarrier: 'other' },
+      { status: 'expired' }, { status: 'failed' }, { userId: '' },
+    ])('does not queue for an ineligible order %j', async changes => {
+      Object.assign(documents['orders/o'], changes);
+      await arrivalEvent(10, 9);
+      expect(documents[jobPath]).toBeUndefined();
+    });
   });
 
 });
