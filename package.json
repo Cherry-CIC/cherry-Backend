@@ -43,6 +43,7 @@
     "start:dev": "ts-node src/server.ts",
     "build": "tsc",
     "test": "jest",
+    "notifications:dispatch": "node dist/scripts/processCollectionNotifications.js",
     "lint": "eslint 'src/**/*.{ts,js}' --fix",
     "format": "prettier --write .",
     "admin:set": "npm run build && node dist/scripts/setAdminClaim.js",

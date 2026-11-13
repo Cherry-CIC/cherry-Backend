@@ -1,3 +1,4 @@
+import { COLLECTION_PUSH_JOBS, collectionPushJobId, newCollectionPushJob } from '../../notifications/models/CollectionPushJob';
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Order } from '../../order/model/Order';
 import { Shipment } from '../models/Shipment';
@@ -111,22 +112,62 @@ export class ShipmentRepository {
     orderUpdates: Partial<Order>,
     sendcloudTime: Date | null,
     collectionTime: Date | null,
+    arrivalTime: Date | null = null,
   ): Promise<boolean> {
     const shipmentRef = firestore.collection(this.collection).doc(shipment.id);
     const orderRef = firestore.collection('orders').doc(shipment.orderId);
     return firestore.runTransaction(async (tx) => {
       const current = await tx.get(shipmentRef);
+      const order = await tx.get(orderRef);
+      const pushRef = process.env.COLLECTION_PUSH_ENABLED === 'true' && shipmentUpdates.status === 'awaiting_collection'
+        ? firestore.collection(COLLECTION_PUSH_JOBS).doc(collectionPushJobId(shipment.id)) : null;
+      // Read the outbox before any writes; Firestore can retry this transaction.
+      const push = pushRef ? await tx.get(pushRef) : null;
       const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
-      if (collectionTime) {
-        const order = await tx.get(orderRef);
+      const previousStatus = current.get('status');
+      const nextStatus = shipmentUpdates.status;
+      // Unordered events cannot change state or establish a deadline.
+      if (!sendcloudTime) return false;
+      const sameEventStatus = previousStatus === nextStatus;
+      const conflictingTie = lastEvent === sendcloudTime.getTime() && !sameEventStatus;
+      const pickup = order.get('deliveryType') === 'pickup_point';
+      // An older collection event may recover missing evidence without reverting
+      // the current status. It can only shorten the inspection deadline.
+      if (collectionTime && nextStatus === 'collected' && pickup && !conflictingTie) {
         const collected = order.get('collectedAt')?.toMillis();
-        if (order.get('deliveryType') === 'pickup_point' &&
-            (collected == null || collectionTime.getTime() < collected)) {
+        if (collected == null || collectionTime.getTime() < collected) {
           tx.update(orderRef, { collectedAt: collectionTime });
         }
       }
-      if (lastEvent != null && (!sendcloudTime || sendcloudTime.getTime() < lastEvent)) {
-        return false;
+      const older = lastEvent != null && sendcloudTime.getTime() < lastEvent;
+      const carrier = String(order.get('shippingCarrier') || current.get('carrier') || '').toLowerCase();
+      const inpost = carrier === 'inpost_gb';
+      const closed = ['cancelled', 'returned', 'returning'].includes(previousStatus) ||
+        ['cancelled', 'refunded'].includes(order.get('paymentStatus')) || order.get('status') === 'cancelled';
+      const regression = (previousStatus === 'collected' || order.get('collectedAt')) &&
+        ['pending', 'announced', 'en_route', 'out_for_delivery', 'awaiting_collection', 'delivered'].includes(nextStatus || '');
+      const arrivalRegression = previousStatus === 'awaiting_collection' &&
+        ['pending', 'announced', 'en_route', 'out_for_delivery', 'delivered'].includes(nextStatus || '');
+      // A retry with newly supplied carrier evidence can fill/shorten a window,
+      // including an older arrival, but cannot reopen a completed collection.
+      if (arrivalTime && nextStatus === 'awaiting_collection' && pickup && inpost &&
+          !closed && !regression && !conflictingTie && (!older || sameEventStatus)) {
+        const arrival = order.get('readyForCollectionAt')?.toMillis();
+        if (arrival == null || arrivalTime.getTime() < arrival) {
+          tx.update(orderRef, {
+            readyForCollectionAt: arrivalTime,
+            collectionDeadline: new Date(arrivalTime.getTime() + 72 * 60 * 60 * 1000),
+          });
+        }
+      }
+      if (lastEvent != null && sendcloudTime.getTime() <= lastEvent) return false;
+      if (regression || arrivalRegression || (closed && nextStatus !== 'returned')) return false;
+      if (nextStatus === 'awaiting_collection' && pickup && inpost &&
+          order.get('paymentStatus') === 'succeeded' && !order.get('buyerConfirmedReceived') &&
+          !order.get('buyerDisputeStatus') && !['expired', 'failed'].includes(order.get('status')) &&
+          typeof order.get('userId') === 'string' && order.get('userId').length > 0 &&
+          pushRef && !push?.exists) {
+        tx.create(pushRef, newCollectionPushJob(shipment.id, shipment.orderId, order.get('userId'), new Date()));
       }
       tx.update(shipmentRef, {
         ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),

@@ -665,6 +665,8 @@ export class OrderRepository {
       paymentExpiresAt: this.toDate(data.paymentExpiresAt),
       paidAt: this.toDate(data.paidAt),
       collectedAt: this.toDate(data.collectedAt),
+      readyForCollectionAt: this.toDate(data.readyForCollectionAt),
+      collectionDeadline: this.toDate(data.collectionDeadline),
       buyerConfirmedReceivedAt: this.toDate(data.buyerConfirmedReceivedAt),
       sellerSoldEmailSentAt: this.toDate(data.sellerSoldEmailSentAt),
       buyerShipmentStartedEmailSentAt: this.toDate(

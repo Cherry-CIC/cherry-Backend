@@ -18,6 +18,9 @@ export const mapSendcloudStatusToShipmentStatus = (
     return 'awaiting_collection';
   }
 
+  if (normalized.includes('returned to sender')) return 'returned';
+  if (normalized.includes('return to sender') || normalized.includes('returning to sender') || normalized.includes('being returned')) return 'returning';
+
   if (normalized === 'delivered') {
     return 'delivered';
   }

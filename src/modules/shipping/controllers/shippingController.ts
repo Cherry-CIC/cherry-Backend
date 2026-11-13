@@ -243,7 +243,7 @@ export const handleSendcloudWebhook = async (
               ? 'delivered'
               : status === 'cancelled'
                 ? 'cancelled'
-                : status === 'exception'
+                : ['exception', 'returned', 'returning'].includes(status)
                   ? 'failed'
                   : status === 'pending' || status === 'announced'
                     ? 'shipment_created'
@@ -258,6 +258,7 @@ export const handleSendcloudWebhook = async (
           status === 'collected'
             ? webhookTime(value.carrier_status_change_timestamp)
             : null,
+          status === 'awaiting_collection' ? webhookTime(value.carrier_status_change_timestamp) : null,
         );
 
         if (

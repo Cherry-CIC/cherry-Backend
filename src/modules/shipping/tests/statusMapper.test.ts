@@ -9,7 +9,7 @@ describe('mapSendcloudStatusToShipmentStatus', () => {
     ['Announcement failed', 'exception'],
     ['Delivery attempt failed', 'exception'],
     ['Delivery delayed', 'exception'],
-    ['Returned to sender', 'exception'],
+    ['Returned to sender', 'returned'],
     ['Unable to deliver', 'exception'],
     ['Cancellation request', 'cancelled'],
     ['Cancelled upstream', 'cancelled'],
