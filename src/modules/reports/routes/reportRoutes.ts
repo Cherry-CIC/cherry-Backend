@@ -15,10 +15,11 @@ const router = Router();
  * @swagger
  * /api/reports:
  *   post:
- *     summary: Report a product or user
+ *     summary: Report a product, user, or charity
  *     description: >
  *       Creates a moderation report from the authenticated user. Product reports
- *       use targetType `product`; seller/user reports use targetType `user`.
+ *       use targetType `product`; seller/user reports use targetType `user`;
+ *       charity reports use targetType `charity`.
  *       Users cannot report themselves.
  *     tags: [Reports]
  *     security:
@@ -33,11 +34,11 @@ const router = Router();
  *             properties:
  *               targetType:
  *                 type: string
- *                 enum: [product, user]
+ *                 enum: [product, user, charity]
  *                 example: product
  *               targetId:
  *                 type: string
- *                 description: Product ID or Firebase UID being reported.
+ *                 description: Product ID, Firebase UID, or Charity ID being reported.
  *                 example: product_123
  *               reason:
  *                 type: string

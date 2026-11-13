@@ -2,10 +2,12 @@ import { Router } from 'express';
 import {
     getAllCharities,
     getCharityById,
+    getCharityProducts,
     createCharity,
     updateCharity,
     deleteCharity
 } from '../controllers/charityController';
+import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import { validateCharity, validateCharityUpdate } from '../validators/charityValidator';
 import { validateCharityId } from '../validators/charityIdValidator';
 
@@ -88,6 +90,42 @@ const router = Router();
  *                     $ref: '#/components/schemas/Charity'
  */
 router.get('/', getAllCharities);
+
+/**
+ * @swagger
+ * /api/charities/{id}/products:
+ *   get:
+ *     summary: Get active products listed on behalf of a charity
+ *     tags: [Charities]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The charity ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paginated list of active products for this charity
+ *       401:
+ *         description: Authentication required
+ *       404:
+ *         description: Charity not found
+ */
+router.get('/:id/products', authMiddleware, validateCharityId, getCharityProducts);
 
 /**
  * @swagger

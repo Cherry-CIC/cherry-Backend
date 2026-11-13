@@ -1,7 +1,11 @@
-export type ReportTargetType = 'product' | 'user';
+export type ReportTargetType = 'product' | 'user' | 'charity';
 export type ReportStatus = 'open' | 'reviewing' | 'resolved' | 'rejected';
 
-export const REPORT_TARGET_TYPES: ReportTargetType[] = ['product', 'user'];
+export const REPORT_TARGET_TYPES: ReportTargetType[] = [
+  'product',
+  'user',
+  'charity',
+];
 export const REPORT_STATUSES: ReportStatus[] = [
   'open',
   'reviewing',

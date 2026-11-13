@@ -310,7 +310,7 @@ router.patch(
  *         name: targetType
  *         schema:
  *           type: string
- *           enum: [product, user]
+ *           enum: [product, user, charity]
  *         description: Optional target type filter.
  *       - in: query
  *         name: limit

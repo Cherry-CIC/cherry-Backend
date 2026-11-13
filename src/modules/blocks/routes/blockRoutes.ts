@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
-import { blockUser, listBlockedUsers, unblockUser } from '../controllers/blockController';
+import {
+  blockCharity,
+  blockUser,
+  listBlockedCharities,
+  listBlockedUsers,
+  unblockCharity,
+  unblockUser,
+} from '../controllers/blockController';
 
 const router = Router();
 
@@ -81,6 +88,10 @@ router.get('/', authMiddleware, listBlockedUsers);
  *       500:
  *         description: Failed to unblock user
  */
+router.get('/charities', authMiddleware, listBlockedCharities);
+router.post('/charities/:charityId', authMiddleware, blockCharity);
+router.delete('/charities/:charityId', authMiddleware, unblockCharity);
+
 router.post('/:userId', authMiddleware, blockUser);
 router.delete('/:userId', authMiddleware, unblockUser);
 
