@@ -7,7 +7,10 @@ import { CategoryRepository } from '../../categories/repositories/CategoryReposi
 import { PostageSize } from '../../postage-sizes/model/PostageSize';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 import { Product } from '../../products/model/Product';
-import { ProductRepository } from '../../products/repositories/ProductRepository';
+import {
+  CharityProductPosition,
+  ProductRepository,
+} from '../../products/repositories/ProductRepository';
 import { Charity } from '../model/Charity';
 import { CharityRepository } from '../repositories/CharityRepository';
 
@@ -41,45 +44,63 @@ export interface CharityProductsPage {
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
+const SCAN_CHUNK_SIZE = 100;
+const MAX_SCANNED_PRODUCTS = 5000;
+const MIN_TIMESTAMP_SECONDS = -62135596800;
+const MAX_TIMESTAMP_SECONDS = 253402300799;
 
-const toMillis = (value: unknown): number => {
-  if (value instanceof Date) return value.getTime();
-  if (value && typeof (value as { toDate?: unknown }).toDate === 'function') {
-    return (value as { toDate: () => Date }).toDate().getTime();
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const parsed = new Date(value).getTime();
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-};
+const isValidDocumentId = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  value.trim() === value &&
+  value !== '.' &&
+  value !== '..' &&
+  !/[/\\\x00-\x1f\x7f-\x9f]/.test(value) &&
+  Buffer.byteLength(value, 'utf8') <= 1500;
 
 const isDisplayableListing = (product: Product, charityId: string): boolean => {
   if (product.charityId !== charityId) return false;
   if (product.status !== 'active') return false;
-  if (typeof product.number !== 'number' || product.number <= 0) return false;
+  if (!Number.isSafeInteger(product.number) || product.number <= 0) {
+    return false;
+  }
+  const raw = product as unknown as Record<string, unknown>;
   if (
     product.hidden === true ||
+    raw.isHidden === true ||
+    raw.moderationHidden === true ||
     product.moderationStatus === 'hidden' ||
     (product.hiddenAt !== undefined && product.hiddenAt !== null)
   ) {
     return false;
   }
-  const raw = product as unknown as Record<string, unknown>;
   if (
     raw.deleted === true ||
     raw.isDeleted === true ||
     raw.removed === true ||
-    raw.isRemoved === true
+    raw.isRemoved === true ||
+    (raw.deletedAt !== undefined && raw.deletedAt !== null) ||
+    (raw.removedAt !== undefined && raw.removedAt !== null)
   ) {
     return false;
   }
   return true;
 };
 
-const encodeCursor = (charityId: string, viewerId: string, lastId: string): string =>
+const encodeCursor = (
+  charityId: string,
+  viewerId: string,
+  position: CharityProductPosition,
+): string =>
   Buffer.from(
-    JSON.stringify({ v: 1, charityId, viewerId, lastId }),
+    JSON.stringify({
+      v: 2,
+      charityId,
+      viewerId,
+      seconds: position.seconds,
+      nanoseconds: position.nanoseconds,
+      lastId: position.id,
+    }),
     'utf8',
   ).toString('base64url');
 
@@ -87,21 +108,43 @@ const decodeCursor = (
   cursor: string,
   charityId: string,
   viewerId: string,
-): string => {
+): CharityProductPosition => {
   try {
-    const parsed = JSON.parse(
-      Buffer.from(cursor, 'base64url').toString('utf8'),
-    ) as { v?: unknown; charityId?: unknown; viewerId?: unknown; lastId?: unknown };
+    if (!cursor || cursor.length > 4096) {
+      throw new InvalidCharityProductCursor();
+    }
+    const bytes = Buffer.from(cursor, 'base64url');
+    if (bytes.toString('base64url') !== cursor) {
+      throw new InvalidCharityProductCursor();
+    }
+    const parsed = JSON.parse(bytes.toString('utf8')) as {
+      v?: unknown;
+      charityId?: unknown;
+      viewerId?: unknown;
+      seconds?: unknown;
+      nanoseconds?: unknown;
+      lastId?: unknown;
+    };
     if (
-      parsed.v !== 1 ||
+      !parsed ||
+      parsed.v !== 2 ||
       parsed.charityId !== charityId ||
       parsed.viewerId !== viewerId ||
-      typeof parsed.lastId !== 'string' ||
-      !parsed.lastId
+      !Number.isInteger(parsed.seconds) ||
+      (parsed.seconds as number) < MIN_TIMESTAMP_SECONDS ||
+      (parsed.seconds as number) > MAX_TIMESTAMP_SECONDS ||
+      !Number.isInteger(parsed.nanoseconds) ||
+      (parsed.nanoseconds as number) < 0 ||
+      (parsed.nanoseconds as number) >= 1_000_000_000 ||
+      !isValidDocumentId(parsed.lastId)
     ) {
       throw new InvalidCharityProductCursor();
     }
-    return parsed.lastId;
+    return {
+      seconds: parsed.seconds as number,
+      nanoseconds: parsed.nanoseconds as number,
+      id: parsed.lastId,
+    };
   } catch {
     throw new InvalidCharityProductCursor();
   }
@@ -116,7 +159,7 @@ export class CharityProfileService {
     > = new CharityRepository(),
     private readonly products: Pick<
       ProductRepository,
-      'getProductsByCharity'
+      'getCharityProductBatch'
     > = new ProductRepository(),
     private readonly categories: Pick<
       CategoryRepository,
@@ -141,9 +184,9 @@ export class CharityProfileService {
       Math.max(Number.isInteger(query.limit) ? query.limit! : DEFAULT_LIMIT, 1),
       MAX_LIMIT,
     );
-    const afterId = query.cursor
+    const afterPosition = query.cursor
       ? decodeCursor(query.cursor, charityId, viewerId)
-      : null;
+      : undefined;
 
     if (await this.blocks.isBlocked(viewerId, charityId)) {
       return {
@@ -155,31 +198,53 @@ export class CharityProfileService {
     const charity = await this.charities.getById(charityId);
     if (!charity) return null;
 
-    const rawProducts = await this.products.getProductsByCharity(charityId);
-    const activeSorted = rawProducts
-      .filter((product) => isDisplayableListing(product, charityId))
-      .sort((a, b) => {
-        const timeDiff = toMillis(b.createdAt) - toMillis(a.createdAt);
-        return timeDiff !== 0 ? timeDiff : (b.id || '').localeCompare(a.id || '');
-      });
+    const eligible: { product: Product; position: CharityProductPosition }[] =
+      [];
+    let scanned = 0;
+    let exhausted = false;
+    let batchSize = limit + 1;
+    let scanAfter:
+      | CharityProductPosition
+      | FirebaseFirestore.QueryDocumentSnapshot
+      | undefined = afterPosition;
 
-    let startIndex = 0;
-    if (afterId !== null) {
-      const idx = activeSorted.findIndex((item) => item.id === afterId);
-      if (idx === -1) {
-        return {
-          data: { products: [] },
-          meta: { limit, nextCursor: null, hasMore: false },
-        };
+    while (eligible.length < limit + 1 && !exhausted) {
+      const sourceLimit = Math.min(batchSize, MAX_SCANNED_PRODUCTS - scanned);
+      if (sourceLimit === 0) {
+        throw new Error('Charity product scan limit exceeded');
       }
-      startIndex = idx + 1;
+
+      const batch = await this.products.getCharityProductBatch(
+        charityId,
+        sourceLimit,
+        scanAfter,
+      );
+      scanned += batch.items.length;
+      exhausted = batch.exhausted || !batch.nextScanAfter;
+
+      for (const item of batch.items) {
+        if (!item.position) continue;
+        if (!isDisplayableListing(item.product, charityId)) continue;
+        eligible.push({ product: item.product, position: item.position });
+        if (eligible.length === limit + 1) break;
+      }
+
+      if (!exhausted && eligible.length < limit + 1) {
+        scanAfter = batch.nextScanAfter;
+        batchSize = SCAN_CHUNK_SIZE;
+      }
     }
 
-    const slice = activeSorted.slice(startIndex, startIndex + limit);
-    const hasMore = startIndex + limit < activeSorted.length;
+    const pageEntries = eligible.slice(0, limit);
+    const slice = pageEntries.map((entry) => entry.product);
+    const hasMore = eligible.length > limit;
     const nextCursor =
-      hasMore && slice.length > 0 && slice[slice.length - 1].id
-        ? encodeCursor(charityId, viewerId, slice[slice.length - 1].id!)
+      hasMore && pageEntries.length > 0
+        ? encodeCursor(
+            charityId,
+            viewerId,
+            pageEntries[pageEntries.length - 1].position,
+          )
         : null;
 
     const categoryCache = new Map<string, Promise<Category | null>>();

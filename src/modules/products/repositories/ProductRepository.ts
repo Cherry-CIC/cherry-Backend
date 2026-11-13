@@ -30,6 +30,76 @@ export interface ProductQueryPage {
   hasMore: boolean;
 }
 
+export interface CharityProductPosition {
+  seconds: number;
+  nanoseconds: number;
+  id: string;
+}
+
+export interface CharityProductBatchItem {
+  product: Product;
+  position: CharityProductPosition | null;
+}
+
+export interface CharityProductBatch {
+  items: CharityProductBatchItem[];
+  exhausted: boolean;
+  nextScanAfter?: FirebaseFirestore.QueryDocumentSnapshot;
+}
+
+const isCharityProductPosition = (
+  value: CharityProductPosition | FirebaseFirestore.QueryDocumentSnapshot,
+): value is CharityProductPosition =>
+  typeof (value as CharityProductPosition).seconds === 'number' &&
+  typeof (value as CharityProductPosition).nanoseconds === 'number' &&
+  typeof (value as CharityProductPosition).id === 'string' &&
+  !('data' in value);
+
+const isValidPositionId = (id: string): boolean =>
+  Boolean(id) &&
+  id.trim() === id &&
+  id !== '.' &&
+  id !== '..' &&
+  !/[/\\\x00-\x1f\x7f-\x9f]/.test(id) &&
+  Buffer.byteLength(id, 'utf8') <= 1500;
+
+const toCharityProductPosition = (
+  id: string,
+  createdAt: unknown,
+): CharityProductPosition | null => {
+  if (!isValidPositionId(id)) return null;
+  if (createdAt instanceof Timestamp) {
+    return {
+      seconds: createdAt.seconds,
+      nanoseconds: createdAt.nanoseconds,
+      id,
+    };
+  }
+  if (createdAt instanceof Date && !Number.isNaN(createdAt.getTime())) {
+    const ts = Timestamp.fromDate(createdAt);
+    return {
+      seconds: ts.seconds,
+      nanoseconds: ts.nanoseconds,
+      id,
+    };
+  }
+  if (
+    createdAt &&
+    typeof (createdAt as { toDate?: unknown }).toDate === 'function'
+  ) {
+    const date = (createdAt as { toDate: () => Date }).toDate();
+    if (date instanceof Date && !Number.isNaN(date.getTime())) {
+      const ts = Timestamp.fromDate(date);
+      return {
+        seconds: ts.seconds,
+        nanoseconds: ts.nanoseconds,
+        id,
+      };
+    }
+  }
+  return null;
+};
+
 export class ProductRepository {
   constructor(private readonly db: FirebaseFirestore.Firestore = firestore) {}
   private collectionName = 'products';
@@ -292,6 +362,47 @@ export class ProductRepository {
       .get();
 
     return snapshot.docs.map((doc) => this.mapToProduct(doc.id, doc.data()));
+  }
+
+  /** Fetches a bounded newest-first batch of products for a charity using (charityId, createdAt, __name__). */
+  async getCharityProductBatch(
+    charityId: string,
+    limit: number,
+    after?: CharityProductPosition | FirebaseFirestore.QueryDocumentSnapshot,
+  ): Promise<CharityProductBatch> {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error('Invalid charity product batch size');
+    }
+
+    let query: FirebaseFirestore.Query = this.db
+      .collection(this.collectionName)
+      .where('charityId', '==', charityId)
+      .orderBy('createdAt', 'desc')
+      .orderBy(FieldPath.documentId(), 'desc');
+
+    if (after) {
+      query = isCharityProductPosition(after)
+        ? query.startAfter(
+            new Timestamp(after.seconds, after.nanoseconds),
+            after.id,
+          )
+        : query.startAfter(after);
+    }
+
+    const snapshot = await query.limit(limit).get();
+    const docs = snapshot.docs;
+
+    return {
+      items: docs.map((doc) => {
+        const data = doc.data();
+        return {
+          product: this.mapToProduct(doc.id, data),
+          position: toCharityProductPosition(doc.id, data.createdAt),
+        };
+      }),
+      exhausted: docs.length < limit,
+      nextScanAfter: docs.length > 0 ? docs[docs.length - 1] : undefined,
+    };
   }
 
   async getPageByFilters(

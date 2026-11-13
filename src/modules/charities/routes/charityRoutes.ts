@@ -120,10 +120,14 @@ router.get('/', getAllCharities);
  *     responses:
  *       200:
  *         description: Paginated list of active products for this charity
+ *       400:
+ *         description: Invalid charity ID, limit, or cursor
  *       401:
  *         description: Authentication required
  *       404:
  *         description: Charity not found
+ *       503:
+ *         description: Unable to load these products
  */
 router.get('/:id/products', authMiddleware, validateCharityId, getCharityProducts);
 
