@@ -20,6 +20,7 @@ import { CharityRepository } from '../../charities/repositories/CharityRepositor
 import { PostageSize } from '../../postage-sizes/model/PostageSize';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 import { getStorage } from 'firebase-admin/storage';
+import { Timestamp } from 'firebase-admin/firestore';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_PRODUCT_PAGE_SIZE = 50;
@@ -541,19 +542,18 @@ export class ProductService {
         query,
         options,
       );
-      for (const item of matchedItems) {
-        if (items.length < limit) {
-          items.push(item);
-        }
-      }
+      const remaining = limit - items.length;
+      items.push(...matchedItems.slice(0, remaining));
 
       if (items.length >= limit) {
         const lastItem = items[items.length - 1];
+        const hasMore = page.hasMore || matchedItems.length > remaining;
+        const lastCursor = page.cursors?.find((cursor) => cursor.id === lastItem.id);
         return {
           items,
           limit,
-          nextCursor: page.hasMore ? this.encodeCursor(lastItem, query) : null,
-          hasMore: page.hasMore,
+          nextCursor: hasMore ? this.encodeCursor(lastItem, query, lastCursor) : null,
+          hasMore,
         };
       }
 
@@ -562,10 +562,9 @@ export class ProductService {
         break;
       }
 
-      pageCursor = this.buildCursorFromProduct(
-        page.items[page.items.length - 1],
-        query,
-      );
+      const lastScanned = page.items[page.items.length - 1];
+      pageCursor = page.cursors?.find((cursor) => cursor.id === lastScanned.id) ??
+        this.buildCursorFromProduct(lastScanned, query);
       hasMore = true;
     } while (items.length < limit);
 
@@ -681,10 +680,19 @@ export class ProductService {
     return Math.min(Math.max(limit, 1), MAX_PRODUCT_PAGE_SIZE);
   }
 
-  private encodeCursor(product: Product, query: ProductListQuery): string {
+  private encodeCursor(
+    product: Product,
+    query: ProductListQuery,
+    position?: ProductQueryCursor,
+  ): string {
+    const timestamp = position?.createdAt;
     return Buffer.from(
       JSON.stringify({
         createdAt: this.requireProductCreatedAt(product).toISOString(),
+        ...(timestamp instanceof Timestamp ? {
+          createdAtSeconds: timestamp.seconds,
+          createdAtNanoseconds: timestamp.nanoseconds,
+        } : {}),
         id: product.id,
         signature: this.buildQuerySignature(query),
       }),
@@ -703,7 +711,13 @@ export class ProductService {
     try {
       const parsed = JSON.parse(
         Buffer.from(cursor, 'base64').toString('utf8'),
-      ) as { createdAt?: string; id?: string; signature?: string };
+      ) as {
+        createdAt?: string;
+        createdAtSeconds?: number;
+        createdAtNanoseconds?: number;
+        id?: string;
+        signature?: string;
+      };
 
       if (
         !parsed.createdAt ||
@@ -713,9 +727,15 @@ export class ProductService {
         throw new Error('Invalid cursor');
       }
 
-      const createdAt = new Date(parsed.createdAt);
+      let createdAt: Date | Timestamp = new Date(parsed.createdAt);
       if (Number.isNaN(createdAt.getTime())) {
         throw new Error('Invalid cursor');
+      }
+      if (parsed.createdAtSeconds !== undefined || parsed.createdAtNanoseconds !== undefined) {
+        if (!Number.isInteger(parsed.createdAtSeconds) || !Number.isInteger(parsed.createdAtNanoseconds)) {
+          throw new Error('Invalid cursor');
+        }
+        createdAt = new Timestamp(parsed.createdAtSeconds!, parsed.createdAtNanoseconds!);
       }
 
       return {
