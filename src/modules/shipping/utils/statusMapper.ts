@@ -71,6 +71,7 @@ export const mapSendcloudStatusToShipmentStatus = (
     normalized.includes('delivery date changed') ||
     normalized.includes('delivery method changed') ||
     normalized.includes('parcel en route') ||
+    normalized.includes('shipment picked up by driver') ||
     normalized.includes('en route to sorting center') ||
     normalized.includes('not sorted')
   ) {

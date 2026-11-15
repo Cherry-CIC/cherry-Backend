@@ -18,7 +18,7 @@ describe('mapSendcloudStatusToShipmentStatus', () => {
     ['At customs', 'en_route'],
     ['At sorting centre', 'en_route'],
     ['Awaiting customer pickup', 'awaiting_collection'],
-    ['Shipment picked up by driver', 'pending'],
+    ['Shipment picked up by driver', 'en_route'],
     ['Delivery date changed', 'en_route'],
     ['No label', 'pending'],
   ])('maps "%s" to "%s"', (sendcloudStatus, expected) => {

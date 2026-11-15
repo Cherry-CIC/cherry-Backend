@@ -221,7 +221,7 @@ describe('shippingController', () => {
   it.each([
     ['Awaiting customer pickup', 'awaiting_collection', 'shipped'],
     ['Delivered', 'delivered', 'delivered'],
-    ['Shipment picked up by driver', 'pending', 'shipment_created'],
+    ['Shipment picked up by driver', 'en_route', 'shipped'],
     ['Shipment collected by customer', 'collected', 'delivered'],
   ])('keeps collection time absent for %s without a carrier time', async (message, status, orderStatus) => {
     mockGetShipmentBySendcloudId.mockResolvedValue({ id: 's', orderId: 'o' });
