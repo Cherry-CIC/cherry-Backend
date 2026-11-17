@@ -720,22 +720,37 @@ export class ProductService {
       };
 
       if (
+        typeof parsed.createdAt !== 'string' ||
         !parsed.createdAt ||
+        typeof parsed.id !== 'string' ||
         !parsed.id ||
         parsed.signature !== this.buildQuerySignature(query)
       ) {
         throw new Error('Invalid cursor');
       }
 
-      let createdAt: Date | Timestamp = new Date(parsed.createdAt);
-      if (Number.isNaN(createdAt.getTime())) {
+      const parsedDate = new Date(parsed.createdAt);
+      if (Number.isNaN(parsedDate.getTime())) {
         throw new Error('Invalid cursor');
       }
-      if (parsed.createdAtSeconds !== undefined || parsed.createdAtNanoseconds !== undefined) {
-        if (!Number.isInteger(parsed.createdAtSeconds) || !Number.isInteger(parsed.createdAtNanoseconds)) {
+
+      let createdAt: Date | Timestamp = parsedDate;
+      if (
+        parsed.createdAtSeconds !== undefined ||
+        parsed.createdAtNanoseconds !== undefined
+      ) {
+        if (
+          typeof parsed.createdAtSeconds !== 'number' ||
+          typeof parsed.createdAtNanoseconds !== 'number' ||
+          !Number.isInteger(parsed.createdAtSeconds) ||
+          !Number.isInteger(parsed.createdAtNanoseconds)
+        ) {
           throw new Error('Invalid cursor');
         }
-        createdAt = new Timestamp(parsed.createdAtSeconds!, parsed.createdAtNanoseconds!);
+        createdAt = new Timestamp(
+          parsed.createdAtSeconds,
+          parsed.createdAtNanoseconds,
+        );
       }
 
       return {

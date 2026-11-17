@@ -142,6 +142,8 @@ describe('Marketplace category search pagination', () => {
     const readCount = reads.mock.calls.length;
     await expect(service.getPaginatedProducts({ ...query, categoryId: 'men', cursor: first.nextCursor! }))
       .rejects.toThrow('Invalid cursor');
+    await expect(service.getPaginatedProducts({ ...query, cursor: encode({ ...payload, createdAt: 'not-a-date' }) }))
+      .rejects.toThrow('Invalid cursor');
     await expect(service.getPaginatedProducts({ ...query, cursor: encode({ ...payload, createdAtSeconds: 1 }) }))
       .rejects.toThrow('Invalid cursor');
     await expect(service.getPaginatedProducts({ ...query, cursor: encode({ ...payload, createdAtSeconds: 1, createdAtNanoseconds: 1000000000 }) }))
