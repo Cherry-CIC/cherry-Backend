@@ -96,6 +96,8 @@ router.get('/', getAllCharities);
  * /api/charities/{id}/products:
  *   get:
  *     summary: Get active products listed on behalf of a charity
+ *     description: Temporary compatibility wrapper around GET /api/products/with-details?charityId={id}.
+ *     deprecated: true
  *     tags: [Charities]
  *     security:
  *       - bearerAuth: []

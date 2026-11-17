@@ -717,4 +717,176 @@ describe('ProductService pagination', () => {
     await expect(service.deleteProduct('product-1', 'user-1')).rejects.toThrow('Payment pending');
     expect(bucket.file).not.toHaveBeenCalled();
   });
+
+  it('excludes products from charities blocked by the viewer and preserves remaining pages', async () => {
+    const p1 = {
+      ...createProduct('p-1', '2026-07-13T10:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const p2Blocked = {
+      ...createProduct('p-2', '2026-07-13T09:00:00.000Z'),
+      charityId: 'charity-blocked',
+    };
+    const p3 = {
+      ...createProduct('p-3', '2026-07-13T08:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const p4 = {
+      ...createProduct('p-4', '2026-07-13T07:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({ items: [p1, p2Blocked], hasMore: true })
+      .mockResolvedValueOnce({ items: [p3, p4], hasMore: false })
+      .mockResolvedValueOnce({ items: [p4], hasMore: false });
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    categoryRepo.getById.mockResolvedValue({ id: 'category-1', name: 'Tops' });
+    charityRepo.getById.mockResolvedValue({
+      id: 'charity-open',
+      name: 'Open Charity',
+    });
+    postageSizeRepo.getById.mockResolvedValue({
+      id: 'postage-1',
+      name: 'Small',
+    });
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const page1 = await service.getPaginatedProductsWithDetails(
+      { limit: 2 },
+      'viewer-1',
+    );
+
+    expect(charityBlockRepo.getBlockedCharityIds).toHaveBeenCalledWith(
+      'viewer-1',
+    );
+    expect(page1.items.map((item) => item.id)).toEqual(['p-1', 'p-3']);
+    expect(page1.hasMore).toBe(true);
+    expect(page1.nextCursor).toBeTruthy();
+    expect(categoryRepo.getById).toHaveBeenCalledTimes(1);
+    expect(charityRepo.getById).toHaveBeenCalledTimes(1);
+    expect(postageSizeRepo.getById).toHaveBeenCalledTimes(1);
+
+    const page2 = await service.getPaginatedProducts(
+      { limit: 2, cursor: page1.nextCursor! },
+      'viewer-1',
+    );
+    expect(page2.items.map((item) => item.id)).toEqual(['p-4']);
+    expect(page2.hasMore).toBe(false);
+    expect(page2.nextCursor).toBeNull();
+  });
+
+  it('returns empty listings without querying products when requested charityId is blocked', async () => {
+    const getPageByFilters = jest.fn();
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockResolvedValue(true),
+      getBlockedCharityIds: jest.fn(),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const result = await service.getPaginatedProductsWithDetails(
+      { charityId: 'charity-blocked', limit: 20 },
+      'viewer-1',
+    );
+
+    expect(charityBlockRepo.isBlocked).toHaveBeenCalledWith(
+      'viewer-1',
+      'charity-blocked',
+    );
+    expect(charityBlockRepo.getBlockedCharityIds).not.toHaveBeenCalled();
+    expect(getPageByFilters).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      items: [],
+      limit: 20,
+      nextCursor: null,
+      hasMore: false,
+    });
+  });
+
+  it('binds pagination cursors to the authenticated viewer', async () => {
+    const first = createProduct('product-1', '2026-07-13T10:00:00.000Z');
+    const second = createProduct('product-2', '2026-07-13T09:00:00.000Z');
+    const getPageByFilters = jest.fn().mockResolvedValueOnce({
+      items: [first, second],
+      hasMore: true,
+    });
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockResolvedValue(false),
+      getBlockedCharityIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const page1 = await service.getPaginatedProducts(
+      { charityId: 'charity-1', limit: 2 },
+      'viewer-1',
+    );
+
+    await expect(
+      service.getPaginatedProducts(
+        { charityId: 'charity-1', limit: 2, cursor: page1.nextCursor! },
+        'viewer-2',
+      ),
+    ).rejects.toThrow('Invalid cursor');
+  });
+
+  it('propagates errors when checking blocked charities fails', async () => {
+    const getPageByFilters = jest.fn();
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockRejectedValue(new Error('Firestore down')),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockRejectedValue(new Error('Firestore down')),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    await expect(
+      service.getPaginatedProducts({ charityId: 'charity-1' }, 'viewer-1'),
+    ).rejects.toThrow('Firestore down');
+    await expect(
+      service.getPaginatedProducts({}, 'viewer-1'),
+    ).rejects.toThrow('Firestore down');
+    expect(getPageByFilters).not.toHaveBeenCalled();
+  });
 });

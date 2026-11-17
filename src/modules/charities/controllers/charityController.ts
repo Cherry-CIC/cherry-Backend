@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
 import { CharityRepository } from '../repositories/CharityRepository';
-import {
-  CharityProfileService,
-  InvalidCharityProductCursor,
-} from '../services/CharityProfileService';
+import { ServiceFactory } from '../../products/services/ServiceFactory';
+import { withSecurityFee } from '../../products/controllers/productController';
 import { ResponseHandler } from '../../../shared/utils/responseHandler';
 import { requireSingleParam } from '../../../shared/utils/requestParam';
 
@@ -98,36 +96,53 @@ export const getCharityProducts = async (req: Request, res: Response): Promise<v
         return;
     }
 
-    const id = requireSingleParam(req.params.id);
+    const id = requireSingleParam(req.params.id)?.trim();
     if (!id) {
         ResponseHandler.badRequest(res, 'Charity ID is required');
         return;
     }
 
-    const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
-    const limit = rawLimit !== undefined && Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 50
-        ? rawLimit
-        : rawLimit === undefined
-            ? undefined
-            : NaN;
-    if (limit !== undefined && Number.isNaN(limit)) {
-        ResponseHandler.badRequest(res, 'Invalid limit parameter');
-        return;
+    let limit: number | undefined;
+    if (req.query.limit !== undefined) {
+        const raw = typeof req.query.limit === 'string' ? req.query.limit.trim() : '';
+        if (!/^\d+$/.test(raw)) {
+            ResponseHandler.badRequest(res, 'Invalid limit parameter');
+            return;
+        }
+        const parsed = Number.parseInt(raw, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+            ResponseHandler.badRequest(res, 'Invalid limit parameter');
+            return;
+        }
+        limit = parsed;
     }
 
+    if (req.query.cursor !== undefined && typeof req.query.cursor !== 'string') {
+        ResponseHandler.badRequest(res, 'Invalid cursor');
+        return;
+    }
     const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim()
         ? req.query.cursor.trim()
         : undefined;
 
     try {
-        const page = await new CharityProfileService().getCharityProducts(id, viewerId, { limit, cursor });
-        if (!page) {
+        const charity = await repo.getById(id);
+        if (!charity) {
             ResponseHandler.notFound(res, 'Charity not found', `Charity with ID ${id} does not exist`);
             return;
         }
-        ResponseHandler.paginated(res, page.data, page.meta);
+
+        const result = await ServiceFactory.getProductService().getPaginatedProductsWithDetails(
+            { charityId: id, limit, cursor },
+            viewerId,
+        );
+        ResponseHandler.paginated(
+            res,
+            { products: result.items.map((product) => withSecurityFee(product)) },
+            { limit: result.limit, nextCursor: result.nextCursor, hasMore: result.hasMore },
+        );
     } catch (err) {
-        if (err instanceof InvalidCharityProductCursor) {
+        if (err instanceof Error && err.message === 'Invalid cursor') {
             ResponseHandler.badRequest(res, 'Invalid cursor');
             return;
         }

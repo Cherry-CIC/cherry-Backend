@@ -10,10 +10,13 @@ import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig
 import { gbpToPence } from '../../../shared/utils/money';
 import { ProductListQuery } from '../services/ProductService';
 
-const withSecurityFee = <T extends { price: number }>(product: T) => ({
+export const withSecurityFee = <T extends { price: number }>(product: T) => ({
   ...exposedListing(product),
   securityFee: calculateSecurityFeePence(gbpToPence(product.price)) / 100,
 });
+
+const viewerIdFrom = (req: Request): string | undefined =>
+  (req as Request & { user?: { uid?: string } }).user?.uid;
 
 const sendPaginatedProductsResponse = <T extends { price: number }>(
   res: Response,
@@ -42,10 +45,17 @@ export const getAllProducts = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const viewerId = viewerIdFrom(req);
+  if (!viewerId) {
+    ResponseHandler.unauthorized(res, 'Authentication required');
+    return;
+  }
+
   try {
     const productService = ServiceFactory.getProductService();
     const query = req.query as unknown as ProductListQuery;
-    const result = await productService.getPaginatedProducts(query);
+    const result = await productService.getPaginatedProducts(query, viewerId);
     sendPaginatedProductsResponse(
       res,
       result.items,
@@ -177,10 +187,20 @@ export const getAllProductsWithDetails = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const viewerId = viewerIdFrom(req);
+  if (!viewerId) {
+    ResponseHandler.unauthorized(res, 'Authentication required');
+    return;
+  }
+
   try {
     const productService = ServiceFactory.getProductService();
     const query = req.query as unknown as ProductListQuery;
-    const result = await productService.getPaginatedProductsWithDetails(query);
+    const result = await productService.getPaginatedProductsWithDetails(
+      query,
+      viewerId,
+    );
     sendPaginatedProductsResponse(
       res,
       result.items,

@@ -113,7 +113,7 @@ router.get('/charities', authMiddleware, listBlockedCharities);
  *     summary: Block a charity
  *     description: >
  *       Blocks a charity for the authenticated viewer. Blocked charities'
- *       listings are hidden from the viewer's charity profile product endpoint.
+ *       listings are excluded from product listing endpoints for the viewer.
  *     tags: [Blocks]
  *     security:
  *       - bearerAuth: []
