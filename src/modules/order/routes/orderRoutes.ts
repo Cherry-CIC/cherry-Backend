@@ -51,6 +51,10 @@ const router = Router();
  *         pickupPoint:
  *           type: object
  *           nullable: true
+ *         deliveredAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -97,6 +101,10 @@ const router = Router();
  *           format: date-time
  *           nullable: true
  *         confirmationDeadline:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         deliveredAt:
  *           type: string
  *           format: date-time
  *           nullable: true

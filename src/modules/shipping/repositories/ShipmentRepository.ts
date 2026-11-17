@@ -128,8 +128,13 @@ export class ShipmentRepository {
       if (lastEvent != null && (!sendcloudTime || sendcloudTime.getTime() < lastEvent)) {
         return false;
       }
+      const deliveredAtUpdate =
+        shipmentUpdates.status === 'delivered' && current.get('deliveredAt') == null
+          ? { deliveredAt: sendcloudTime ?? new Date() }
+          : {};
       tx.update(shipmentRef, {
         ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),
+        ...deliveredAtUpdate,
         ...(sendcloudTime && { lastTrackingEventMs: sendcloudTime.getTime() }),
         updatedAt: new Date(),
       });
@@ -215,6 +220,16 @@ export class ShipmentRepository {
     return [];
   }
 
+  private toDate(value: any): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+    if (typeof value.toDate === 'function') {
+      return value.toDate();
+    }
+    return new Date(value);
+  }
+
   /**
    * Map Firestore data to Shipment model
    * @param id - Document ID
@@ -222,21 +237,9 @@ export class ShipmentRepository {
    * @returns Shipment object
    */
   private mapToShipment(id: string, data: any): Shipment {
-    // Handle Firestore Timestamp conversion
-    let createdAt = data.createdAt;
-    let updatedAt = data.updatedAt;
-
-    if (createdAt && typeof createdAt.toDate === 'function') {
-      createdAt = createdAt.toDate();
-    } else if (createdAt) {
-      createdAt = new Date(createdAt);
-    }
-
-    if (updatedAt && typeof updatedAt.toDate === 'function') {
-      updatedAt = updatedAt.toDate();
-    } else if (updatedAt) {
-      updatedAt = new Date(updatedAt);
-    }
+    const createdAt = (this.toDate(data.createdAt) ?? data.createdAt) as Date;
+    const updatedAt = (this.toDate(data.updatedAt) ?? data.updatedAt) as Date;
+    const deliveredAt = this.toDate(data.deliveredAt);
 
     return {
       id,
@@ -255,6 +258,7 @@ export class ShipmentRepository {
       parcel: data.parcel,
       createdAt,
       updatedAt,
+      ...(deliveredAt ? { deliveredAt } : {}),
     };
   }
 }

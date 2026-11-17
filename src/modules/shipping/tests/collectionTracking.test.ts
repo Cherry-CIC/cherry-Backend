@@ -55,4 +55,14 @@ describe('collection event persistence', () => {
     expect(documents['orders/o'].shipmentStatus).toBe('exception');
     expect(documents['orders/o'].collectedAt.toMillis()).toBe(time(12).getTime());
   });
+
+  it('persists deliveredAt when first transitioning to delivered and preserves it on retries', async () => {
+    await event('en_route', 10, null);
+    expect(documents['shipments/s'].deliveredAt).toBeUndefined();
+
+    await event('delivered', 12, null);
+    await event('delivered', 14, null);
+    expect(documents['shipments/s'].deliveredAt.toMillis()).toBe(time(12).getTime());
+    expect(documents['shipments/s'].status).toBe('delivered');
+  });
 });

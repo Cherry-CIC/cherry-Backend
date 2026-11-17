@@ -166,6 +166,7 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     confirmationDeadline: order.collectedAt
       ? new Date(order.collectedAt.getTime() + 48 * 60 * 60 * 1000).toISOString()
       : null,
+    deliveredAt: shipment?.deliveredAt ?? null,
     canTrack: Boolean(shipment?.trackingUrl),
     trackingNumber: shipment?.trackingNumber ?? null,
     trackingUrl: shipment?.trackingUrl ?? null,
@@ -181,6 +182,7 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
           trackingUrl: shipment.trackingUrl ?? null,
           labelUrl: shipment.labelUrl ?? null,
           pickupPoint: shipment.pickupPoint ?? order.pickupPoint,
+          deliveredAt: shipment.deliveredAt ?? null,
           createdAt: shipment.createdAt,
           updatedAt: shipment.updatedAt,
         }
