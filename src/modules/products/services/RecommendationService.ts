@@ -68,18 +68,27 @@ export class RecommendationService {
       ? decodeCursor(query.cursor)
       : { position: 0, feedId: randomUUID() };
     const key = `${userId}:${cursor.feedId}`;
-    const feed = query.cursor
-      ? this.feeds.get(key)
-      : await this.buildFeed(userId);
-    // The saved order is gone, for example after a server restart. Sorting
-    // again could repeat or skip items, so the app starts again from page 1.
-    if (!feed) {
-      throw new Error('Feed expired');
+    let feed: string[];
+    let products: Product[];
+    if (query.cursor) {
+      const saved = this.feeds.get(key);
+      // The saved order is gone, for example after a server restart. Sorting
+      // again could repeat or skip items, so the app starts again from page 1.
+      if (!saved) {
+        throw new Error('Feed expired');
+      }
+      feed = saved;
+      const pageIds = feed.slice(cursor.position, cursor.position + limit);
+      products = await this.loadStillForSale(userId, pageIds);
+    } else {
+      // buildFeed has only just checked these products, so page 1 uses them
+      // as they are instead of reading them again.
+      const ranked = await this.buildFeed(userId);
+      feed = ranked.map((product) => product.id as string);
+      products = ranked.slice(0, limit);
     }
     this.saveFeed(key, feed);
 
-    const pageIds = feed.slice(cursor.position, cursor.position + limit);
-    const products = await this.loadStillForSale(userId, pageIds);
     const items = await this.productService.enrichProductsWithDetails(products);
     const nextPosition = cursor.position + limit;
     const hasMore = nextPosition < feed.length;
@@ -104,8 +113,8 @@ export class RecommendationService {
     }
   }
 
-  // Works out the whole feed order for one user, as a list of product ids.
-  private async buildFeed(userId: string): Promise<string[]> {
+  // Works out the whole feed order for one user, best match first.
+  private async buildFeed(userId: string): Promise<Product[]> {
     // These 4 reads don't depend on each other, so they run at the same time.
     const [likedIds, boughtIds, blockedUserIds, candidates] = await Promise.all(
       [
@@ -134,9 +143,7 @@ export class RecommendationService {
         !blockedUserIds.has(product.userId), // a seller they blocked
     );
 
-    return rankProducts(allowed, profile, this.now()).map(
-      (product) => product.id as string,
-    );
+    return rankProducts(allowed, profile, this.now());
   }
 
   // Loads products by id, keeping their order and skipping deleted ones.

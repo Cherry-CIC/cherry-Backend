@@ -59,19 +59,35 @@ const setUp = (
     isModerationHidden: (product: Product) => product.hidden === true,
   };
 
+  const likeRepo = {
+    getLikedProductIds: jest.fn(async () => [...liked]),
+    getLikedProductIdsAmong: jest.fn(async (_userId, productIds: string[]) =>
+      productIds.filter((id) => liked.includes(id)),
+    ),
+  };
+  const orderRepo = {
+    getPurchasedProductIds: jest.fn(async () => options.bought ?? []),
+  };
+  const blockRepo = {
+    getBlockedUserIds: jest.fn(async () => new Set(options.blocked)),
+  };
+
   const service = new RecommendationService(
     productService as unknown as ProductService,
-    {
-      getLikedProductIds: jest.fn(async () => [...liked]),
-      getLikedProductIdsAmong: jest.fn(async (_userId, productIds: string[]) =>
-        productIds.filter((id) => liked.includes(id)),
-      ),
-    },
-    { getPurchasedProductIds: jest.fn(async () => options.bought ?? []) },
-    { getBlockedUserIds: jest.fn(async () => new Set(options.blocked)) },
+    likeRepo,
+    orderRepo,
+    blockRepo,
     () => now,
   );
-  return { service, store, liked, productService };
+  return {
+    service,
+    store,
+    liked,
+    productService,
+    likeRepo,
+    orderRepo,
+    blockRepo,
+  };
 };
 
 // 25 products, p1 the newest.
@@ -145,6 +161,20 @@ describe('RecommendationService', () => {
     expect(new Set(all).size).toBe(25);
     // Page 2 reused the saved order instead of sorting again.
     expect(productService.getNewestAvailableProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it("doesn't check page 1's items a second time", async () => {
+    const { service, productService, likeRepo, orderRepo, blockRepo } =
+      setUp(shop());
+
+    const pageOne = await service.getRecommendedPage('newbie', { limit: 20 });
+
+    expect(pageOne.items).toHaveLength(20);
+    // buildFeed read each of these once. Nothing reads them again.
+    expect(productService.getProductById).not.toHaveBeenCalled();
+    expect(likeRepo.getLikedProductIdsAmong).not.toHaveBeenCalled();
+    expect(orderRepo.getPurchasedProductIds).toHaveBeenCalledTimes(1);
+    expect(blockRepo.getBlockedUserIds).toHaveBeenCalledTimes(1);
   });
 
   it('drops an item that sold, or whose seller was blocked, after page 1', async () => {
