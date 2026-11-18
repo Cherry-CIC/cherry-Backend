@@ -24,7 +24,6 @@ const getDeliveryState = (
   | 'preparing'
   | 'shipped'
   | 'out_for_delivery'
-  | 'awaiting_collection'
   | 'awaiting_confirmation'
   | 'confirmed'
   | 'disputed'
@@ -37,14 +36,6 @@ const getDeliveryState = (
 
   if (order.buyerConfirmedReceived) {
     return 'confirmed';
-  }
-
-  if (order.shipmentStatus === 'awaiting_collection') {
-    return 'awaiting_collection';
-  }
-
-  if (order.shipmentStatus === 'collected') {
-    return 'awaiting_confirmation';
   }
 
   if (order.status === 'delivered') {
@@ -83,7 +74,6 @@ const getDeliveryLabel = (
     | 'preparing'
     | 'shipped'
     | 'out_for_delivery'
-    | 'awaiting_collection'
     | 'awaiting_confirmation'
     | 'confirmed'
     | 'disputed'
@@ -100,8 +90,6 @@ const getDeliveryLabel = (
       return 'On the way';
     case 'out_for_delivery':
       return 'Out for delivery';
-    case 'awaiting_collection':
-      return 'Ready to collect';
     case 'awaiting_confirmation':
       return 'Awaiting your confirmation';
     case 'confirmed':
@@ -134,8 +122,7 @@ const canBuyerConfirmReceived = (order: Order): boolean => {
   }
 
   return order.status === 'delivered' ||
-    order.shipmentStatus === 'delivered' ||
-    order.shipmentStatus === 'collected';
+    order.shipmentStatus === 'delivered';
 };
 
 const DISPUTE_REASONS: OrderDisputeReason[] = [
@@ -163,9 +150,6 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
-    confirmationDeadline: order.collectedAt
-      ? new Date(order.collectedAt.getTime() + 48 * 60 * 60 * 1000).toISOString()
-      : null,
     deliveredAt: shipment?.deliveredAt ?? null,
     canTrack: Boolean(shipment?.trackingUrl),
     trackingNumber: shipment?.trackingNumber ?? null,

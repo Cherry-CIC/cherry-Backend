@@ -239,7 +239,7 @@ export const handleSendcloudWebhook = async (
           shipmentStatus: status,
           shipmentId: shipment.id,
           status:
-            (status === 'delivered' || status === 'collected')
+            status === 'delivered'
               ? 'delivered'
               : status === 'cancelled'
                 ? 'cancelled'
@@ -255,13 +255,10 @@ export const handleSendcloudWebhook = async (
           { status, trackingNumber: parcel.tracking_number, trackingUrl: parcel.tracking_url },
           orderUpdates,
           webhookTime(timestamp),
-          status === 'collected'
-            ? webhookTime(value.carrier_status_change_timestamp)
-            : null,
         );
 
         if (
-          updated && (status === 'delivered' || status === 'collected') &&
+          updated && status === 'delivered' &&
           order &&
           !order.buyerDeliveryEmailSentAt
         ) {
