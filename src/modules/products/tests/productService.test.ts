@@ -718,3 +718,49 @@ describe('ProductService pagination', () => {
     expect(bucket.file).not.toHaveBeenCalled();
   });
 });
+
+describe('ProductService.getNewestAvailableProducts', () => {
+  const serviceWith = (getPageByFilters: jest.Mock) =>
+    new ProductService(
+      { getPageByFilters } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+  it('pages through Firestore and skips products not for sale', async () => {
+    const sold = {
+      ...createProduct('sold', '2026-07-13T09:00:00.000Z'),
+      status: 'sold' as const,
+      number: 0,
+    };
+    const hidden = {
+      ...createProduct('hidden', '2026-07-13T08:00:00.000Z'),
+      hidden: true,
+    };
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({
+        items: [
+          createProduct('for-sale-1', '2026-07-13T10:00:00.000Z'),
+          sold,
+          hidden,
+        ],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [createProduct('for-sale-2', '2026-07-13T07:00:00.000Z')],
+        hasMore: false,
+      });
+
+    const products =
+      await serviceWith(getPageByFilters).getNewestAvailableProducts(200);
+
+    expect(products.map((product) => product.id)).toEqual([
+      'for-sale-1',
+      'for-sale-2',
+    ]);
+  });
+
+});

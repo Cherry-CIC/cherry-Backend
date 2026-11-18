@@ -131,6 +131,51 @@ export class ProductLikeRepository {
         };
     }
 
+    // The ids of every product a user has liked, newest like first, for the
+    // recommended feed. select() asks Firestore for just these two fields.
+    // Sorting here, not in the query, means Firestore needs no extra index.
+    async getLikedProductIds(userId: string): Promise<string[]> {
+        const snapshot = await this.db
+            .collection(this.likesCollection)
+            .where('userId', '==', userId)
+            .select('productId', 'createdAt')
+            .get();
+
+        return snapshot.docs
+            .map((doc) => {
+                const likedAt = doc.get('createdAt');
+                return {
+                    productId: doc.get('productId'),
+                    likedAt: likedAt instanceof Timestamp ? likedAt.toMillis() : 0,
+                };
+            })
+            .filter((like): like is { productId: string; likedAt: number } =>
+                typeof like.productId === 'string')
+            .sort((a, b) => b.likedAt - a.likedAt)
+            .map((like) => like.productId);
+    }
+
+    // Which of these products the user has liked, for the recommended feed's
+    // later pages. Each like's id is made from the user and product ids, so
+    // this reads those likes directly instead of searching.
+    async getLikedProductIdsAmong(
+        userId: string,
+        productIds: string[],
+    ): Promise<string[]> {
+        // getAll needs at least one document.
+        if (productIds.length === 0) {
+            return [];
+        }
+        const likes = await this.db.getAll(
+            ...productIds.map((productId) =>
+                this.db
+                    .collection(this.likesCollection)
+                    .doc(this.buildLikeId(userId, productId)),
+            ),
+        );
+        return productIds.filter((_, index) => likes[index].exists);
+    }
+
     async deleteLikesByUserId(firebaseUid: string): Promise<number> {
         const snapshot = await this.db
             .collection(this.likesCollection)

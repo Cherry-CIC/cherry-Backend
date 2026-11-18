@@ -195,3 +195,39 @@ describe('OrderRepository.finalizePendingOrder', () => {
     expect(transaction.set).not.toHaveBeenCalled();
   });
 });
+
+describe('OrderRepository.getPurchasedProductIds', () => {
+  const orderDoc = (productId: string, paymentStatus: string) => ({
+    get: (field: string) =>
+      field === 'productId'
+        ? productId
+        : field === 'paymentStatus'
+          ? paymentStatus
+          : undefined,
+  });
+
+  it('reads only the product id and payment status, keeping paid orders', async () => {
+    const select = jest.fn().mockReturnValue({
+      get: jest.fn().mockResolvedValue({
+        docs: [
+          orderDoc('product-1', 'succeeded'),
+          orderDoc('product-2', 'pending'),
+          orderDoc('product-3', 'refunded'),
+          orderDoc('product-1', 'succeeded'),
+        ],
+      }),
+    });
+    const where = jest.fn().mockReturnValue({ select });
+    mockFirestore.collection.mockReturnValueOnce({ where });
+
+    const productIds = await new OrderRepository().getPurchasedProductIds(
+      'buyer-1',
+    );
+
+    expect(mockFirestore.collection).toHaveBeenCalledWith('orders');
+    expect(where).toHaveBeenCalledWith('userId', '==', 'buyer-1');
+    // Never the address, phone or email.
+    expect(select).toHaveBeenCalledWith('productId', 'paymentStatus');
+    expect(productIds).toEqual(['product-1']);
+  });
+});

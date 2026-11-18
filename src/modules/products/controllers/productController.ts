@@ -9,6 +9,7 @@ import { requireSingleParam } from '../../../shared/utils/requestParam';
 import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig';
 import { gbpToPence } from '../../../shared/utils/money';
 import { ProductListQuery } from '../services/ProductService';
+import { RecommendedQuery } from '../services/RecommendationService';
 
 const withSecurityFee = <T extends { price: number }>(product: T) => ({
   ...exposedListing(product),
@@ -197,6 +198,54 @@ export const getAllProductsWithDetails = async (
     ResponseHandler.internalServerError(
       res,
       'Failed to fetch products with details',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
+  }
+};
+
+// The personalised home feed (issue #57). Same response shape as
+// /with-details, so the app only needs to change the address it calls.
+export const getRecommendedProducts = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const recommendationService = ServiceFactory.getRecommendationService();
+    const user = (req as any).user;
+    const query = req.query as unknown as RecommendedQuery;
+    const result = await recommendationService.getRecommendedPage(
+      user.uid,
+      query,
+    );
+    sendPaginatedProductsResponse(
+      res,
+      result.items,
+      result.limit,
+      result.nextCursor,
+      result.hasMore,
+      'Recommended products fetched successfully',
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === 'Invalid cursor') {
+      ResponseHandler.badRequest(res, 'Invalid cursor', err.message);
+      return;
+    }
+    // 410 Gone: this feed's saved order no longer exists, so the app loads
+    // page 1 again.
+    if (err instanceof Error && err.message === 'Feed expired') {
+      ResponseHandler.custom(
+        res,
+        410,
+        false,
+        'Feed expired',
+        undefined,
+        err.message,
+      );
+      return;
+    }
+    ResponseHandler.internalServerError(
+      res,
+      'Failed to fetch recommended products',
       err instanceof Error ? err.message : 'Unknown error',
     );
   }
