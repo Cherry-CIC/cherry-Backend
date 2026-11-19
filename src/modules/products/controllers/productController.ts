@@ -10,7 +10,7 @@ import { calculateSecurityFeePence } from '../../../shared/config/checkoutConfig
 import { gbpToPence } from '../../../shared/utils/money';
 import { ProductListQuery } from '../services/ProductService';
 
-export const withSecurityFee = <T extends { price: number }>(product: T) => ({
+const withSecurityFee = <T extends { price: number }>(product: T) => ({
   ...exposedListing(product),
   securityFee: calculateSecurityFeePence(gbpToPence(product.price)) / 100,
 });
