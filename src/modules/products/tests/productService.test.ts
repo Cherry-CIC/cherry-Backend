@@ -786,9 +786,191 @@ describe('ProductService pagination', () => {
       { limit: 2, cursor: page1.nextCursor! },
       'viewer-1',
     );
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ limit: 2 }),
+      2,
+      {
+        createdAt: p2Blocked.createdAt,
+        id: 'p-2',
+      },
+    );
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ limit: 2, cursor: page1.nextCursor }),
+      2,
+      {
+        createdAt: p3.createdAt,
+        id: 'p-3',
+      },
+    );
     expect(page2.items.map((item) => item.id)).toEqual(['p-4']);
     expect(page2.hasMore).toBe(false);
     expect(page2.nextCursor).toBeNull();
+  });
+
+  it('bounds raw product scanning when blocked charities fill pages and resumes after the last examined product', async () => {
+    const pages = Array.from({ length: 10 }, (_, pageIndex) => {
+      const firstIndex = pageIndex * 2 + 1;
+      const secondIndex = pageIndex * 2 + 2;
+      return [
+        {
+          ...createProduct(
+            `blocked-${firstIndex}`,
+            new Date(Date.UTC(2026, 6, 13, 10, 0, 100 - firstIndex)).toISOString(),
+          ),
+          charityId: 'charity-blocked',
+        },
+        {
+          ...createProduct(
+            `blocked-${secondIndex}`,
+            new Date(Date.UTC(2026, 6, 13, 10, 0, 100 - secondIndex)).toISOString(),
+          ),
+          charityId: 'charity-blocked',
+        },
+      ];
+    });
+    const openProduct = {
+      ...createProduct('open-after-budget', '2026-07-13T09:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest.fn();
+    for (const items of pages) {
+      getPageByFilters.mockResolvedValueOnce({ items, hasMore: true });
+    }
+    getPageByFilters.mockResolvedValueOnce({
+      items: [openProduct],
+      hasMore: false,
+    });
+
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const firstResult = await service.getPaginatedProducts(
+      { limit: 2 },
+      'viewer-1',
+    );
+
+    const lastExamined = pages[9][1];
+    expect(getPageByFilters).toHaveBeenCalledTimes(10);
+    expect(firstResult.items).toEqual([]);
+    expect(firstResult.hasMore).toBe(true);
+    expect(firstResult.nextCursor).toBeTruthy();
+
+    const nextResult = await service.getPaginatedProducts(
+      { limit: 2, cursor: firstResult.nextCursor! },
+      'viewer-1',
+    );
+
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      11,
+      expect.objectContaining({ limit: 2, cursor: firstResult.nextCursor }),
+      2,
+      {
+        createdAt: lastExamined.createdAt,
+        id: lastExamined.id,
+      },
+    );
+    expect(nextResult.items.map((item) => item.id)).toEqual([
+      'open-after-budget',
+    ]);
+    expect(nextResult.hasMore).toBe(false);
+    expect(nextResult.nextCursor).toBeNull();
+  });
+
+  it('bounds raw product scanning by item budget and returns a continuation cursor from the last examined product on partial pages', async () => {
+    const page1Open = {
+      ...createProduct('open-1', '2026-07-13T12:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const makeBlockedBatch = (batchIndex: number, count: number) =>
+      Array.from({ length: count }, (_, itemIndex) => ({
+        ...createProduct(
+          `blocked-${batchIndex}-${itemIndex}`,
+          new Date(
+            Date.UTC(2026, 6, 13, 11, 59 - batchIndex, 59 - itemIndex),
+          ).toISOString(),
+        ),
+        charityId: 'charity-blocked',
+      }));
+
+    const batch1 = [page1Open, ...makeBlockedBatch(0, 49)];
+    const batch2 = makeBlockedBatch(1, 50);
+    const batch3 = makeBlockedBatch(2, 50);
+    const batch4 = makeBlockedBatch(3, 50);
+    const batch5 = makeBlockedBatch(4, 50);
+    const page6Open = {
+      ...createProduct('open-2', '2026-07-13T10:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({ items: batch1, hasMore: true })
+      .mockResolvedValueOnce({ items: batch2, hasMore: true })
+      .mockResolvedValueOnce({ items: batch3, hasMore: true })
+      .mockResolvedValueOnce({ items: batch4, hasMore: true })
+      .mockResolvedValueOnce({ items: batch5, hasMore: true })
+      .mockResolvedValueOnce({ items: [page6Open], hasMore: false });
+
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const partialPage = await service.getPaginatedProducts(
+      { limit: 50 },
+      'viewer-1',
+    );
+
+    const lastExamined = batch5[batch5.length - 1];
+    expect(getPageByFilters).toHaveBeenCalledTimes(5);
+    expect(partialPage.items.map((item) => item.id)).toEqual(['open-1']);
+    expect(partialPage.hasMore).toBe(true);
+    expect(partialPage.nextCursor).toBeTruthy();
+
+    const nextPage = await service.getPaginatedProducts(
+      { limit: 50, cursor: partialPage.nextCursor! },
+      'viewer-1',
+    );
+
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      6,
+      expect.objectContaining({ limit: 50, cursor: partialPage.nextCursor }),
+      50,
+      {
+        createdAt: lastExamined.createdAt,
+        id: lastExamined.id,
+      },
+    );
+    expect(nextPage.items.map((item) => item.id)).toEqual(['open-2']);
+    expect(nextPage.hasMore).toBe(false);
+    expect(nextPage.nextCursor).toBeNull();
   });
 
   it('returns empty listings without querying products when requested charityId is blocked', async () => {

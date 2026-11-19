@@ -23,6 +23,8 @@ import { getStorage } from 'firebase-admin/storage';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_PRODUCT_PAGE_SIZE = 50;
+const MAX_PRODUCT_SCAN_PAGES = 10;
+const MAX_PRODUCT_SCAN_ITEMS = 250;
 
 export interface CharityBlockReader {
   isBlocked(blockerId: string, blockedCharityId: string): Promise<boolean>;
@@ -577,7 +579,8 @@ export class ProductService {
 
     const items: T[] = [];
     let pageCursor = cursor;
-    let hasMore = false;
+    let scannedPages = 0;
+    let scannedProducts = 0;
 
     do {
       const page = await this.productRepo.getPageByFilters(
@@ -585,6 +588,8 @@ export class ProductService {
         limit,
         pageCursor,
       );
+      scannedPages += 1;
+      scannedProducts += page.items.length;
 
       const matchedItems = this.applyProductFilters(
         this.applySearch(page.items as T[], normalizedQuery.search),
@@ -615,30 +620,40 @@ export class ProductService {
       }
 
       if (!page.items.length || !page.hasMore) {
-        hasMore = false;
         break;
       }
 
-      pageCursor = this.buildCursorFromProduct(
-        page.items[page.items.length - 1],
+      const lastExaminedProduct = page.items[page.items.length - 1];
+      const continuationCursor = this.encodeCursor(
+        lastExaminedProduct,
         normalizedQuery,
         viewerId,
       );
-      hasMore = true;
+
+      if (
+        scannedPages >= MAX_PRODUCT_SCAN_PAGES ||
+        scannedProducts >= MAX_PRODUCT_SCAN_ITEMS
+      ) {
+        return {
+          items,
+          limit,
+          nextCursor: continuationCursor,
+          hasMore: true,
+        };
+      }
+
+      pageCursor = this.decodeCursor(
+        continuationCursor,
+        normalizedQuery,
+        viewerId,
+      );
     } while (items.length < limit);
 
     return {
       items,
       limit,
-      nextCursor:
-        hasMore && items.length
-          ? this.encodeCursor(
-              items[items.length - 1],
-              normalizedQuery,
-              viewerId,
-            )
-          : null,
-      hasMore,
+      nextCursor: null,
+      hasMore: false,
     };
   }
 
@@ -878,15 +893,6 @@ export class ProductService {
     } catch (error) {
       throw new Error('Invalid cursor');
     }
-  }
-
-  private buildCursorFromProduct(
-    product: Product,
-    query: ProductListQuery,
-    viewerId?: string,
-  ): ProductQueryCursor {
-    const encoded = this.encodeCursor(product, query, viewerId);
-    return this.decodeCursor(encoded, query, viewerId)!;
   }
 
   private requireProductCreatedAt(product: Product): Date {
