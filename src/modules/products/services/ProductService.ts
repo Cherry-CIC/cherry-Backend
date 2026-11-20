@@ -558,7 +558,10 @@ export class ProductService {
 
     let blockedCharityIds: Set<string> | undefined;
     if (viewerId) {
-      const blockRepo = await this.getCharityBlockRepo();
+      if (!this.charityBlockRepo) {
+        throw new Error('Charity block repository not configured');
+      }
+      const blockRepo = this.charityBlockRepo;
       if (requestedCharityId) {
         if (await blockRepo.isBlocked(viewerId, requestedCharityId)) {
           return {
@@ -740,18 +743,6 @@ export class ProductService {
 
   private isAvailableForPurchase(product: Product): boolean {
     return product.status === 'active' && this.hasStock(product);
-  }
-
-  private async getCharityBlockRepo(): Promise<CharityBlockReader> {
-    if (this.charityBlockRepo) {
-      return this.charityBlockRepo;
-    }
-
-    const { CharityBlockRepository } = await import(
-      '../../blocks/repositories/CharityBlockRepository'
-    );
-    this.charityBlockRepo = new CharityBlockRepository();
-    return this.charityBlockRepo;
   }
 
   private isModerationHidden(product: Product): boolean {
