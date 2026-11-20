@@ -3,9 +3,7 @@ import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 import {
   blockCharity,
   blockUser,
-  listBlockedCharities,
   listBlockedUsers,
-  unblockCharity,
   unblockUser,
 } from '../controllers/blockController';
 
@@ -90,24 +88,6 @@ router.get('/', authMiddleware, listBlockedUsers);
  */
 /**
  * @swagger
- * /api/blocks/charities:
- *   get:
- *     summary: List charities blocked by the authenticated user
- *     tags: [Blocks]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Blocked charities fetched
- *       401:
- *         description: Authentication required
- *       500:
- *         description: Failed to fetch blocked charities
- */
-router.get('/charities', authMiddleware, listBlockedCharities);
-
-/**
- * @swagger
  * /api/blocks/charities/{charityId}:
  *   post:
  *     summary: Block a charity
@@ -134,31 +114,8 @@ router.get('/charities', authMiddleware, listBlockedCharities);
  *         description: Authentication required
  *       500:
  *         description: Failed to block charity
- *   delete:
- *     summary: Unblock a charity
- *     tags: [Blocks]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: charityId
- *         required: true
- *         schema:
- *           type: string
- *           maxLength: 128
- *         description: Charity ID to unblock. Path separators, control characters, and dot identifiers are invalid.
- *     responses:
- *       200:
- *         description: Charity unblocked
- *       400:
- *         description: Invalid charity to unblock
- *       401:
- *         description: Authentication required
- *       500:
- *         description: Failed to unblock charity
  */
 router.post('/charities/:charityId', authMiddleware, blockCharity);
-router.delete('/charities/:charityId', authMiddleware, unblockCharity);
 
 router.post('/:userId', authMiddleware, blockUser);
 router.delete('/:userId', authMiddleware, unblockUser);
