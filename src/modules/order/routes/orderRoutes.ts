@@ -37,6 +37,7 @@ const router = Router();
  *           example: "inpost_gb"
  *         status:
  *           type: string
+ *           enum: [pending, announced, en_route, out_for_delivery, delivered, exception, cancelled]
  *           example: "en_route"
  *         trackingNumber:
  *           type: string
@@ -49,6 +50,10 @@ const router = Router();
  *           nullable: true
  *         pickupPoint:
  *           type: object
+ *           nullable: true
+ *         deliveredAt:
+ *           type: string
+ *           format: date-time
  *           nullable: true
  *         createdAt:
  *           type: string
@@ -82,13 +87,19 @@ const router = Router();
  *           example: "shipped"
  *         shipmentStatus:
  *           type: string
+ *           enum: [pending, announced, en_route, out_for_delivery, delivered, exception, cancelled]
  *           example: "en_route"
  *         deliveryState:
  *           type: string
+ *           enum: [pending, preparing, shipped, out_for_delivery, awaiting_confirmation, confirmed, disputed, delivered, failed, cancelled]
  *           example: "shipped"
  *         deliveryLabel:
  *           type: string
  *           example: "On the way"
+ *         deliveredAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
  *         canTrack:
  *           type: boolean
  *           example: true

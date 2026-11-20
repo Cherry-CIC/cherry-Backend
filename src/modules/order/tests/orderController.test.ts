@@ -501,6 +501,7 @@ describe('orderController order retrieval', () => {
         id: '999',
         name: 'Locker A',
       },
+      deliveredAt: new Date('2026-07-14T11:30:00.000Z'),
       createdAt: new Date('2026-07-14T10:05:00.000Z'),
       updatedAt: new Date('2026-07-14T12:00:00.000Z'),
     });
@@ -524,9 +525,13 @@ describe('orderController order retrieval', () => {
         data: {
           order: expect.objectContaining({
             id: 'order-1',
+            deliveredAt: new Date('2026-07-14T11:30:00.000Z'),
             deliveryState: 'awaiting_confirmation',
             deliveryLabel: 'Awaiting your confirmation',
             canTrack: true,
+            shipment: expect.objectContaining({
+              deliveredAt: new Date('2026-07-14T11:30:00.000Z'),
+            }),
           }),
         },
       }),

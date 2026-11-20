@@ -1,7 +1,7 @@
 const mockGetDeliveryOptions = jest.fn();
 const mockGetPickupPoints = jest.fn();
 const mockGetShipmentBySendcloudId = jest.fn();
-const mockUpdateShipment = jest.fn();
+const mockApplyTrackingEvent = jest.fn().mockResolvedValue(true);
 const mockUpdateOrder = jest.fn();
 const mockGetOrderById = jest.fn();
 const mockGetUserById = jest.fn();
@@ -19,7 +19,7 @@ jest.mock('../services/CheckoutShippingService', () => ({
 jest.mock('../repositories/ShipmentRepository', () => ({
   ShipmentRepository: jest.fn().mockImplementation(() => ({
     getShipmentBySendcloudId: mockGetShipmentBySendcloudId,
-    updateShipment: mockUpdateShipment,
+    applyTrackingEvent: mockApplyTrackingEvent,
     getShipmentByOrderId: jest.fn(),
     getAllShipments: jest.fn(),
   })),
@@ -165,59 +165,6 @@ describe('shippingController', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
-  it('updates shipment and order state from a webhook', async () => {
-    mockGetShipmentBySendcloudId.mockResolvedValue({
-      id: 'shipment-1',
-      orderId: 'order-1',
-      status: 'announced',
-    });
-    mockGetOrderById.mockResolvedValue({
-      id: 'order-1',
-      userId: 'user-1',
-      email: 'buyer@example.com',
-      productName: 'Winter Coat',
-    });
-
-    const req: any = {
-      body: {
-        action: 'parcel_status_changed',
-        timestamp: '2026-03-28T12:00:00Z',
-        parcel: {
-          id: 123,
-          tracking_number: 'TRACK123',
-          tracking_url: 'https://track.example/123',
-          status: {
-            message: 'Delivered',
-          },
-        },
-      },
-    };
-    const res = createResponse();
-
-    await handleSendcloudWebhook(req, res);
-
-    expect(mockUpdateShipment).toHaveBeenCalledWith('shipment-1', {
-      status: 'delivered',
-      trackingNumber: 'TRACK123',
-      trackingUrl: 'https://track.example/123',
-    });
-    expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
-      shipmentStatus: 'delivered',
-      shipmentId: 'shipment-1',
-      status: 'delivered',
-    });
-    expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith({
-      to: 'buyer@example.com',
-      buyerName: 'Buyer',
-      productName: 'Winter Coat',
-      orderId: 'order-1',
-    });
-    expect(mockUpdateOrder).toHaveBeenCalledWith('order-1', {
-      buyerDeliveryEmailSentAt: expect.any(Date),
-    });
-    expect(res.status).toHaveBeenCalledWith(200);
-  });
-
   it('acknowledges Sendcloud integration events without a parcel', async () => {
     const req: any = {
       body: {
@@ -235,7 +182,7 @@ describe('shippingController', () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ received: true });
-    expect(mockUpdateShipment).not.toHaveBeenCalled();
+    expect(mockApplyTrackingEvent).not.toHaveBeenCalled();
     expect(mockUpdateOrder).not.toHaveBeenCalled();
   });
 

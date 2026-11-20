@@ -35,6 +35,7 @@ export interface Shipment {
   };
   createdAt: Date;
   updatedAt: Date;
+  deliveredAt?: Date;
 }
 
 export interface SendcloudParcel {
