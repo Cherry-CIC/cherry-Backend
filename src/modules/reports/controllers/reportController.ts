@@ -12,6 +12,12 @@ import { ReportRepository } from '../repositories/ReportRepository';
 const safeString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
+const isSafeTargetIdentifier = (value: string): boolean =>
+  value.length <= 128 &&
+  value !== '.' &&
+  value !== '..' &&
+  !/[\/\\\x00-\x1f\x7f-\x9f]/.test(value);
+
 export const createReport = async (
   req: Request,
   res: Response,
@@ -31,6 +37,7 @@ export const createReport = async (
     !targetType ||
     !REPORT_TARGET_TYPES.includes(targetType as ReportTargetType) ||
     !targetId ||
+    !isSafeTargetIdentifier(targetId) ||
     (targetType === 'product' && !/^[a-zA-Z0-9_-]{3,50}$/.test(targetId)) ||
     !reason ||
     reason.length > 100 ||

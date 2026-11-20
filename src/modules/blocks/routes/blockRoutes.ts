@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
-import { blockUser, listBlockedUsers, unblockUser } from '../controllers/blockController';
+import {
+  blockCharity,
+  blockUser,
+  listBlockedUsers,
+  unblockUser,
+} from '../controllers/blockController';
 
 const router = Router();
 
@@ -81,6 +86,37 @@ router.get('/', authMiddleware, listBlockedUsers);
  *       500:
  *         description: Failed to unblock user
  */
+/**
+ * @swagger
+ * /api/blocks/charities/{charityId}:
+ *   post:
+ *     summary: Block a charity
+ *     description: >
+ *       Blocks a charity for the authenticated viewer. Blocked charities'
+ *       listings are excluded from product listing endpoints for the viewer.
+ *     tags: [Blocks]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: charityId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           maxLength: 128
+ *         description: Charity ID to block. Path separators, control characters, and dot identifiers are invalid.
+ *     responses:
+ *       200:
+ *         description: Charity blocked
+ *       400:
+ *         description: Invalid charity to block
+ *       401:
+ *         description: Authentication required
+ *       500:
+ *         description: Failed to block charity
+ */
+router.post('/charities/:charityId', authMiddleware, blockCharity);
+
 router.post('/:userId', authMiddleware, blockUser);
 router.delete('/:userId', authMiddleware, unblockUser);
 

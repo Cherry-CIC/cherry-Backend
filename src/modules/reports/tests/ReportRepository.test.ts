@@ -104,6 +104,25 @@ describe('ReportRepository', () => {
     );
   });
 
+  it('creates charity reports without checking product documents', async () => {
+    const { repository, db, reportRef } = createFixture();
+
+    await repository.create({
+      reporterId: 'user-1',
+      targetType: 'charity',
+      targetId: 'dogs-trust',
+      reason: 'misleading',
+    });
+
+    expect(db.runTransaction).not.toHaveBeenCalled();
+    expect(reportRef.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: 'charity',
+        targetId: 'dogs-trust',
+      }),
+    );
+  });
+
   it.each(['open', 'reviewing'] as const)(
     'clears resolution metadata and serialises deletion when setting a product report to %s',
     async (status) => {
