@@ -21,13 +21,15 @@ export interface ProductListFilters {
 }
 
 export interface ProductQueryCursor {
-  createdAt: Date;
+  createdAt: Date | Timestamp;
   id: string;
 }
 
 export interface ProductQueryPage {
   items: Product[];
   hasMore: boolean;
+  // Keep database precision separate from public product dates.
+  cursors?: ProductQueryCursor[];
 }
 
 export class ProductRepository {
@@ -349,6 +351,10 @@ export class ProductRepository {
     return {
       items: docs.map((doc) => this.mapToProduct(doc.id, doc.data())),
       hasMore: snapshot.docs.length > limit,
+      cursors: docs.map((doc) => ({
+        id: doc.id,
+        createdAt: doc.data().createdAt,
+      })),
     };
   }
   /**
