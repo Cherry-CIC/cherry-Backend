@@ -96,6 +96,60 @@ const router = Router();
  */
 router.get('/', getAllCharities);
 
+/**
+ * @swagger
+ * /api/charities/my-liked-items:
+ *   get:
+ *     summary: Get the current user's liked charities
+ *     tags: [Charities]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *         description: Number of charities to return
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Cursor returned in the previous response
+ *     responses:
+ *       200:
+ *         description: Liked charities fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     charities:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Charity'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         description: Missing or invalid Firebase authentication
+ */
 router.get('/my-liked-items', authMiddleware, getMyLikedCharities);
 
 /**
