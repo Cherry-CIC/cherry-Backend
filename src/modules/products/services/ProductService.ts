@@ -24,6 +24,13 @@ import { Timestamp } from 'firebase-admin/firestore';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_PRODUCT_PAGE_SIZE = 50;
+const MAX_PRODUCT_SCAN_PAGES = 10;
+const MAX_PRODUCT_SCAN_ITEMS = 250;
+
+export interface CharityBlockReader {
+  isBlocked(blockerId: string, blockedCharityId: string): Promise<boolean>;
+  getBlockedCharityIds(blockerId: string): Promise<Set<string>>;
+}
 
 interface StorageFileLike {
   delete(): Promise<unknown>;
@@ -42,6 +49,7 @@ export class ProductService {
     private charityRepo: CharityRepository,
     private postageSizeRepo: PostageSizeRepository,
     private mediaBucket?: StorageBucketLike,
+    private charityBlockRepo?: CharityBlockReader,
   ) {}
 
   async getAllProducts(): Promise<Product[]> {
@@ -50,8 +58,9 @@ export class ProductService {
 
   async getPaginatedProducts(
     query: ProductListQuery,
+    viewerId?: string,
   ): Promise<PaginatedResult<Product>> {
-    return this.getProductPage(query, { availableOnly: true });
+    return this.getProductPage(query, { availableOnly: true }, viewerId);
   }
 
   async getPaginatedProductsByUserId(
@@ -267,10 +276,13 @@ export class ProductService {
 
   async getPaginatedProductsWithDetails(
     query: ProductListQuery,
+    viewerId?: string,
   ): Promise<PaginatedResult<ProductWithDetails>> {
-    const paginated = await this.getProductPage(query, {
-      availableOnly: true,
-    });
+    const paginated = await this.getProductPage(
+      query,
+      { availableOnly: true },
+      viewerId,
+    );
     const items = await this.enrichProductsWithDetails(paginated.items);
 
     return {
@@ -487,31 +499,39 @@ export class ProductService {
   async enrichProductsWithDetails(
     products: Product[],
   ): Promise<ProductWithDetails[]> {
+    const categoryCache = new Map<string, Promise<Category | null>>();
+    const charityCache = new Map<string, Promise<Charity | null>>();
+    const postageSizeCache = new Map<string, Promise<PostageSize | null>>();
+
+    const cachedGet = <T>(
+      cache: Map<string, Promise<T | null>>,
+      rawId: unknown,
+      loader: (id: string) => Promise<T | null>,
+    ): Promise<T | null> => {
+      const id = typeof rawId === 'string' ? rawId.trim() : '';
+      if (!id) return Promise.resolve(null);
+      if (!cache.has(id)) {
+        cache.set(
+          id,
+          loader(id).catch(() => null),
+        );
+      }
+      return cache.get(id)!;
+    };
+
     return Promise.all(
       products.map(async (product) => {
         try {
-          const categoryPromise =
-            product.categoryId && product.categoryId.trim().length > 0
-              ? this.categoryRepo.getById(product.categoryId).catch(() => null)
-              : Promise.resolve(null);
-
-          const charityPromise =
-            product.charityId &&
-            typeof product.charityId === 'string' &&
-            product.charityId.trim().length > 0
-              ? this.charityRepo.getById(product.charityId).catch(() => null)
-              : Promise.resolve(null);
-
-          const postageSizePromise = product.postageSize
-            ? this.postageSizeRepo
-                .getById(product.postageSize)
-                .catch(() => null)
-            : Promise.resolve(null);
-
           const [category, charity, postageSizeDetails] = await Promise.all([
-            categoryPromise,
-            charityPromise,
-            postageSizePromise,
+            cachedGet(categoryCache, product.categoryId, (id) =>
+              this.categoryRepo.getById(id),
+            ),
+            cachedGet(charityCache, product.charityId, (id) =>
+              this.charityRepo.getById(id),
+            ),
+            cachedGet(postageSizeCache, product.postageSize, (id) =>
+              this.postageSizeRepo.getById(id),
+            ),
           ]);
 
           return {
@@ -539,59 +559,126 @@ export class ProductService {
   private async getProductPage<T extends Product>(
     query: ProductListQuery,
     options: ProductPageOptions = {},
+    viewerId?: string,
   ): Promise<PaginatedResult<T>> {
-    const limit = this.normalizeLimit(query.limit);
-    const cursor = this.decodeCursor(query.cursor, query);
+    const requestedCharityId = query.charityId?.trim();
+    const normalizedQuery =
+      query.charityId !== undefined && requestedCharityId !== query.charityId
+        ? { ...query, charityId: requestedCharityId || undefined }
+        : query;
+    const limit = this.normalizeLimit(normalizedQuery.limit);
+    const cursor = this.decodeCursor(
+      normalizedQuery.cursor,
+      normalizedQuery,
+      viewerId,
+    );
+
+    let blockedCharityIds: Set<string> | undefined;
+    if (viewerId) {
+      if (!this.charityBlockRepo) {
+        throw new Error('Charity block repository not configured');
+      }
+      const blockRepo = this.charityBlockRepo;
+      if (requestedCharityId) {
+        if (await blockRepo.isBlocked(viewerId, requestedCharityId)) {
+          return {
+            items: [],
+            limit,
+            nextCursor: null,
+            hasMore: false,
+          };
+        }
+      } else {
+        blockedCharityIds = await blockRepo.getBlockedCharityIds(viewerId);
+      }
+    }
+
+    const filterOptions: ProductPageOptions = blockedCharityIds?.size
+      ? { ...options, blockedCharityIds }
+      : options;
+
     const items: T[] = [];
     let pageCursor = cursor;
-    let hasMore = false;
+    let scannedPages = 0;
+    let scannedProducts = 0;
 
     do {
       const page = await this.productRepo.getPageByFilters(
-        query,
+        normalizedQuery,
         limit,
         pageCursor,
       );
+      scannedPages += 1;
+      scannedProducts += page.items.length;
 
       const matchedItems = this.applyProductFilters(
-        this.applySearch(page.items as T[], query.search),
-        query,
-        options,
+        this.applySearch(page.items as T[], normalizedQuery.search),
+        normalizedQuery,
+        filterOptions,
       );
-      const remaining = limit - items.length;
-      items.push(...matchedItems.slice(0, remaining));
+      let hasUnconsumedMatch = false;
+      for (const item of matchedItems) {
+        if (items.length < limit) {
+          items.push(item);
+        } else {
+          hasUnconsumedMatch = true;
+          break;
+        }
+      }
 
       if (items.length >= limit) {
         const lastItem = items[items.length - 1];
-        const hasMore = page.hasMore || matchedItems.length > remaining;
+        const moreAvailable = page.hasMore || hasUnconsumedMatch;
         const lastCursor = page.cursors?.find((cursor) => cursor.id === lastItem.id);
         return {
           items,
           limit,
-          nextCursor: hasMore ? this.encodeCursor(lastItem, query, lastCursor) : null,
-          hasMore,
+          nextCursor: moreAvailable
+            ? this.encodeCursor(lastItem, normalizedQuery, viewerId, lastCursor)
+            : null,
+          hasMore: moreAvailable,
         };
       }
 
       if (!page.items.length || !page.hasMore) {
-        hasMore = false;
         break;
       }
 
-      const lastScanned = page.items[page.items.length - 1];
-      pageCursor = page.cursors?.find((cursor) => cursor.id === lastScanned.id) ??
-        this.buildCursorFromProduct(lastScanned, query);
-      hasMore = true;
+      const lastExaminedProduct = page.items[page.items.length - 1];
+      const lastCursor = page.cursors?.find(
+        (cursor) => cursor.id === lastExaminedProduct.id,
+      );
+      const continuationCursor = this.encodeCursor(
+        lastExaminedProduct,
+        normalizedQuery,
+        viewerId,
+        lastCursor,
+      );
+
+      if (
+        scannedPages >= MAX_PRODUCT_SCAN_PAGES ||
+        scannedProducts >= MAX_PRODUCT_SCAN_ITEMS
+      ) {
+        return {
+          items,
+          limit,
+          nextCursor: continuationCursor,
+          hasMore: true,
+        };
+      }
+
+      pageCursor = this.decodeCursor(
+        continuationCursor,
+        normalizedQuery,
+        viewerId,
+      );
     } while (items.length < limit);
 
     return {
       items,
       limit,
-      nextCursor:
-        hasMore && items.length
-          ? this.encodeCursor(items[items.length - 1], query)
-          : null,
-      hasMore,
+      nextCursor: null,
+      hasMore: false,
     };
   }
 
@@ -627,6 +714,14 @@ export class ProductService {
       }
 
       if (!options.includeModerationHidden && this.isModerationHidden(product)) {
+        return false;
+      }
+
+      if (
+        options.blockedCharityIds?.size &&
+        typeof product.charityId === 'string' &&
+        options.blockedCharityIds.has(product.charityId.trim())
+      ) {
         return false;
       }
 
@@ -673,10 +768,19 @@ export class ProductService {
   }
 
   isModerationHidden(product: Product): boolean {
+    const raw = product as unknown as Record<string, unknown>;
     return (
       product.hidden === true ||
+      raw.isHidden === true ||
+      raw.moderationHidden === true ||
       product.moderationStatus === 'hidden' ||
-      product.hiddenAt !== undefined && product.hiddenAt !== null
+      (product.hiddenAt !== undefined && product.hiddenAt !== null) ||
+      raw.deleted === true ||
+      raw.isDeleted === true ||
+      raw.removed === true ||
+      raw.isRemoved === true ||
+      (raw.deletedAt !== undefined && raw.deletedAt !== null) ||
+      (raw.removedAt !== undefined && raw.removedAt !== null)
     );
   }
 
@@ -699,6 +803,7 @@ export class ProductService {
   private encodeCursor(
     product: Product,
     query: ProductListQuery,
+    viewerId?: string,
     position?: ProductQueryCursor,
   ): string {
     const timestamp = position?.createdAt;
@@ -710,7 +815,7 @@ export class ProductService {
           createdAtNanoseconds: timestamp.nanoseconds,
         } : {}),
         id: product.id,
-        signature: this.buildQuerySignature(query),
+        signature: this.buildQuerySignature(query, viewerId),
       }),
       'utf8',
     ).toString('base64');
@@ -719,6 +824,7 @@ export class ProductService {
   private decodeCursor(
     cursor: string | undefined,
     query: ProductListQuery,
+    viewerId?: string,
   ): ProductQueryCursor | undefined {
     if (!cursor) {
       return undefined;
@@ -740,7 +846,7 @@ export class ProductService {
         !parsed.createdAt ||
         typeof parsed.id !== 'string' ||
         !parsed.id ||
-        parsed.signature !== this.buildQuerySignature(query)
+        parsed.signature !== this.buildQuerySignature(query, viewerId)
       ) {
         throw new Error('Invalid cursor');
       }
@@ -835,14 +941,6 @@ export class ProductService {
     }
   }
 
-  private buildCursorFromProduct(
-    product: Product,
-    query: ProductListQuery,
-  ): ProductQueryCursor {
-    const encoded = this.encodeCursor(product, query);
-    return this.decodeCursor(encoded, query)!;
-  }
-
   private requireProductCreatedAt(product: Product): Date {
     if (
       !(product.createdAt instanceof Date) ||
@@ -856,7 +954,10 @@ export class ProductService {
     return product.createdAt;
   }
 
-  private buildQuerySignature(query: ProductListQuery): string {
+  private buildQuerySignature(
+    query: ProductListQuery,
+    viewerId?: string,
+  ): string {
     return JSON.stringify({
       search: query.search?.trim().toLowerCase() || '',
       categoryId: query.categoryId || '',
@@ -866,6 +967,7 @@ export class ProductService {
       status: query.status || '',
       minPrice: query.minPrice ?? null,
       maxPrice: query.maxPrice ?? null,
+      viewerId: viewerId || '',
     });
   }
 }
@@ -910,6 +1012,7 @@ export interface ProductListQuery extends ProductListFilters {
 interface ProductPageOptions {
   availableOnly?: boolean;
   includeModerationHidden?: boolean;
+  blockedCharityIds?: Set<string>;
 }
 
 export interface PaginatedResult<T> {

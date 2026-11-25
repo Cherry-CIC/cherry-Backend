@@ -1,4 +1,5 @@
 import {
+  blockCharity,
   blockUser,
   listBlockedUsers,
   unblockUser,
@@ -7,12 +8,19 @@ import {
 const mockBlock = jest.fn();
 const mockUnblock = jest.fn();
 const mockListBlockedUsers = jest.fn();
+const mockCharityBlock = jest.fn();
 
 jest.mock('../repositories/UserBlockRepository', () => ({
   UserBlockRepository: jest.fn().mockImplementation(() => ({
     block: mockBlock,
     unblock: mockUnblock,
     listBlockedUsers: mockListBlockedUsers,
+  })),
+}));
+
+jest.mock('../repositories/CharityBlockRepository', () => ({
+  CharityBlockRepository: jest.fn().mockImplementation(() => ({
+    block: mockCharityBlock,
   })),
 }));
 
@@ -74,4 +82,30 @@ describe('blockController', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mockListBlockedUsers).toHaveBeenCalledWith('user-1');
   });
+
+  it('blocks a charity', async () => {
+    mockCharityBlock.mockResolvedValue({ id: 'charity-block-1' });
+    const res = response();
+
+    await blockCharity(
+      { user: { uid: 'user-1' }, params: { charityId: 'dogs-trust' } } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mockCharityBlock).toHaveBeenCalledWith('user-1', 'dogs-trust');
+  });
+
+  it('rejects invalid charity block identifiers', async () => {
+    const res = response();
+
+    await blockCharity(
+      { user: { uid: 'user-1' }, params: { charityId: '..' } } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockCharityBlock).not.toHaveBeenCalled();
+  });
+
 });

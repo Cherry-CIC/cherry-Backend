@@ -4,6 +4,7 @@ import { ProductLikeRepository } from '../repositories/ProductLikeRepository';
 import { CategoryRepository } from '../../categories/repositories/CategoryRepository';
 import { CharityRepository } from '../../charities/repositories/CharityRepository';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
+import { CharityBlockRepository } from '../../blocks/repositories/CharityBlockRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
 import { UserBlockRepository } from '../../blocks/repositories/UserBlockRepository';
 import { RecommendationService } from './RecommendationService';
@@ -19,6 +20,7 @@ export class ServiceFactory {
             const categoryRepo = new CategoryRepository();
             const charityRepo = new CharityRepository();
             const postageSizeRepo = new PostageSizeRepository();
+            const charityBlockRepo = new CharityBlockRepository();
             
             this.productService = new ProductService(
                 productRepo,
@@ -26,6 +28,8 @@ export class ServiceFactory {
                 categoryRepo,
                 charityRepo,
                 postageSizeRepo,
+                undefined,
+                charityBlockRepo,
             );
         }
         

@@ -118,7 +118,10 @@ const router = Router();
  * /api/products:
  *   get:
  *     summary: Get products with cursor pagination, search, and filters
+ *     description: Excludes products belonging to charities blocked by the authenticated user.
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: limit
@@ -218,7 +221,57 @@ router.get(
  * /api/products/with-details:
  *   get:
  *     summary: Get products with details using cursor pagination, search, and filters
+ *     description: Excludes products belonging to charities blocked by the authenticated user.
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Cursor returned by the previous products response.
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Case-insensitive search across product name, description, size, and quality.
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: charityId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, unlisted, sold]
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
  *     responses:
  *       200:
  *         description: Paginated list of products with populated category and charity details

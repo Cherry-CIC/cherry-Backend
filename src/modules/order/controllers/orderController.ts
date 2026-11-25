@@ -121,7 +121,8 @@ const canBuyerConfirmReceived = (order: Order): boolean => {
     return false;
   }
 
-  return order.status === 'delivered' || order.shipmentStatus === 'delivered';
+  return order.status === 'delivered' ||
+    order.shipmentStatus === 'delivered';
 };
 
 const DISPUTE_REASONS: OrderDisputeReason[] = [
@@ -149,6 +150,7 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
     paymentState: 'paid' as const,
     deliveryState,
     deliveryLabel: getDeliveryLabel(deliveryState),
+    deliveredAt: shipment?.deliveredAt ?? null,
     canTrack: Boolean(shipment?.trackingUrl),
     trackingNumber: shipment?.trackingNumber ?? null,
     trackingUrl: shipment?.trackingUrl ?? null,
@@ -164,6 +166,7 @@ const mapOrderForClient = (order: Order, shipment?: Shipment | null) => {
           trackingUrl: shipment.trackingUrl ?? null,
           labelUrl: shipment.labelUrl ?? null,
           pickupPoint: shipment.pickupPoint ?? order.pickupPoint,
+          deliveredAt: shipment.deliveredAt ?? null,
           createdAt: shipment.createdAt,
           updatedAt: shipment.updatedAt,
         }

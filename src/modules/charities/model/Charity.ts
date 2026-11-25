@@ -4,6 +4,7 @@ export interface Charity {
     description: string;
     imageUrl: string;
     website?: string;
+    likes: number;
     createdAt?: Date;
     updatedAt?: Date;
 }

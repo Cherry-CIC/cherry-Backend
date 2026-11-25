@@ -9,6 +9,8 @@ jest.mock('../services/ServiceFactory', () => ({
 }));
 
 import {
+  getAllProducts,
+  getAllProductsWithDetails,
   getRecommendedProducts,
   relistProduct,
   unlistProduct,
@@ -16,6 +18,7 @@ import {
 
 const createResponse = () => {
   const res: any = {};
+  res.setHeader = jest.fn();
   res.status = jest.fn().mockReturnValue(res);
   res.json = jest.fn().mockReturnValue(res);
   return res;
@@ -26,6 +29,8 @@ describe('productController listing status actions', () => {
     getProductById: jest.fn(),
     unlistProduct: jest.fn(),
     relistProduct: jest.fn(),
+    getPaginatedProducts: jest.fn(),
+    getPaginatedProductsWithDetails: jest.fn(),
   };
 
   beforeEach(() => {
@@ -142,6 +147,107 @@ describe('productController listing status actions', () => {
     await relistProduct(req, res);
 
     expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  it('requires authentication and sets private no-store cache headers on product list endpoints', async () => {
+    for (const handler of [getAllProducts, getAllProductsWithDetails]) {
+      const res = createResponse();
+      await handler({ query: {} } as any, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Cache-Control',
+        'private, no-store',
+      );
+      expect(res.status).toHaveBeenCalledWith(401);
+    }
+    expect(productService.getPaginatedProducts).not.toHaveBeenCalled();
+    expect(
+      productService.getPaginatedProductsWithDetails,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('forwards viewerId and query filters for getAllProducts and getAllProductsWithDetails', async () => {
+    const product = {
+      id: 'product-1',
+      name: 'Jacket',
+      price: 10,
+      charityId: 'charity-1',
+      status: 'active',
+      hasSales: false,
+      hasBeenEdited: false,
+    };
+    productService.getPaginatedProducts.mockResolvedValue({
+      items: [product],
+      limit: 20,
+      nextCursor: null,
+      hasMore: false,
+    });
+    productService.getPaginatedProductsWithDetails.mockResolvedValue({
+      items: [{ ...product, charity: { id: 'charity-1', name: 'Charity' } }],
+      limit: 20,
+      nextCursor: 'next-1',
+      hasMore: true,
+    });
+
+    const listRes = createResponse();
+    await getAllProducts(
+      {
+        user: { uid: 'viewer-1' },
+        query: { charityId: 'charity-1', limit: 20 },
+      } as any,
+      listRes,
+    );
+
+    expect(productService.getPaginatedProducts).toHaveBeenCalledWith(
+      { charityId: 'charity-1', limit: 20 },
+      'viewer-1',
+    );
+    expect(listRes.status).toHaveBeenCalledWith(200);
+    expect(listRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: {
+          products: [
+            expect.objectContaining({
+              id: 'product-1',
+              securityFee: expect.any(Number),
+            }),
+          ],
+        },
+      }),
+    );
+
+    const detailsRes = createResponse();
+    await getAllProductsWithDetails(
+      {
+        user: { uid: 'viewer-1' },
+        query: { charityId: 'charity-1', limit: 20 },
+      } as any,
+      detailsRes,
+    );
+
+    expect(
+      productService.getPaginatedProductsWithDetails,
+    ).toHaveBeenCalledWith(
+      { charityId: 'charity-1', limit: 20 },
+      'viewer-1',
+    );
+    expect(detailsRes.status).toHaveBeenCalledWith(200);
+    expect(detailsRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        meta: { limit: 20, nextCursor: 'next-1', hasMore: true },
+        data: {
+          products: [
+            expect.objectContaining({
+              id: 'product-1',
+              charity: { id: 'charity-1', name: 'Charity' },
+              securityFee: expect.any(Number),
+            }),
+          ],
+        },
+      }),
+    );
   });
 });
 

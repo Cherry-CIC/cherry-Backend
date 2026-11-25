@@ -302,6 +302,11 @@ export class UserRepository {
       .where('userId', '==', firebaseUid)
       .get();
 
+    const charityLikesSnapshot = await this.db
+      .collection('charity_likes')
+      .where('userId', '==', firebaseUid)
+      .get();
+
     const orderIds = ordersSnapshot.docs.map((doc) => doc.id);
     const soldProductDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
     const unsoldProductDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
@@ -343,10 +348,22 @@ export class UserRepository {
       }
     });
 
+    const likeCharityAdjustments = new Map<string, number>();
+    charityLikesSnapshot.docs.forEach((doc) => {
+      const charityId = doc.data().charityId;
+      if (typeof charityId === 'string' && charityId.length > 0) {
+        likeCharityAdjustments.set(
+          charityId,
+          (likeCharityAdjustments.get(charityId) || 0) + 1,
+        );
+      }
+    });
+
     const deleteDocRefs = [
       ...userProfilesSnapshot.docs.map((doc) => doc.ref),
       ...unsoldProductDocs.map((doc) => doc.ref),
       ...likesSnapshot.docs.map((doc) => doc.ref),
+      ...charityLikesSnapshot.docs.map((doc) => doc.ref),
     ];
 
     for (const refs of chunk(deleteDocRefs, FIRESTORE_BATCH_LIMIT)) {
@@ -369,6 +386,22 @@ export class UserRepository {
         const currentLikes =
           typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0;
         transaction.update(productRef, {
+          likes: Math.max(0, currentLikes - decrementBy),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+    }
+
+    for (const [charityId, decrementBy] of likeCharityAdjustments.entries()) {
+      const charityRef = this.db.collection('charities').doc(charityId);
+      await this.db.runTransaction(async (transaction) => {
+        const charityDoc = await transaction.get(charityRef);
+        if (!charityDoc.exists) return;
+
+        const data = charityDoc.data() || {};
+        const currentLikes =
+          typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0;
+        transaction.update(charityRef, {
           likes: Math.max(0, currentLikes - decrementBy),
           updatedAt: FieldValue.serverTimestamp(),
         });
@@ -437,7 +470,7 @@ export class UserRepository {
       anonymisedProducts: soldProductDocs.length,
       anonymisedOrders: ordersSnapshot.size,
       anonymisedShipments: uniqueShipmentDocs.length,
-      deletedLikes: likesSnapshot.size,
+      deletedLikes: likesSnapshot.size + charityLikesSnapshot.size,
     };
   }
 

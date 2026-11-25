@@ -4,10 +4,13 @@ import {
     getCharityById,
     createCharity,
     updateCharity,
-    deleteCharity
+    deleteCharity,
+    likeCharity,
+    getMyLikedCharities,
 } from '../controllers/charityController';
 import { validateCharity, validateCharityUpdate } from '../validators/charityValidator';
 import { validateCharityId } from '../validators/charityIdValidator';
+import { authMiddleware } from '../../../shared/middleware/authMiddleWare';
 
 const router = Router();
 
@@ -39,6 +42,10 @@ const router = Router();
  *           type: string
  *           format: uri
  *           description: The website URL of the charity (optional)
+ *         likes:
+ *           type: integer
+ *           minimum: 0
+ *           description: Number of likes
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -88,6 +95,96 @@ const router = Router();
  *                     $ref: '#/components/schemas/Charity'
  */
 router.get('/', getAllCharities);
+
+/**
+ * @swagger
+ * /api/charities/my-liked-items:
+ *   get:
+ *     summary: Get the current user's liked charities
+ *     tags: [Charities]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *         description: Number of charities to return
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Cursor returned in the previous response
+ *     responses:
+ *       200:
+ *         description: Liked charities fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     charities:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Charity'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         description: Missing or invalid Firebase authentication
+ */
+router.get('/my-liked-items', authMiddleware, getMyLikedCharities);
+
+/**
+ * @swagger
+ * /api/charities/{id}/like:
+ *   post:
+ *     summary: Like or unlike a charity
+ *     tags: [Charities]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Charity ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [like]
+ *             properties:
+ *               like:
+ *                 type: boolean
+ *                 description: true to like, false to unlike
+ *     responses:
+ *       200:
+ *         description: Charity like status updated
+ *       404:
+ *         description: Charity not found
+ */
+router.post('/:id/like', authMiddleware, likeCharity);
 
 /**
  * @swagger

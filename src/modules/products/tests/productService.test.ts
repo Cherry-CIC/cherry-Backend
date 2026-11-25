@@ -717,6 +717,360 @@ describe('ProductService pagination', () => {
     await expect(service.deleteProduct('product-1', 'user-1')).rejects.toThrow('Payment pending');
     expect(bucket.file).not.toHaveBeenCalled();
   });
+
+  it('excludes products from charities blocked by the viewer and preserves remaining pages', async () => {
+    const p1 = {
+      ...createProduct('p-1', '2026-07-13T10:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const p2Blocked = {
+      ...createProduct('p-2', '2026-07-13T09:00:00.000Z'),
+      charityId: 'charity-blocked',
+    };
+    const p3 = {
+      ...createProduct('p-3', '2026-07-13T08:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const p4 = {
+      ...createProduct('p-4', '2026-07-13T07:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({ items: [p1, p2Blocked], hasMore: true })
+      .mockResolvedValueOnce({ items: [p3, p4], hasMore: false })
+      .mockResolvedValueOnce({ items: [p4], hasMore: false });
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    categoryRepo.getById.mockResolvedValue({ id: 'category-1', name: 'Tops' });
+    charityRepo.getById.mockResolvedValue({
+      id: 'charity-open',
+      name: 'Open Charity',
+    });
+    postageSizeRepo.getById.mockResolvedValue({
+      id: 'postage-1',
+      name: 'Small',
+    });
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const page1 = await service.getPaginatedProductsWithDetails(
+      { limit: 2 },
+      'viewer-1',
+    );
+
+    expect(charityBlockRepo.getBlockedCharityIds).toHaveBeenCalledWith(
+      'viewer-1',
+    );
+    expect(page1.items.map((item) => item.id)).toEqual(['p-1', 'p-3']);
+    expect(page1.hasMore).toBe(true);
+    expect(page1.nextCursor).toBeTruthy();
+    expect(categoryRepo.getById).toHaveBeenCalledTimes(1);
+    expect(charityRepo.getById).toHaveBeenCalledTimes(1);
+    expect(postageSizeRepo.getById).toHaveBeenCalledTimes(1);
+
+    const page2 = await service.getPaginatedProducts(
+      { limit: 2, cursor: page1.nextCursor! },
+      'viewer-1',
+    );
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ limit: 2 }),
+      2,
+      {
+        createdAt: p2Blocked.createdAt,
+        id: 'p-2',
+      },
+    );
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ limit: 2, cursor: page1.nextCursor }),
+      2,
+      {
+        createdAt: p3.createdAt,
+        id: 'p-3',
+      },
+    );
+    expect(page2.items.map((item) => item.id)).toEqual(['p-4']);
+    expect(page2.hasMore).toBe(false);
+    expect(page2.nextCursor).toBeNull();
+  });
+
+  it('bounds raw product scanning when blocked charities fill pages and resumes after the last examined product', async () => {
+    const pages = Array.from({ length: 10 }, (_, pageIndex) => {
+      const firstIndex = pageIndex * 2 + 1;
+      const secondIndex = pageIndex * 2 + 2;
+      return [
+        {
+          ...createProduct(
+            `blocked-${firstIndex}`,
+            new Date(Date.UTC(2026, 6, 13, 10, 0, 100 - firstIndex)).toISOString(),
+          ),
+          charityId: 'charity-blocked',
+        },
+        {
+          ...createProduct(
+            `blocked-${secondIndex}`,
+            new Date(Date.UTC(2026, 6, 13, 10, 0, 100 - secondIndex)).toISOString(),
+          ),
+          charityId: 'charity-blocked',
+        },
+      ];
+    });
+    const openProduct = {
+      ...createProduct('open-after-budget', '2026-07-13T09:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest.fn();
+    for (const items of pages) {
+      getPageByFilters.mockResolvedValueOnce({ items, hasMore: true });
+    }
+    getPageByFilters.mockResolvedValueOnce({
+      items: [openProduct],
+      hasMore: false,
+    });
+
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const firstResult = await service.getPaginatedProducts(
+      { limit: 2 },
+      'viewer-1',
+    );
+
+    const lastExamined = pages[9][1];
+    expect(getPageByFilters).toHaveBeenCalledTimes(10);
+    expect(firstResult.items).toEqual([]);
+    expect(firstResult.hasMore).toBe(true);
+    expect(firstResult.nextCursor).toBeTruthy();
+
+    const nextResult = await service.getPaginatedProducts(
+      { limit: 2, cursor: firstResult.nextCursor! },
+      'viewer-1',
+    );
+
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      11,
+      expect.objectContaining({ limit: 2, cursor: firstResult.nextCursor }),
+      2,
+      {
+        createdAt: lastExamined.createdAt,
+        id: lastExamined.id,
+      },
+    );
+    expect(nextResult.items.map((item) => item.id)).toEqual([
+      'open-after-budget',
+    ]);
+    expect(nextResult.hasMore).toBe(false);
+    expect(nextResult.nextCursor).toBeNull();
+  });
+
+  it('bounds raw product scanning by item budget and returns a continuation cursor from the last examined product on partial pages', async () => {
+    const page1Open = {
+      ...createProduct('open-1', '2026-07-13T12:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+    const makeBlockedBatch = (batchIndex: number, count: number) =>
+      Array.from({ length: count }, (_, itemIndex) => ({
+        ...createProduct(
+          `blocked-${batchIndex}-${itemIndex}`,
+          new Date(
+            Date.UTC(2026, 6, 13, 11, 59 - batchIndex, 59 - itemIndex),
+          ).toISOString(),
+        ),
+        charityId: 'charity-blocked',
+      }));
+
+    const batch1 = [page1Open, ...makeBlockedBatch(0, 49)];
+    const batch2 = makeBlockedBatch(1, 50);
+    const batch3 = makeBlockedBatch(2, 50);
+    const batch4 = makeBlockedBatch(3, 50);
+    const batch5 = makeBlockedBatch(4, 50);
+    const page6Open = {
+      ...createProduct('open-2', '2026-07-13T10:00:00.000Z'),
+      charityId: 'charity-open',
+    };
+
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({ items: batch1, hasMore: true })
+      .mockResolvedValueOnce({ items: batch2, hasMore: true })
+      .mockResolvedValueOnce({ items: batch3, hasMore: true })
+      .mockResolvedValueOnce({ items: batch4, hasMore: true })
+      .mockResolvedValueOnce({ items: batch5, hasMore: true })
+      .mockResolvedValueOnce({ items: [page6Open], hasMore: false });
+
+    const charityBlockRepo = {
+      isBlocked: jest.fn(),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockResolvedValue(new Set(['charity-blocked'])),
+    };
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const partialPage = await service.getPaginatedProducts(
+      { limit: 50 },
+      'viewer-1',
+    );
+
+    const lastExamined = batch5[batch5.length - 1];
+    expect(getPageByFilters).toHaveBeenCalledTimes(5);
+    expect(partialPage.items.map((item) => item.id)).toEqual(['open-1']);
+    expect(partialPage.hasMore).toBe(true);
+    expect(partialPage.nextCursor).toBeTruthy();
+
+    const nextPage = await service.getPaginatedProducts(
+      { limit: 50, cursor: partialPage.nextCursor! },
+      'viewer-1',
+    );
+
+    expect(getPageByFilters).toHaveBeenNthCalledWith(
+      6,
+      expect.objectContaining({ limit: 50, cursor: partialPage.nextCursor }),
+      50,
+      {
+        createdAt: lastExamined.createdAt,
+        id: lastExamined.id,
+      },
+    );
+    expect(nextPage.items.map((item) => item.id)).toEqual(['open-2']);
+    expect(nextPage.hasMore).toBe(false);
+    expect(nextPage.nextCursor).toBeNull();
+  });
+
+  it('returns empty listings without querying products when requested charityId is blocked', async () => {
+    const getPageByFilters = jest.fn();
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockResolvedValue(true),
+      getBlockedCharityIds: jest.fn(),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const result = await service.getPaginatedProductsWithDetails(
+      { charityId: 'charity-blocked', limit: 20 },
+      'viewer-1',
+    );
+
+    expect(charityBlockRepo.isBlocked).toHaveBeenCalledWith(
+      'viewer-1',
+      'charity-blocked',
+    );
+    expect(charityBlockRepo.getBlockedCharityIds).not.toHaveBeenCalled();
+    expect(getPageByFilters).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      items: [],
+      limit: 20,
+      nextCursor: null,
+      hasMore: false,
+    });
+  });
+
+  it('binds pagination cursors to the authenticated viewer', async () => {
+    const first = createProduct('product-1', '2026-07-13T10:00:00.000Z');
+    const second = createProduct('product-2', '2026-07-13T09:00:00.000Z');
+    const getPageByFilters = jest.fn().mockResolvedValueOnce({
+      items: [first, second],
+      hasMore: true,
+    });
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockResolvedValue(false),
+      getBlockedCharityIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    const page1 = await service.getPaginatedProducts(
+      { charityId: 'charity-1', limit: 2 },
+      'viewer-1',
+    );
+
+    await expect(
+      service.getPaginatedProducts(
+        { charityId: 'charity-1', limit: 2, cursor: page1.nextCursor! },
+        'viewer-2',
+      ),
+    ).rejects.toThrow('Invalid cursor');
+  });
+
+  it('propagates errors when checking blocked charities fails', async () => {
+    const getPageByFilters = jest.fn();
+    const charityBlockRepo = {
+      isBlocked: jest.fn().mockRejectedValue(new Error('Firestore down')),
+      getBlockedCharityIds: jest
+        .fn()
+        .mockRejectedValue(new Error('Firestore down')),
+    };
+
+    const service = new ProductService(
+      { getPageByFilters } as any,
+      productLikeRepo,
+      categoryRepo,
+      charityRepo,
+      postageSizeRepo,
+      undefined,
+      charityBlockRepo,
+    );
+
+    await expect(
+      service.getPaginatedProducts({ charityId: 'charity-1' }, 'viewer-1'),
+    ).rejects.toThrow('Firestore down');
+    await expect(
+      service.getPaginatedProducts({}, 'viewer-1'),
+    ).rejects.toThrow('Firestore down');
+    expect(getPageByFilters).not.toHaveBeenCalled();
+  });
 });
 
 describe('ProductService.getNewestAvailableProducts', () => {

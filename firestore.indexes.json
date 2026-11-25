@@ -4,6 +4,7 @@
       "collectionGroup": "products",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "charityId", "order": "ASCENDING" },
         { "fieldPath": "categoryId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" },
         { "fieldPath": "__name__", "order": "DESCENDING" }

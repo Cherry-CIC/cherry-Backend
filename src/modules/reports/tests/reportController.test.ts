@@ -72,6 +72,52 @@ describe('reportController', () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
+  it('creates a charity report for the authenticated user', async () => {
+    mockCreate.mockResolvedValue({ id: 'report-charity-1', status: 'open' });
+    const res = response();
+
+    await createReport(
+      {
+        user: { uid: 'user-1' },
+        body: {
+          targetType: 'charity',
+          targetId: 'charity-dogs-trust',
+          reason: 'misleading_info',
+          message: 'Broken details',
+        },
+      } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(mockCreate).toHaveBeenCalledWith({
+      reporterId: 'user-1',
+      targetType: 'charity',
+      targetId: 'charity-dogs-trust',
+      reason: 'misleading_info',
+      message: 'Broken details',
+    });
+  });
+
+  it('rejects unsafe charity target identifiers', async () => {
+    const res = response();
+
+    await createReport(
+      {
+        user: { uid: 'user-1' },
+        body: {
+          targetType: 'charity',
+          targetId: '../other-collection',
+          reason: 'abuse',
+        },
+      } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it('does not return raw report creation errors', async () => {
     mockCreate.mockRejectedValue(
       new Error('firestore private@example.org internal-index-detail'),

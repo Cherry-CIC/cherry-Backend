@@ -13,6 +13,7 @@ export class CharityRepository {
             return {
                 id: doc.id,
                 ...data,
+                likes: typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0,
                 createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
                 updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
             } as Charity;
@@ -28,6 +29,7 @@ export class CharityRepository {
         return {
             id: doc.id,
             ...data,
+            likes: typeof data.likes === 'number' && data.likes >= 0 ? data.likes : 0,
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
         } as Charity;
@@ -36,6 +38,7 @@ export class CharityRepository {
     async create(charity: Omit<Charity, 'id' | 'createdAt' | 'updatedAt'>): Promise<Charity> {
         const docRef = await this.db.collection(this.collectionName).add({
             ...charity,
+            likes: 0,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
         });
@@ -43,6 +46,7 @@ export class CharityRepository {
         return {
             id: docRef.id,
             ...charity,
+            likes: 0,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
