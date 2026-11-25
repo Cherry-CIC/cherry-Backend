@@ -131,6 +131,47 @@ export class ProductLikeRepository {
         };
     }
 
+    // The ids of a user's newest `max` liked products, newest first, for the
+    // recommended feed. It sorts the same way as getLikedProductsPage (the
+    // Liked screen), so it uses the index that screen already needs.
+    // select() asks Firestore for just the product id.
+    async getLikedProductIds(userId: string, max: number): Promise<string[]> {
+        const snapshot = await this.db
+            .collection(this.likesCollection)
+            .where('userId', '==', userId)
+            .orderBy('createdAt', 'desc')
+            .orderBy(FieldPath.documentId(), 'desc')
+            .select('productId')
+            .limit(max)
+            .get();
+
+        return snapshot.docs
+            .map((doc) => doc.get('productId'))
+            .filter((productId): productId is string =>
+                typeof productId === 'string');
+    }
+
+    // Which of these products the user has liked, for the recommended feed's
+    // later pages. Each like's id is made from the user and product ids, so
+    // this reads those likes directly instead of searching.
+    async getLikedProductIdsAmong(
+        userId: string,
+        productIds: string[],
+    ): Promise<string[]> {
+        // getAll needs at least one document.
+        if (productIds.length === 0) {
+            return [];
+        }
+        const likes = await this.db.getAll(
+            ...productIds.map((productId) =>
+                this.db
+                    .collection(this.likesCollection)
+                    .doc(this.buildLikeId(userId, productId)),
+            ),
+        );
+        return productIds.filter((_, index) => likes[index].exists);
+    }
+
     async deleteLikesByUserId(firebaseUid: string): Promise<number> {
         const snapshot = await this.db
             .collection(this.likesCollection)

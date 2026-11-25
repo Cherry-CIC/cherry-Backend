@@ -1072,3 +1072,64 @@ describe('ProductService pagination', () => {
     expect(getPageByFilters).not.toHaveBeenCalled();
   });
 });
+
+describe('ProductService.getNewestAvailableProducts', () => {
+  const charityBlockRepo = {
+    isBlocked: jest.fn(),
+    getBlockedCharityIds: jest.fn(async () => new Set(['blocked-charity'])),
+  };
+  const serviceWith = (getPageByFilters: jest.Mock) =>
+    new ProductService(
+      { getPageByFilters } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      undefined,
+      charityBlockRepo,
+    );
+
+  it("pages through Firestore and skips products this user shouldn't see", async () => {
+    const sold = {
+      ...createProduct('sold', '2026-07-13T09:00:00.000Z'),
+      status: 'sold' as const,
+      number: 0,
+    };
+    const hidden = {
+      ...createProduct('hidden', '2026-07-13T08:00:00.000Z'),
+      hidden: true,
+    };
+    const fromBlockedCharity = {
+      ...createProduct('blocked', '2026-07-13T07:30:00.000Z'),
+      charityId: 'blocked-charity',
+    };
+    const getPageByFilters = jest
+      .fn()
+      .mockResolvedValueOnce({
+        items: [
+          createProduct('for-sale-1', '2026-07-13T10:00:00.000Z'),
+          sold,
+          hidden,
+          fromBlockedCharity,
+        ],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [createProduct('for-sale-2', '2026-07-13T07:00:00.000Z')],
+        hasMore: false,
+      });
+
+    const products = await serviceWith(
+      getPageByFilters,
+    ).getNewestAvailableProducts(200, 'viewer-1');
+
+    expect(products.map((product) => product.id)).toEqual([
+      'for-sale-1',
+      'for-sale-2',
+    ]);
+    expect(charityBlockRepo.getBlockedCharityIds).toHaveBeenCalledWith(
+      'viewer-1',
+    );
+  });
+
+});

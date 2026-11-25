@@ -5,9 +5,13 @@ import { CategoryRepository } from '../../categories/repositories/CategoryReposi
 import { CharityRepository } from '../../charities/repositories/CharityRepository';
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 import { CharityBlockRepository } from '../../blocks/repositories/CharityBlockRepository';
+import { OrderRepository } from '../../order/repositories/OrderRepository';
+import { UserBlockRepository } from '../../blocks/repositories/UserBlockRepository';
+import { RecommendationService } from './RecommendationService';
 
 export class ServiceFactory {
     private static productService: ProductService | null = null;
+    private static recommendationService: RecommendationService | null = null;
 
     static getProductService(): ProductService {
         if (!this.productService) {
@@ -32,8 +36,25 @@ export class ServiceFactory {
         return this.productService;
     }
 
+    // One shared instance, so its in-memory feed order is shared by every
+    // request.
+    static getRecommendationService(): RecommendationService {
+        if (!this.recommendationService) {
+            this.recommendationService = new RecommendationService(
+                this.getProductService(),
+                new ProductLikeRepository(),
+                new OrderRepository(),
+                new UserBlockRepository(),
+                new CharityBlockRepository(),
+            );
+        }
+
+        return this.recommendationService;
+    }
+
     // Reset for testing purposes
     static reset(): void {
         this.productService = null;
+        this.recommendationService = null;
     }
 }

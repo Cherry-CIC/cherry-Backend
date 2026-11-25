@@ -291,6 +291,27 @@ export class ProductService {
     };
   }
 
+  // The newest products /with-details would show this user (for sale, not
+  // hidden, not from a charity they blocked), up to `max`. These are the
+  // candidates for the recommended feed.
+  async getNewestAvailableProducts(
+    max: number,
+    viewerId: string,
+  ): Promise<Product[]> {
+    const products: Product[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.getProductPage(
+        { limit: MAX_PRODUCT_PAGE_SIZE, cursor },
+        { availableOnly: true },
+        viewerId,
+      );
+      products.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && products.length < max);
+    return products.slice(0, max);
+  }
+
   async getProductsByCategory(categoryId: string): Promise<Product[]> {
     // Validate category exists
     const category = await this.categoryRepo.getById(categoryId);
@@ -480,7 +501,7 @@ export class ProductService {
     }
   }
 
-  private async enrichProductsWithDetails(
+  async enrichProductsWithDetails(
     products: Product[],
   ): Promise<ProductWithDetails[]> {
     const categoryCache = new Map<string, Promise<Category | null>>();
@@ -703,8 +724,7 @@ export class ProductService {
 
       if (
         options.blockedCharityIds?.size &&
-        typeof product.charityId === 'string' &&
-        options.blockedCharityIds.has(product.charityId.trim())
+        this.isFromBlockedCharity(product, options.blockedCharityIds)
       ) {
         return false;
       }
@@ -747,11 +767,23 @@ export class ProductService {
     });
   }
 
-  private isAvailableForPurchase(product: Product): boolean {
+  isAvailableForPurchase(product: Product): boolean {
     return product.status === 'active' && this.hasStock(product);
   }
 
-  private isModerationHidden(product: Product): boolean {
+  // Shared with the recommended feed, so both hide blocked charities the
+  // same way.
+  isFromBlockedCharity(
+    product: Product,
+    blockedCharityIds: Set<string>,
+  ): boolean {
+    return (
+      typeof product.charityId === 'string' &&
+      blockedCharityIds.has(product.charityId.trim())
+    );
+  }
+
+  isModerationHidden(product: Product): boolean {
     const raw = product as unknown as Record<string, unknown>;
     return (
       product.hidden === true ||

@@ -1,14 +1,17 @@
 const mockGetProductService = jest.fn();
+const mockGetRecommendationService = jest.fn();
 
 jest.mock('../services/ServiceFactory', () => ({
   ServiceFactory: {
     getProductService: mockGetProductService,
+    getRecommendationService: mockGetRecommendationService,
   },
 }));
 
 import {
   getAllProducts,
   getAllProductsWithDetails,
+  getRecommendedProducts,
   relistProduct,
   unlistProduct,
 } from '../controllers/productController';
@@ -244,6 +247,60 @@ describe('productController listing status actions', () => {
           ],
         },
       }),
+    );
+  });
+});
+
+describe('productController.getRecommendedProducts', () => {
+  const recommendationService = { getRecommendedPage: jest.fn() };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetRecommendationService.mockReturnValue(recommendationService);
+  });
+
+  it("returns the user's recommended page in the usual shape", async () => {
+    recommendationService.getRecommendedPage.mockResolvedValue({
+      items: [{ id: 'product-1', price: 5 }],
+      limit: 20,
+      nextCursor: 'eyJwb3NpdGlvbiI6MjB9',
+      hasMore: true,
+    });
+    const req: any = { user: { uid: 'buyer-1' }, query: { limit: 20 } };
+    const res = createResponse();
+
+    await getRecommendedProducts(req, res);
+
+    expect(recommendationService.getRecommendedPage).toHaveBeenCalledWith(
+      'buyer-1',
+      { limit: 20 },
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: { products: [expect.objectContaining({ id: 'product-1' })] },
+        meta: {
+          limit: 20,
+          nextCursor: 'eyJwb3NpdGlvbiI6MjB9',
+          hasMore: true,
+        },
+      }),
+    );
+  });
+
+  it('answers 410 when the feed expired, so the app loads page 1 again', async () => {
+    recommendationService.getRecommendedPage.mockRejectedValue(
+      new Error('Feed expired'),
+    );
+    const req: any = { user: { uid: 'buyer-1' }, query: { cursor: 'old' } };
+    const res = createResponse();
+
+    await getRecommendedProducts(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(410);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, message: 'Feed expired' }),
     );
   });
 });
