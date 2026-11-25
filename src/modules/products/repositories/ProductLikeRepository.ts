@@ -131,28 +131,24 @@ export class ProductLikeRepository {
         };
     }
 
-    // The ids of every product a user has liked, newest like first, for the
-    // recommended feed. select() asks Firestore for just these two fields.
-    // Sorting here, not in the query, means Firestore needs no extra index.
-    async getLikedProductIds(userId: string): Promise<string[]> {
+    // The ids of a user's newest `max` liked products, newest first, for the
+    // recommended feed. It sorts the same way as getLikedProductsPage (the
+    // Liked screen), so it uses the index that screen already needs.
+    // select() asks Firestore for just the product id.
+    async getLikedProductIds(userId: string, max: number): Promise<string[]> {
         const snapshot = await this.db
             .collection(this.likesCollection)
             .where('userId', '==', userId)
-            .select('productId', 'createdAt')
+            .orderBy('createdAt', 'desc')
+            .orderBy(FieldPath.documentId(), 'desc')
+            .select('productId')
+            .limit(max)
             .get();
 
         return snapshot.docs
-            .map((doc) => {
-                const likedAt = doc.get('createdAt');
-                return {
-                    productId: doc.get('productId'),
-                    likedAt: likedAt instanceof Timestamp ? likedAt.toMillis() : 0,
-                };
-            })
-            .filter((like): like is { productId: string; likedAt: number } =>
-                typeof like.productId === 'string')
-            .sort((a, b) => b.likedAt - a.likedAt)
-            .map((like) => like.productId);
+            .map((doc) => doc.get('productId'))
+            .filter((productId): productId is string =>
+                typeof productId === 'string');
     }
 
     // Which of these products the user has liked, for the recommended feed's

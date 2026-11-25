@@ -76,7 +76,10 @@ const setUp = (
   };
 
   const likeRepo = {
-    getLikedProductIds: jest.fn(async () => [...liked]),
+    // Newest first, at most `max`, like Firestore's limit().
+    getLikedProductIds: jest.fn(async (_userId, max: number) =>
+      liked.slice(0, max),
+    ),
     getLikedProductIdsAmong: jest.fn(async (_userId, productIds: string[]) =>
       productIds.filter((id) => liked.includes(id)),
     ),
@@ -146,13 +149,13 @@ describe('RecommendationService', () => {
     );
   });
 
-  it('builds the taste from the newest 100 likes, but hides every like', async () => {
+  it('reads only the newest 100 likes, but hides every like', async () => {
     // 120 likes, newest first, plus 2 items they haven't liked.
     const likedIds = Array.from(
       { length: MAX_PROFILE_LIKES + 20 },
       (_, index) => `liked-${index + 1}`,
     );
-    const { service, productService } = setUp(
+    const { service, productService, likeRepo } = setUp(
       [
         ...likedIds.map((id) => makeProduct(id)),
         makeProduct('ok-1'),
@@ -161,12 +164,28 @@ describe('RecommendationService', () => {
       { liked: likedIds },
     );
 
-    const page = await service.getRecommendedPage('buyer', { limit: 50 });
-
-    expect(ids(page.items).sort()).toEqual(['ok-1', 'ok-2']);
+    // Scroll to the end, 10 at a time.
+    const shown: (string | undefined)[] = [];
+    let page = await service.getRecommendedPage('buyer', { limit: 10 });
+    shown.push(...ids(page.items));
+    // Page 1 built the taste from the newest 100 likes only.
     const loaded = productService.getProductById.mock.calls.map(([id]) => id);
     expect(loaded).toContain('liked-100');
     expect(loaded).not.toContain('liked-101');
+    while (page.nextCursor) {
+      page = await service.getRecommendedPage('buyer', {
+        limit: 10,
+        cursor: page.nextCursor,
+      });
+      shown.push(...ids(page.items));
+    }
+
+    // The 20 older likes weren't read, but they're still never shown.
+    expect(shown.sort()).toEqual(['ok-1', 'ok-2']);
+    expect(likeRepo.getLikedProductIds).toHaveBeenCalledWith(
+      'buyer',
+      MAX_PROFILE_LIKES,
+    );
   });
 
   it('pages through the saved order with no duplicates', async () => {

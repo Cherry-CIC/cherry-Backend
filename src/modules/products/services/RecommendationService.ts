@@ -1,6 +1,6 @@
 // The recommended feed (issue #57): GET /api/products/recommended.
 //
-// Page 1 reads the user's likes, purchases and blocks, scores the newest
+// Page 1 reads the user's newest likes, purchases and blocks, scores the newest
 // products against their taste, and remembers the order. Later pages walk
 // through that saved order, so it stays the same until the user refreshes.
 // If the saved order is gone, a later page answers "Feed expired", and the
@@ -21,9 +21,11 @@ import { buildTasteProfile, rankProducts } from './recommendationScoring';
 // How many of the newest products are considered for one feed.
 export const MAX_CANDIDATES = 200;
 
-// How many of the newest likes build the taste. Each older like counts a
-// little less, so likes past 100 add up to under 1% of it. Skipping them
-// saves one product read per like.
+// How many of the newest likes the feed reads. They build the taste, and
+// they're left out of the feed. Each older like counts a little less, so
+// likes past 100 add up to under 1% of the taste. Someone with more likes
+// than this has older ones the feed doesn't read, so page 1 checks its items
+// against all their likes, like later pages do.
 export const MAX_PROFILE_LIKES = 100;
 
 // How many feed orders are kept in memory at once. Each page 1 starts a new
@@ -88,9 +90,13 @@ export class RecommendationService {
     } else {
       // buildFeed has only just checked these products, so page 1 uses them
       // as they are instead of reading them again.
-      const ranked = await this.buildFeed(userId);
+      const { ranked, mayHaveOlderLikes } = await this.buildFeed(userId);
       feed = ranked.map((product) => product.id as string);
       products = ranked.slice(0, limit);
+      // buildFeed only knew the newest likes, so this checks for older ones.
+      if (mayHaveOlderLikes) {
+        products = await this.dropLiked(userId, products);
+      }
     }
     this.saveFeed(key, feed);
 
@@ -119,11 +125,14 @@ export class RecommendationService {
   }
 
   // Works out the whole feed order for one user, best match first.
-  private async buildFeed(userId: string): Promise<Product[]> {
+  // mayHaveOlderLikes is true when they have likes it didn't read.
+  private async buildFeed(
+    userId: string,
+  ): Promise<{ ranked: Product[]; mayHaveOlderLikes: boolean }> {
     // These 4 reads don't depend on each other, so they run at the same time.
     const [likedIds, boughtIds, blockedUserIds, candidates] = await Promise.all(
       [
-        this.productLikeRepo.getLikedProductIds(userId),
+        this.productLikeRepo.getLikedProductIds(userId, MAX_PROFILE_LIKES),
         this.orderRepo.getPurchasedProductIds(userId),
         this.blockRepo.getBlockedUserIds(userId),
         // Already leaves out charities this user blocked.
@@ -132,10 +141,9 @@ export class RecommendationService {
     );
 
     // likedIds come newest first, and loadProducts keeps that order, which
-    // buildTasteProfile needs so newer likes count more. Every like is still
-    // left out of the feed below, not just these.
+    // buildTasteProfile needs so newer likes count more.
     const [liked, bought] = await Promise.all([
-      this.loadProducts(likedIds.slice(0, MAX_PROFILE_LIKES)),
+      this.loadProducts(likedIds),
       this.loadProducts(boughtIds),
     ]);
     const profile = buildTasteProfile(liked, bought, userId);
@@ -149,7 +157,25 @@ export class RecommendationService {
         !blockedUserIds.has(product.userId), // a seller they blocked
     );
 
-    return rankProducts(allowed, profile, this.now());
+    return {
+      ranked: rankProducts(allowed, profile, this.now()),
+      mayHaveOlderLikes: likedIds.length >= MAX_PROFILE_LIKES,
+    };
+  }
+
+  // Leaves out the products the user has liked. It reads only these
+  // products' likes, however many likes the user has.
+  private async dropLiked(
+    userId: string,
+    products: Product[],
+  ): Promise<Product[]> {
+    const liked = new Set(
+      await this.productLikeRepo.getLikedProductIdsAmong(
+        userId,
+        products.map((product) => product.id as string),
+      ),
+    );
+    return products.filter((product) => !liked.has(product.id as string));
   }
 
   // Loads products by id, keeping their order and skipping deleted ones.
