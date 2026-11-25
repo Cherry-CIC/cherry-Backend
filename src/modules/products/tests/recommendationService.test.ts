@@ -4,6 +4,7 @@ import { ProductService } from '../services/ProductService';
 import {
   decodeCursor,
   encodeCursor,
+  MAX_CANDIDATES,
   MAX_PROFILE_LIKES,
   MAX_SAVED_FEEDS,
   RecommendationService,
@@ -40,23 +41,38 @@ const ids = (items: Product[]) => items.map((item) => item.id);
 // likes, orders and blocks are plain lists.
 const setUp = (
   products: Product[],
-  options: { liked?: string[]; bought?: string[]; blocked?: string[] } = {},
+  options: {
+    liked?: string[];
+    bought?: string[];
+    blocked?: string[];
+    blockedCharities?: string[];
+  } = {},
 ) => {
   const store = new Map(products.map((product) => [product.id!, product]));
   const liked = options.liked ?? [];
+  const blockedCharities = options.blockedCharities ?? [];
   const isForSale = (product: Product) =>
     product.status === 'active' && product.number > 0;
+  const isFromBlockedCharity = (product: Product, charityIds: Set<string>) =>
+    charityIds.has(product.charityId);
 
   const productService = {
+    // Like the real one, it leaves out charities the user blocked.
     getNewestAvailableProducts: jest.fn(async () =>
       [...store.values()]
-        .filter((product) => isForSale(product) && !product.hidden)
+        .filter(
+          (product) =>
+            isForSale(product) &&
+            !product.hidden &&
+            !isFromBlockedCharity(product, new Set(blockedCharities)),
+        )
         .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime()),
     ),
     getProductById: jest.fn(async (id: string) => store.get(id) ?? null),
     enrichProductsWithDetails: jest.fn(async (items: Product[]) => items),
     isAvailableForPurchase: isForSale,
     isModerationHidden: (product: Product) => product.hidden === true,
+    isFromBlockedCharity,
   };
 
   const likeRepo = {
@@ -71,12 +87,16 @@ const setUp = (
   const blockRepo = {
     getBlockedUserIds: jest.fn(async () => new Set(options.blocked)),
   };
+  const charityBlockRepo = {
+    getBlockedCharityIds: jest.fn(async () => new Set(blockedCharities)),
+  };
 
   const service = new RecommendationService(
     productService as unknown as ProductService,
     likeRepo,
     orderRepo,
     blockRepo,
+    charityBlockRepo,
     () => now,
   );
   return {
@@ -98,21 +118,32 @@ const shop = () =>
 
 describe('RecommendationService', () => {
   it('never shows their own, liked, bought or blocked items', async () => {
-    const { service } = setUp(
+    const { service, productService } = setUp(
       [
         makeProduct('mine', { userId: 'buyer' }),
         makeProduct('liked'),
         makeProduct('bought'),
         makeProduct('blocked', { userId: 'blocked-seller' }),
+        makeProduct('blocked-charity', { charityId: 'charity-x' }),
         makeProduct('ok-1'),
         makeProduct('ok-2'),
       ],
-      { liked: ['liked'], bought: ['bought'], blocked: ['blocked-seller'] },
+      {
+        liked: ['liked'],
+        bought: ['bought'],
+        blocked: ['blocked-seller'],
+        blockedCharities: ['charity-x'],
+      },
     );
 
     const page = await service.getRecommendedPage('buyer', { limit: 50 });
 
     expect(ids(page.items).sort()).toEqual(['ok-1', 'ok-2']);
+    // Says who is looking, so their blocked charities are left out.
+    expect(productService.getNewestAvailableProducts).toHaveBeenCalledWith(
+      MAX_CANDIDATES,
+      'buyer',
+    );
   });
 
   it('builds the taste from the newest 100 likes, but hides every like', async () => {
@@ -177,20 +208,23 @@ describe('RecommendationService', () => {
     expect(blockRepo.getBlockedUserIds).toHaveBeenCalledTimes(1);
   });
 
-  it('drops an item that sold, or whose seller was blocked, after page 1', async () => {
+  it('drops an item that sold, or whose seller or charity was blocked, after page 1', async () => {
     const blocked: string[] = [];
-    const { service, store } = setUp(shop(), { blocked });
+    const blockedCharities: string[] = [];
+    const { service, store } = setUp(shop(), { blocked, blockedCharities });
     store.set('p24', { ...store.get('p24')!, userId: 'rude-seller' });
+    store.set('p25', { ...store.get('p25')!, charityId: 'charity-x' });
     const pageOne = await service.getRecommendedPage('newbie', { limit: 20 });
 
     store.set('p22', { ...store.get('p22')!, status: 'sold', number: 0 });
     blocked.push('rude-seller');
+    blockedCharities.push('charity-x');
 
     const pageTwo = await service.getRecommendedPage('newbie', {
       limit: 20,
       cursor: pageOne.nextCursor!,
     });
-    expect(ids(pageTwo.items)).toEqual(['p21', 'p23', 'p25']);
+    expect(ids(pageTwo.items)).toEqual(['p21', 'p23']);
   });
 
   it('drops an item they liked or bought after page 1', async () => {

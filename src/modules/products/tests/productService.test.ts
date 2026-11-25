@@ -1074,6 +1074,10 @@ describe('ProductService pagination', () => {
 });
 
 describe('ProductService.getNewestAvailableProducts', () => {
+  const charityBlockRepo = {
+    isBlocked: jest.fn(),
+    getBlockedCharityIds: jest.fn(async () => new Set(['blocked-charity'])),
+  };
   const serviceWith = (getPageByFilters: jest.Mock) =>
     new ProductService(
       { getPageByFilters } as any,
@@ -1081,9 +1085,11 @@ describe('ProductService.getNewestAvailableProducts', () => {
       {} as any,
       {} as any,
       {} as any,
+      undefined,
+      charityBlockRepo,
     );
 
-  it('pages through Firestore and skips products not for sale', async () => {
+  it("pages through Firestore and skips products this user shouldn't see", async () => {
     const sold = {
       ...createProduct('sold', '2026-07-13T09:00:00.000Z'),
       status: 'sold' as const,
@@ -1093,6 +1099,10 @@ describe('ProductService.getNewestAvailableProducts', () => {
       ...createProduct('hidden', '2026-07-13T08:00:00.000Z'),
       hidden: true,
     };
+    const fromBlockedCharity = {
+      ...createProduct('blocked', '2026-07-13T07:30:00.000Z'),
+      charityId: 'blocked-charity',
+    };
     const getPageByFilters = jest
       .fn()
       .mockResolvedValueOnce({
@@ -1100,6 +1110,7 @@ describe('ProductService.getNewestAvailableProducts', () => {
           createProduct('for-sale-1', '2026-07-13T10:00:00.000Z'),
           sold,
           hidden,
+          fromBlockedCharity,
         ],
         hasMore: true,
       })
@@ -1108,13 +1119,17 @@ describe('ProductService.getNewestAvailableProducts', () => {
         hasMore: false,
       });
 
-    const products =
-      await serviceWith(getPageByFilters).getNewestAvailableProducts(200);
+    const products = await serviceWith(
+      getPageByFilters,
+    ).getNewestAvailableProducts(200, 'viewer-1');
 
     expect(products.map((product) => product.id)).toEqual([
       'for-sale-1',
       'for-sale-2',
     ]);
+    expect(charityBlockRepo.getBlockedCharityIds).toHaveBeenCalledWith(
+      'viewer-1',
+    );
   });
 
 });

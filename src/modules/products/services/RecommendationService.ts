@@ -10,6 +10,7 @@ import { Product } from '../model/Product';
 import { ProductLikeRepository } from '../repositories/ProductLikeRepository';
 import { OrderRepository } from '../../order/repositories/OrderRepository';
 import { UserBlockRepository } from '../../blocks/repositories/UserBlockRepository';
+import { CharityBlockRepository } from '../../blocks/repositories/CharityBlockRepository';
 import {
   PaginatedResult,
   ProductService,
@@ -53,6 +54,10 @@ export class RecommendationService {
     >,
     private orderRepo: Pick<OrderRepository, 'getPurchasedProductIds'>,
     private blockRepo: Pick<UserBlockRepository, 'getBlockedUserIds'>,
+    private charityBlockRepo: Pick<
+      CharityBlockRepository,
+      'getBlockedCharityIds'
+    >,
     private now: () => Date = () => new Date(),
   ) {}
 
@@ -121,7 +126,8 @@ export class RecommendationService {
         this.productLikeRepo.getLikedProductIds(userId),
         this.orderRepo.getPurchasedProductIds(userId),
         this.blockRepo.getBlockedUserIds(userId),
-        this.productService.getNewestAvailableProducts(MAX_CANDIDATES),
+        // Already leaves out charities this user blocked.
+        this.productService.getNewestAvailableProducts(MAX_CANDIDATES, userId),
       ],
     );
 
@@ -155,23 +161,27 @@ export class RecommendationService {
   }
 
   // Something on a later page may have sold or been hidden since page 1, or
-  // the user may have blocked its seller, liked it or bought it since then.
+  // the user may have blocked its seller or charity, liked it or bought it
+  // since then.
   private async loadStillForSale(
     userId: string,
     ids: string[],
   ): Promise<Product[]> {
-    const [products, blockedUserIds, likedIds, boughtIds] = await Promise.all([
-      this.loadProducts(ids),
-      this.blockRepo.getBlockedUserIds(userId),
-      this.productLikeRepo.getLikedProductIdsAmong(userId, ids),
-      this.orderRepo.getPurchasedProductIds(userId),
-    ]);
+    const [products, blockedUserIds, blockedCharityIds, likedIds, boughtIds] =
+      await Promise.all([
+        this.loadProducts(ids),
+        this.blockRepo.getBlockedUserIds(userId),
+        this.charityBlockRepo.getBlockedCharityIds(userId),
+        this.productLikeRepo.getLikedProductIdsAmong(userId, ids),
+        this.orderRepo.getPurchasedProductIds(userId),
+      ]);
     const likedOrBought = new Set([...likedIds, ...boughtIds]);
     return products.filter(
       (product) =>
         this.productService.isAvailableForPurchase(product) &&
         !this.productService.isModerationHidden(product) &&
         !blockedUserIds.has(product.userId) &&
+        !this.productService.isFromBlockedCharity(product, blockedCharityIds) &&
         !likedOrBought.has(product.id as string),
     );
   }

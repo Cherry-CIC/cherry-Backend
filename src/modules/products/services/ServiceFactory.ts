@@ -45,6 +45,7 @@ export class ServiceFactory {
                 new ProductLikeRepository(),
                 new OrderRepository(),
                 new UserBlockRepository(),
+                new CharityBlockRepository(),
             );
         }
 
