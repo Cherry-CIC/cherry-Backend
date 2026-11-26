@@ -12,6 +12,7 @@ import { ProductRepository } from '../../products/repositories/ProductRepository
 import { PostageSizeRepository } from '../../postage-sizes/repositories/PostageSizeRepository';
 import { UserRepository } from '../../auth/repositories/UserRepository';
 import { EmailService } from '../../notifications/services/EmailService';
+import { dispatchLockerReadyPush } from '../../notifications/services/LockerReadyPush';
 import { Order } from '../../order/model/Order';
 
 const checkoutShippingService = new CheckoutShippingService();
@@ -250,12 +251,22 @@ export const handleSendcloudWebhook = async (
                     : 'shipped',
         };
 
-        const updated = await shipmentRepo.applyTrackingEvent(
+        const { updated, dispatchLockerReady } = await shipmentRepo.applyTrackingEvent(
           shipment,
           { status, trackingNumber: parcel.tracking_number, trackingUrl: parcel.tracking_url },
           orderUpdates,
           webhookTime(timestamp),
+          {
+            message: parcel.status?.message,
+            carrierTime: webhookTime(value.carrier_status_change_timestamp),
+            isReturn: parcel.is_return === true,
+            servicePointId: parcel.to_service_point,
+          },
         );
+
+        if (dispatchLockerReady) {
+          await dispatchLockerReadyPush(shipment.id);
+        }
 
         if (
           updated && status === 'delivered' &&

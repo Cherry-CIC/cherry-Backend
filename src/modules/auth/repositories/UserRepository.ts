@@ -462,6 +462,8 @@ export class UserRepository {
       });
     }
 
+    await this.deleteOwnedPushRecords('pushDevices', 'userId', firebaseUid);
+    await this.deleteOwnedPushRecords('lockerPushReceipts', 'buyerId', firebaseUid);
     await this.deleteUserProductMedia(firebaseUid);
 
     return {
@@ -472,6 +474,20 @@ export class UserRepository {
       anonymisedShipments: uniqueShipmentDocs.length,
       deletedLikes: likesSnapshot.size + charityLikesSnapshot.size,
     };
+  }
+
+  private async deleteOwnedPushRecords(collection: string, ownerField: string, uid: string): Promise<void> {
+    const query = this.db.collection(collection).where(ownerField, '==', uid).limit(FIRESTORE_BATCH_LIMIT);
+    let deleted: number;
+    do {
+      deleted = await this.db.runTransaction(async tx => {
+        // A device can transfer to another account while deletion is in progress.
+        // Reading ownership and deleting in the same transaction protects that transfer.
+        const owned = await tx.get(query);
+        for (const doc of owned.docs) tx.delete(doc.ref);
+        return owned.size;
+      });
+    } while (deleted === FIRESTORE_BATCH_LIMIT);
   }
 
   /** Removes listing uploads, including orphaned files with no Firestore document. */

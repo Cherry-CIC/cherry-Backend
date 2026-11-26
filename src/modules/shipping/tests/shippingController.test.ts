@@ -1,7 +1,8 @@
 const mockGetDeliveryOptions = jest.fn();
 const mockGetPickupPoints = jest.fn();
 const mockGetShipmentBySendcloudId = jest.fn();
-const mockApplyTrackingEvent = jest.fn().mockResolvedValue(true);
+const mockApplyTrackingEvent = jest.fn();
+const mockDispatchLockerReadyPush = jest.fn();
 const mockUpdateOrder = jest.fn();
 const mockGetOrderById = jest.fn();
 const mockGetUserById = jest.fn();
@@ -45,6 +46,10 @@ jest.mock('../../notifications/services/EmailService', () => ({
   })),
 }));
 
+jest.mock('../../notifications/services/LockerReadyPush', () => ({
+  dispatchLockerReadyPush: mockDispatchLockerReadyPush,
+}));
+
 jest.mock('../../products/repositories/ProductRepository', () => ({
   ProductRepository: jest.fn().mockImplementation(() => ({
     getById: mockGetProductById,
@@ -73,6 +78,8 @@ const createResponse = () => {
 describe('shippingController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockApplyTrackingEvent.mockResolvedValue({ updated: true, dispatchLockerReady: false });
+    mockDispatchLockerReadyPush.mockResolvedValue(undefined);
     mockGetProductById.mockResolvedValue({
       id: 'product-1',
       postageSize: 'postage-size-1',
@@ -216,6 +223,81 @@ describe('shippingController', () => {
     await handleSendcloudWebhook(req, res);
 
     expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
+    expect(mockDispatchLockerReadyPush).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('preserves the existing delivered email for a newly accepted delivery', async () => {
+    mockGetShipmentBySendcloudId.mockResolvedValue({ id: 'shipment-1', orderId: 'order-1' });
+    mockGetOrderById.mockResolvedValue({
+      id: 'order-1', userId: 'user-1', email: 'buyer@example.com', productName: 'Winter Coat',
+    });
+    const req: any = { body: {
+      action: 'parcel_status_changed', parcel: { id: 123, status: { message: 'Delivered' } },
+    } };
+    const res = createResponse();
+    await handleSendcloudWebhook(req, res);
+
+    expect(mockSendBuyerDeliveredEmail).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'buyer@example.com', orderId: 'order-1',
+    }));
+    expect(mockDispatchLockerReadyPush).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  describe('locker arrival', () => {
+    const shipment = { id: 'shipment-1', orderId: 'order-1' };
+    const request = {
+      body: {
+        action: 'parcel_status_changed',
+        timestamp: 1793909100,
+        carrier_status_change_timestamp: '2026-11-05T19:11:00Z',
+        parcel: {
+          id: 123,
+          status: { message: 'Awaiting customer pickup' },
+          is_return: false,
+          to_service_point: 45,
+        },
+      },
+    } as any;
+
+    beforeEach(() => {
+      mockGetShipmentBySendcloudId.mockResolvedValue(shipment);
+      mockApplyTrackingEvent.mockResolvedValue({ updated: true, dispatchLockerReady: true });
+    });
+
+    it('uses the carrier arrival details and sends only the collection push', async () => {
+      const res = createResponse();
+      await handleSendcloudWebhook(request, res);
+
+      expect(mockApplyTrackingEvent).toHaveBeenCalledWith(
+        shipment, expect.objectContaining({ status: 'en_route' }),
+        expect.objectContaining({ status: 'shipped' }), new Date(request.body.timestamp * 1000),
+        {
+          message: 'Awaiting customer pickup',
+          carrierTime: new Date('2026-11-05T19:11:00Z'),
+          isReturn: false,
+          servicePointId: 45,
+        },
+      );
+      expect(mockDispatchLockerReadyPush).toHaveBeenCalledTimes(1);
+      expect(mockDispatchLockerReadyPush).toHaveBeenCalledWith(shipment.id);
+      expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('returns a retryable response if dispatch fails after recording the arrival', async () => {
+      mockDispatchLockerReadyPush.mockRejectedValueOnce(new Error('Delivery incomplete'));
+      const firstResponse = createResponse();
+      await handleSendcloudWebhook(request, firstResponse);
+      expect(firstResponse.status).toHaveBeenCalledWith(500);
+
+      mockApplyTrackingEvent.mockResolvedValue({ updated: false, dispatchLockerReady: true });
+      const retryResponse = createResponse();
+      await handleSendcloudWebhook(request, retryResponse);
+      expect(mockDispatchLockerReadyPush).toHaveBeenCalledTimes(2);
+      expect(retryResponse.status).toHaveBeenCalledWith(200);
+      expect(mockSendBuyerDeliveredEmail).not.toHaveBeenCalled();
+    });
   });
 });

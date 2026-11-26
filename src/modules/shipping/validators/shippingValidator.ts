@@ -100,8 +100,11 @@ export const postcodeValidationQueryValidator = Joi.object({
 export const sendcloudWebhookValidator = Joi.object({
   action: Joi.string().required(),
   timestamp: Joi.alternatives(Joi.string(), Joi.number()).optional(),
+  carrier_status_change_timestamp: Joi.alternatives(Joi.string(), Joi.number()).allow(null).optional(),
   parcel: Joi.object({
     id: Joi.number().required(),
+    is_return: Joi.boolean().allow(null).optional(),
+    to_service_point: Joi.alternatives(Joi.number(), Joi.string()).allow(null).optional(),
     tracking_number: Joi.string().allow(null).optional(),
     tracking_url: Joi.string().allow(null).optional(),
     status: Joi.object({
