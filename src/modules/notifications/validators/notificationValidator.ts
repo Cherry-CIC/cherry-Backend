@@ -8,3 +8,14 @@ export const testResendEmailSchema = Joi.object({
     'any.required': '"to" is required',
   }),
 });
+
+const deviceToken = Joi.string().max(4096).pattern(/^[!-~]+$/).required().messages({
+  'string.pattern.base': 'Invalid notification token',
+});
+
+export const registerDeviceSchema = Joi.object({
+  token: deviceToken,
+  platform: Joi.string().valid('ios', 'android').required(),
+}).required();
+
+export const removeDeviceSchema = Joi.object({ token: deviceToken }).required();

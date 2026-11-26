@@ -1,6 +1,26 @@
 import { firestore } from '../../../shared/config/firebaseConfig';
 import { Order } from '../../order/model/Order';
 import { Shipment } from '../models/Shipment';
+import { isLockerPushEnabled, LOCKER_COLLECTION_WINDOW_MS } from '../../notifications/lockerPushConfig';
+
+interface TrackingDetails {
+  message?: string;
+  carrierTime?: Date | null;
+  isReturn?: boolean;
+  servicePointId?: string | number | null;
+}
+
+function isSelectedLocker(shipment: FirebaseFirestore.DocumentSnapshot, order: FirebaseFirestore.DocumentSnapshot, event: TrackingDetails): boolean {
+  const point = shipment.get('pickupPoint') as Shipment['pickupPoint'];
+  // Older service point records carry a name, without a structured point type.
+  const lockerDestination = /\bto locker\b/i.test(order.get('shippingOptionName') || '');
+  const lockerName = /\blockers?\b/i.test(point?.name || '');
+  const carrier = String(order.get('shippingCarrier') || shipment.get('carrier') || '').trim().toLowerCase();
+  return shipment.get('deliveryType') === 'pickup_point' && !!point?.id &&
+    point.country?.toUpperCase() === 'GB' && ['inpost_gb', 'inpost uk', 'inpost'].includes(carrier) &&
+    (event.servicePointId == null || String(event.servicePointId) === String(point.id)) &&
+    (lockerName || lockerDestination);
+}
 
 /**
  * Repository for handling shipment persistence in Firestore
@@ -110,15 +130,60 @@ export class ShipmentRepository {
     shipmentUpdates: Partial<Shipment>,
     orderUpdates: Partial<Order>,
     sendcloudTime: Date | null,
-  ): Promise<boolean> {
+    event: TrackingDetails = {},
+  ): Promise<{ updated: boolean; dispatchLockerReady: boolean }> {
     const shipmentRef = firestore.collection(this.collection).doc(shipment.id);
     const orderRef = firestore.collection('orders').doc(shipment.orderId);
     return firestore.runTransaction(async (tx) => {
       const current = await tx.get(shipmentRef);
       const lastEvent = current.get('lastTrackingEventMs') as number | undefined;
       if (lastEvent != null && (!sendcloudTime || sendcloudTime.getTime() < lastEvent)) {
-        return false;
+        return { updated: false, dispatchLockerReady: false };
       }
+
+      const message = event.message?.trim().toLowerCase();
+      const arrival = message === 'awaiting customer pickup';
+      const enabled = isLockerPushEnabled();
+      const wasReady = current.get('lockerReadyActive') === true;
+      const readyAtMs = current.get('lockerReadyAtMs');
+      const previousStatus = current.get('status');
+      const closed = current.get('lockerCollectionClosed') === true || current.get('deliveredAt') ||
+        previousStatus === 'delivered' || previousStatus === 'cancelled';
+      const lockerUpdates: Record<string, unknown> = {};
+      let dispatchLockerReady = false;
+      if (arrival && enabled) {
+        const order = await tx.get(orderRef);
+        if ((order.get('shipmentId') && order.get('shipmentId') !== shipment.id) ||
+            closed || order.get('buyerConfirmedReceived') || order.get('buyerDisputeStatus') ||
+            ['expired', 'cancelled', 'delivered'].includes(order.get('status')) ||
+            ['cancelled', 'refunded', 'failed'].includes(order.get('paymentStatus'))) {
+          return { updated: false, dispatchLockerReady: false };
+        }
+        // A tie with a different tracking update cannot prove a new arrival.
+        const ordered = sendcloudTime && (lastEvent == null || sendcloudTime.getTime() > lastEvent || wasReady);
+        const firstArrival = readyAtMs ?? (event.carrierTime ?? sendcloudTime)?.getTime();
+        const now = Date.now();
+        // A legacy exception could be a return. Preserve normal tracking for it.
+        const ambiguousFailure = (previousStatus === 'exception' || order.get('status') === 'failed') &&
+          current.get('lockerCollectionClosed') !== false;
+        dispatchLockerReady = Boolean(ordered && !ambiguousFailure && !event.isReturn &&
+          (readyAtMs == null || wasReady) && Number.isFinite(firstArrival) &&
+          firstArrival <= now && firstArrival + LOCKER_COLLECTION_WINDOW_MS > now &&
+          order.get('paymentStatus') === 'succeeded' && isSelectedLocker(current, order, event));
+        if (dispatchLockerReady) {
+          lockerUpdates.lockerReadyActive = true;
+          lockerUpdates.lockerReadyAtMs = firstArrival;
+        }
+      }
+      if (wasReady && !dispatchLockerReady && (!arrival || enabled)) lockerUpdates.lockerReadyActive = false;
+      if (enabled && (event.isReturn || /return(ed|ing)? to sender|being returned/.test(message ?? '') ||
+          shipmentUpdates.status === 'cancelled' || shipmentUpdates.status === 'delivered')) {
+        lockerUpdates.lockerCollectionClosed = true;
+      } else if (enabled && shipmentUpdates.status === 'exception' && !closed) {
+        // A later genuine arrival can follow a non-terminal delay.
+        lockerUpdates.lockerCollectionClosed = false;
+      }
+
       const deliveredAtUpdate =
         shipmentUpdates.status === 'delivered' && current.get('deliveredAt') == null
           ? { deliveredAt: sendcloudTime ?? new Date() }
@@ -126,11 +191,12 @@ export class ShipmentRepository {
       tx.update(shipmentRef, {
         ...Object.fromEntries(Object.entries(shipmentUpdates).filter(([, value]) => value !== undefined)),
         ...deliveredAtUpdate,
+        ...lockerUpdates,
         ...(sendcloudTime && { lastTrackingEventMs: sendcloudTime.getTime() }),
         updatedAt: new Date(),
       });
       tx.update(orderRef, { ...orderUpdates });
-      return true;
+      return { updated: true, dispatchLockerReady };
     });
   }
 
